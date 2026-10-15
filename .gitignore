@@ -1,0 +1,12 @@
+.local/
+local/
+.DS_Store
+__pycache__/
+*.py[cod]
+build/
+*.pff
+*.exe
+*.dll
+*.sbf
+*.kdv
+*.ply
