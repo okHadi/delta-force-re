@@ -70,11 +70,11 @@ def check(executable, probe, count,archive_path=None):
         if list(map(int,line.split()))!=expected:
             raise ValueError(f'triangle gradient/span mismatch at case {number}')
         total+=size
-    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),tiny32=check_tiny32(pe,probe,count),local_lighting=check_local_lighting(pe,probe,count),camera=check_camera(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
+    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout','varying_cutout')},lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),tiny32=check_tiny32(pe,probe,count),local_lighting=check_local_lighting(pe,probe,count),camera=check_camera(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
 
 
 def check_texture32(pe,probe,count,mode):
-    setup,draw,option={'uniform':(0x468a6c,0x468cda,'texture32'),'varying_shade':(0x469258,0x4694df,'texture32-shade'),'cutout':(0x468e56,0x4690cc,'texture32-cutout')}[mode]
+    setup,draw,option={'uniform':(0x468a6c,0x468cda,'texture32'),'varying_shade':(0x469258,0x4694df,'texture32-shade'),'cutout':(0x468e56,0x4690cc,'texture32-cutout'),'varying_cutout':(0x4696b3,0x469945,'texture32-shade-cutout')}[mode]
     import unicorn
     from unicorn.x86_const import UC_X86_REG_ESP,UC_X86_REG_EIP
     u=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
@@ -88,7 +88,7 @@ def check_texture32(pe,probe,count,mode):
     for test in range(count):
         x=rng.randrange(64);length=rng.randrange(65-x)
         cases.append((test,rng.randrange(0,9),rng.randrange(0,9),rng.randrange(0x100000000),x,rng.randrange(8),length,*[rng.randrange(-0x80000000,0x80000000) for i in range(6)]))
-        if mode=='varying_shade':
+        if mode in ('varying_shade','varying_cutout'):
             cases[-1]+=tuple(rng.randrange(-0x80000000,0x80000000) for i in range(2))
     text=''.join(' '.join(map(str,case))+'\n' for case in cases);output=subprocess.check_output([probe,option],input=text.encode()).decode().splitlines()
     if len(output)!=len(cases):
@@ -96,7 +96,7 @@ def check_texture32(pe,probe,count,mode):
     u.mem_write(0x3010000,b''.join(struct.pack('<I',(i*0x01010101^0xffa5c3e7)&0xffffffff) for i in range(64*256)));pixels=0
     for number,(case,line) in enumerate(zip(cases,output)):
         test,bx,by,shade,x,y,length,a,b,z,da,db,dz=case[:13]
-        s,ds=case[13:] if mode=='varying_shade' else (0,0)
+        s,ds=case[13:] if mode in ('varying_shade','varying_cutout') else (0,0)
         u.mem_write(0x3000000,bytes((i*37+test*13)&255 for i in range(1<<(bx+by))));u.mem_write(0x3020000,b''.join(struct.pack('<H',(i*317+test*17)&65535) for i in range(512)));u.mem_write(0x3021000,b''.join(struct.pack('<I',(i*1234567^0xabcdef90)&0xffffffff) for i in range(512)))
         u.mem_write(0x2001000,struct.pack('<12I',0,shade,0,0,0,bx,by,0x3020000,0x3021000,0x3000000,0x3010000,0))
         u.mem_write(0x2002000,struct.pack('<10i',y*64+x,length,a,b,z,s,da,db,dz,ds));call(setup,0x2001000);call(draw,0x2002000)

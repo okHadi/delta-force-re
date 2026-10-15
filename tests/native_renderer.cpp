@@ -32,6 +32,8 @@ int main() {
     check(colours==std::vector<std::uint32_t>{0x1234,0x5678,0xabcd,0},"paired shade step changed");
     depths={1,1,1,1};colours.assign(4,0);texture.pixels[0]=0;
     check(dfre::draw_textured_span32(span,4,1,colours,depths,texture,dfre::RasterTextureMode::cutout)==1 && depths==std::vector<std::uint16_t>{1,0,1,1},"zero texel changed colour or depth");
+    depths={1,1,1,1};colours.assign(4,0);span.length=4;texture.shade_colours[2*256+9]=0x9abc;
+    check(dfre::draw_textured_span32(span,4,1,colours,depths,texture,dfre::RasterTextureMode::varying_cutout)==2 && colours==std::vector<std::uint32_t>{0,0x5678,0,0x9abc} && depths==std::vector<std::uint16_t>{1,0,1,0},"varying cutout changed paired shade or transparent depth");
     span.x=3;span.length=2;
     try{dfre::draw_textured_span32(span,4,1,colours,depths,texture);check(false,"out-of-range texture span accepted");}catch(const std::invalid_argument&){}
     texture.shade_colours.pop_back();

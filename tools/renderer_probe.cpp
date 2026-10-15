@@ -2,7 +2,7 @@
 #include <iostream>
 #include <string>
 int main(int argc,char** argv) {
-    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera" && std::string(argv[1])!="faces"))return 2;
+    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="texture32-shade-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera" && std::string(argv[1])!="faces"))return 2;
     if(argc==2 && std::string(argv[1])=="faces") {
         std::uint32_t flags,flat_normal,material_index,normal_start;
         while(std::cin>>flags>>flat_normal>>material_index>>normal_start) {
@@ -116,12 +116,12 @@ int main(int argc,char** argv) {
         return std::cin.eof()?0:2;
     }
     const bool texture=argc>1 && std::string(argv[1])!="spans";
-    const auto mode=argc>1 && std::string(argv[1])=="texture32-shade"?dfre::RasterTextureMode::varying_shade:argc>1 && std::string(argv[1])=="texture32-cutout"?dfre::RasterTextureMode::cutout:dfre::RasterTextureMode::uniform;
+    const auto mode=argc>1 && std::string(argv[1])=="texture32-shade-cutout"?dfre::RasterTextureMode::varying_cutout:argc>1 && std::string(argv[1])=="texture32-shade"?dfre::RasterTextureMode::varying_shade:argc>1 && std::string(argv[1])=="texture32-cutout"?dfre::RasterTextureMode::cutout:dfre::RasterTextureMode::uniform;
     const bool spans=argc>1;
     if(texture) {
         std::uint32_t test,bitsx,bitsy,shade;dfre::RasterSpan row;
         while(std::cin>>test>>bitsx>>bitsy>>shade>>row.x>>row.y>>row.length>>row.u>>row.v>>row.depth>>row.du>>row.dv>>row.ddepth) {
-            if(mode==dfre::RasterTextureMode::varying_shade && !(std::cin>>row.shade>>row.dshade))return 2;
+            if((mode==dfre::RasterTextureMode::varying_shade || mode==dfre::RasterTextureMode::varying_cutout) && !(std::cin>>row.shade>>row.dshade))return 2;
             if(bitsx>8 || bitsy>8)return 2;
             dfre::RasterTexture32 image;image.width_bits=std::uint8_t(bitsx);image.height_bits=std::uint8_t(bitsy);image.uniform_shade=shade;
             image.pixels.resize(std::size_t(1)<<(bitsx+bitsy));image.shade_colours.resize(64*256);
