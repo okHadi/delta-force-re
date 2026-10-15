@@ -1,6 +1,7 @@
 #include "dfre/game.hpp"
 
 #include "dfre/assets.hpp"
+#include "dfre/campaign.hpp"
 #include "dfre/menu.hpp"
 #include "dfre/platform.hpp"
 #include "dfre/state_loop.hpp"
@@ -20,9 +21,10 @@ public:
         : options_(options), assets_(options.game_folder), menu_(assets_),
           soldier_(menu_, options.game_folder, options.save_folder),
           window_(create_game_window("Delta Force RE", 640, 480)) {
-        const std::array<std::pair<GameScreen, const char*>, 6> menus{{
+        const std::array<std::pair<GameScreen, const char*>, 7> menus{{
             {GameScreen::main_menu, "menu1"}, {GameScreen::new_soldier, "NewSoldierMenu"},
-            {GameScreen::campaign, "CampMenu"}, {GameScreen::multiplayer, "pmpMenu"},
+            {GameScreen::campaign, "CampMenu"}, {GameScreen::mission_setup, "MissionMenu"},
+            {GameScreen::multiplayer, "pmpMenu"},
             {GameScreen::options, "OptionsMenu"}, {GameScreen::credits, "CreditsMenu"}
         }};
         for (const auto& entry : menus) {
@@ -30,11 +32,21 @@ public:
             state.enter = [this, screen = entry.first, name = entry.second] {
                 screen_ = screen;
                 if (screen == GameScreen::new_soldier) soldier_.enter();
-                else menu_.select_menu(name);
+                else if (screen == GameScreen::campaign) {
+                    campaign_ = std::make_unique<CampaignMenu>(menu_, options_.game_folder, soldier_.profiles().at(soldier_.selected()));
+                    campaign_->enter();
+                } else if (screen == GameScreen::mission_setup) {
+                    if (!mission_selection_) throw std::runtime_error("Mission selection is missing");
+                    setup_ = std::make_unique<MissionSetupMenu>(menu_, options_.game_folder, soldier_.profiles().at(soldier_.selected()));
+                    setup_->enter(*mission_selection_);
+                } else menu_.select_menu(name);
             };
             state.update = [this] { return update(); };
             state.render = [this] {
-                frame_ = screen_ == GameScreen::new_soldier ? soldier_.draw() : menu_.render();
+                if (screen_ == GameScreen::new_soldier) frame_ = soldier_.draw();
+                else if (screen_ == GameScreen::campaign) frame_ = campaign_->draw();
+                else if (screen_ == GameScreen::mission_setup) frame_ = setup_->draw();
+                else frame_ = menu_.render();
                 window_->present(frame_);
                 if (options_.frame_limit && ++frames_ >= options_.frame_limit) close_ = true;
             };
@@ -66,6 +78,13 @@ private:
         change_ = true;
     }
 
+    void campaign_result(const CampaignResult& result) {
+        if (result.mission) mission_selection_ = result.mission;
+        const auto next = static_cast<GameScreen>(result.next_state);
+        if (states_.find(next) != states_.end()) request(next);
+        else std::clog << "Pending game state: 0x" << std::hex << result.next_state << std::dec << '\n';
+    }
+
     void action(const MenuAction& action) {
         auto& button = menu_.button(action.button);
         if (action.action == 1) button.state = 3;
@@ -73,6 +92,14 @@ private:
         else if (action.action == 7) button.state = 1;
         if (screen_ == GameScreen::new_soldier) {
             if (const auto target = soldier_.actions(action)) request(*target);
+            return;
+        }
+        if (screen_ == GameScreen::campaign) {
+            if (const auto result = campaign_->actions(action)) campaign_result(*result);
+            return;
+        }
+        if (screen_ == GameScreen::mission_setup) {
+            if (const auto result = setup_->actions(action)) campaign_result(*result);
             return;
         }
         if (action.action != 2) return;
@@ -90,7 +117,13 @@ private:
 
     int update() {
         if (close_) return 1;
+        if (screen_ == GameScreen::campaign) campaign_->update();
+        if (screen_ == GameScreen::mission_setup) setup_->update();
         for (const auto& event : window_->poll()) {
+            if (event.kind == InputKind::pointer_move || event.kind == InputKind::pointer_down || event.kind == InputKind::pointer_up) {
+                if (screen_ == GameScreen::campaign) campaign_->pointer(event.x, event.y);
+                if (screen_ == GameScreen::mission_setup) setup_->pointer(event.x, event.y);
+            }
             std::vector<MenuAction> actions;
             switch (event.kind) {
             case InputKind::quit: return 1;
@@ -116,6 +149,9 @@ private:
     MenuRuntime menu_;
     SoldierMenu soldier_;
     std::unique_ptr<GameWindow> window_;
+    std::unique_ptr<CampaignMenu> campaign_;
+    std::unique_ptr<MissionSetupMenu> setup_;
+    std::optional<MissionSelection> mission_selection_;
     StateLoop loop_;
     std::map<GameScreen, GameState> states_;
     GameScreen screen_ = GameScreen::main_menu;

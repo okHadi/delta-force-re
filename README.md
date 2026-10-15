@@ -28,7 +28,7 @@ build/Release/dfre.exe "C:/Games/Delta Force"
 
 Download the Windows executable from the latest successful [Tests run](https://github.com/okHadi/delta-force-re/actions/workflows/tests.yml). Keep the original game files on your device.
 
-The current build opens the original menus and soldier profiles. Mission gameplay is in development. Saves use `%LOCALAPPDATA%/DeltaForceRE`.
+The current build has soldier profiles, campaign selection, and mission briefing. Mission gameplay is in development. Saves use `%LOCALAPPDATA%/DeltaForceRE`.
 
 ## Analysis
 

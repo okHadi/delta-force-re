@@ -71,6 +71,7 @@ struct FontAtlas {
     std::uint8_t glyph_count = 0;
 };
 FontAtlas scan_font(PcxImage image);
+int menu_slider_offset(int range,int extent,int position);
 
 struct MenuAction {
     std::string button, handler;

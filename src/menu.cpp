@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <sstream>
 #include <utility>
@@ -228,6 +230,22 @@ FontAtlas scan_font(PcxImage image) {
     return out;
 }
 
+int menu_slider_offset(int range,int extent,int position) {
+    if(!range||!extent)return 0;
+    const double ratio=double(range)/double(extent);
+    const double value=ratio>=0?double(position)/ratio:double(position)*ratio;
+    double integer=std::trunc(value);
+    // Recover truncation when binary64 rounds an x87 binary80 result to an integer.
+    if(integer==value && integer!=0 && std::isfinite(integer)) {
+        const double residual=ratio>=0?std::fma(-integer,ratio,double(position)):std::fma(double(position),ratio,-integer);
+        const bool toward_zero=(integer>0&&residual<0)||(integer<0&&residual>0);
+        const double half_ulp=std::scalbn(ratio>=0?std::fabs(ratio):1.0,std::ilogb(std::fabs(integer))-64);
+        if(toward_zero&&std::fabs(residual)>half_ulp)integer+=integer>0?-1:1;
+    }
+    if(!std::isfinite(integer)||integer<std::numeric_limits<int>::min()||integer>std::numeric_limits<int>::max())return std::numeric_limits<int>::min();
+    return int(integer);
+}
+
 struct MenuRuntime::Impl {
     const AssetStore& assets;
     MenuData data;
@@ -269,7 +287,12 @@ struct MenuRuntime::Impl {
         return width;
     }
     void dimensions(MenuButton& b) {
-        if(!b.image.empty()) {const auto& picture=image(b.image);b.width=int(picture.width);b.height=int(picture.height)/((b.type==1 && !(b.attributes&2048))?4:1);}
+        if(!b.image.empty()) {const auto& picture=image(b.image);
+            if(b.type==1){b.width=int(picture.width);b.height=int(picture.height)/4;}
+            else if(b.type==6){b.width=int(picture.width);b.height=int(picture.height);}
+            else if(b.type==2)b.height=int(picture.height);
+            else if(b.type==3)b.width=int(picture.width);
+        }
         else if(!b.font.empty()) {const auto& atlas=font(b.font);b.width=text_width(atlas,label(b));b.height=atlas.glyphs[65].height;}
     }
     bool enabled(const MenuButton& b) const {return b.state!=0 && b.state!=4 && !(b.attributes&2);}
@@ -382,9 +405,10 @@ const std::vector<std::uint32_t>& MenuRuntime::render(const std::function<void(c
             const int count=(b.attributes&2048)?1:4;const int cell=count==1?0:b.state-1;
             p.blit(b.image,x,y,cell,count,!(b.attributes&4096),bool(b.attributes&4096));
         } else if(!b.image.empty() && (b.type==2 || b.type==3) && b.state!=4 && !(b.attributes&2)) {
-            if(b.type==2 && b.width)x+=int(double(b.slider_size)/b.width);
-            if(b.type==3 && b.height)y+=int(double(b.slider_size)/b.height);
-            p.blit(b.image,x,y,0,1,false,true);
+            const auto offset=menu_slider_offset(b.slider_size,b.type==2?b.width:b.height,b.slider_position);
+            if(offset==std::numeric_limits<int>::min())continue;
+            if(b.type==2)x+=offset;else y+=offset;
+            p.blit(b.image,x,y,0,1,false,false);
         }
         if((b.attributes&64) && !b.font.empty()) {
             const auto& atlas=p.font(b.font);const auto value=p.label(b);const auto width=p.text_width(atlas,value);

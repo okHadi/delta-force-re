@@ -66,6 +66,11 @@ void archive(const std::filesystem::path& path,const std::vector<std::pair<std::
     std::ofstream out(path,std::ios::binary);out.write(reinterpret_cast<const char*>(data.data()),data.size());
     require(bool(out),"Write menu fixture");
 }
+void test_slider() {
+    require(dfre::menu_slider_offset(768,13,768)==12,"Original x87 slider boundary");
+    require(dfre::menu_slider_offset(-768,203,100)==-378,"Negative slider ratio multiplies");
+    require(dfre::menu_slider_offset(768,13,-768)==-12,"Negative position truncates toward zero");
+}
 void test_runtime() {
     const auto folder=std::filesystem::temp_directory_path()/
         ("dfre-menu-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -74,7 +79,9 @@ void test_runtime() {
     const auto config=bytes("RGB=G,0,255,0\nFONT=F,f.pcx,G,G,G,G,G,G\nIMAGE=BG,bg.pcx,1,1,0,0,1\n"
         "IMAGE=I,i.pcx,1,4,0,0,1\nBUTTON=B,1,192,Name,Action,NULL,NULL,17,29,F,I,0,0,0,0,0,1,65,9,Draw\n"
         "BUTTON=P,6,0,NULL,NULL,NULL,NULL,50,29,F,I,0,0,0,0,0,1,0,0,NULL\n"
-        "MENU=M,BG,F,NULL,B,NULL,B,NULL,NULL,NULL,NULL,Group\nMENUBUTTON=M,B,P,.STOP\n");
+        "BUTTON=H,2,0,NULL,NULL,NULL,NULL,80,29,F,I,768,0,203,0,0,1,0,0,NULL\n"
+        "BUTTON=V,3,0,NULL,NULL,NULL,NULL,300,29,F,I,768,0,0,203,0,1,0,0,NULL\n"
+        "MENU=M,BG,F,NULL,B,NULL,B,NULL,NULL,NULL,NULL,Group\nMENUBUTTON=M,B,P,H,V,.STOP\n");
     dfre::AssetBytes font(40,0);font[1]=255;font[9]=255;font[16]=1;
     archive(folder/"Df.pff",{});
     archive(folder/"Dfbase.pff",{{"DF.MNU",config},{"DFMENU.BIN",rtxt()},
@@ -82,6 +89,8 @@ void test_runtime() {
         {"I.PCX",pcx(8,8,dfre::AssetBytes(64,40))},{"F.PCX",pcx(8,5,font)}});
     const dfre::AssetStore store(folder);dfre::MenuRuntime runtime(store);runtime.select_menu("m");
     require(runtime.button_text("b")=="Hello","Original RTXT button label");
+    runtime.render();require(runtime.button("H").width==203&&runtime.button("H").height==8,"Horizontal slider retains track width");
+    require(runtime.button("V").width==8&&runtime.button("V").height==203,"Vertical slider retains track height");
     require(runtime.hit_test(17,29)=="B" && runtime.hit_test(25,29).empty(),"Button exclusive right edge");
     require(runtime.hit_test(50,36)=="P" && runtime.hit_test(50,37).empty(),"Full-height panel hit area");
     require(runtime.hit_test(17,30)=="B" && runtime.hit_test(17,31).empty(),"Four-frame button hit area");
@@ -95,4 +104,4 @@ void test_runtime() {
     require(runtime.render()[30*640+20]==0xff00fe00u,"Original MMX color carry");
 }
 }
-int main(){try{test_rtxt();test_font();test_menu();test_runtime();std::cout << "menu checks passed\n";return 0;}catch(const std::exception& e){std::cerr << e.what() << '\n';return 1;}}
+int main(){try{test_rtxt();test_font();test_menu();test_slider();test_runtime();std::cout << "menu checks passed\n";return 0;}catch(const std::exception& e){std::cerr << e.what() << '\n';return 1;}}

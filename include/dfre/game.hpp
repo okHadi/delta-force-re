@@ -11,6 +11,7 @@ enum class GameScreen : std::uint32_t {
     new_soldier = 0x4cfbc0,
     main_menu = 0x4cf2ec,
     campaign = 0x4d0cd4,
+    mission_setup = 0x4d3dec,
     multiplayer = 0x4e6cc0,
     options = 0x4d349c,
     credits = 0x4eb3a0,

@@ -29,6 +29,8 @@ void ppm(const std::string& filename,const std::vector<std::uint32_t>& frame) {
 
 int main(int argc,char** argv) {
     try {
+        if(argc==2&&std::string(argv[1])=="slider-table"){int range,extent,position;while(std::cin>>range>>extent>>position)std::cout<<dfre::menu_slider_offset(range,extent,position)<<'\n';return 0;}
+        if(argc==5&&std::string(argv[1])=="slider"){std::cout<<"{\"offset\":"<<dfre::menu_slider_offset(std::stoi(argv[2]),std::stoi(argv[3]),std::stoi(argv[4]))<<"}\n";return 0;}
         if(argc<3)throw dfre::AssetError("menu_probe all GAME_FOLDER | render GAME_FOLDER MENU OUTPUT.ppm | font GAME_FOLDER FONT");
         const std::string command=argv[1];const dfre::AssetStore assets(argv[2]);dfre::MenuRuntime runtime(assets);
         if(command=="all" && argc==3) {
