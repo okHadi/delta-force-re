@@ -181,6 +181,41 @@ TerrainRuntime load_terrain_runtime(const AssetStore& assets, std::string_view m
             std::move(sky_palette), std::move(sky), std::move(water), std::move(water_palette), water_height, pixel_bits};
 }
 
+AssetBytes load_terrain_gamma(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) throw AssetError("Cannot open terrain gamma file");
+    AssetBytes gamma(256);
+    if (!input.read(reinterpret_cast<char*>(gamma.data()), 256)) throw AssetError("Terrain gamma file requires 256 bytes");
+    return gamma;
+}
+
+TerrainPalette8 make_terrain_palette8(const AssetBytes& palette, const AssetBytes& sky_palette, const AssetBytes& gamma) {
+    if (palette.size() != 768 || sky_palette.size() != 768 || gamma.size() != 256) {
+        throw AssetError("Terrain palette requires two 256-color RGB palettes and a 256-byte gamma table");
+    }
+    TerrainPalette8 result;
+    result.raw_rgb = palette;
+    result.gamma_rgb.resize(palette.size());
+    std::transform(palette.begin(), palette.end(), result.gamma_rgb.begin(), [&](std::uint8_t value) { return gamma[value]; });
+    for (unsigned channel = 0; channel < 3; ++channel) {
+        result.fog[channel] = gamma[sky_palette[channel]];
+        result.light[channel] = gamma[sky_palette[48 + channel]];
+    }
+    return result;
+}
+
+TerrainPalette8 load_terrain_palette8(const AssetStore& assets, std::string_view mission,
+    const TerrainRuntime& terrain, const AssetBytes& gamma) {
+    const auto data = assets.read(mission);
+    mission_terrain_name(data.bytes);
+    if (data.bytes.size() < 268) throw AssetError("Truncated mission palette header");
+    const auto name = (data.bytes[122] & 0x10) ? std::string("night.PAL") : set_asset_extension(mission, "PAL");
+    const auto image = assets.load_image(name);
+    auto result = make_terrain_palette8(image.image.palette, terrain.sky_palette.palette, gamma);
+    result.source = image.source;
+    return result;
+}
+
 AssetBytes terrain_height_mip(const AssetBytes& source, std::uint32_t width) {
     require_square(source, width);
     AssetBytes result;
@@ -313,6 +348,54 @@ TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
                 result.shade[row * 256 + color] = nearest(unsigned(value[0]) >> 16, unsigned(value[1]) >> 16, unsigned(value[2]) >> 16);
                 for (unsigned channel = 0; channel < 3; ++channel) value[channel] += step[channel];
             }
+        }
+    }
+    return result;
+}
+
+std::vector<std::uint32_t> build_terrain_shades32(const AssetBytes& gamma_palette,
+    const std::array<std::uint8_t, 3>& light_color, const TerrainColorControl& control) {
+    if (gamma_palette.size() != 768 || control.brightness < 0 || control.brightness > 255 ||
+        control.saturation < 0 || control.saturation > 255 || std::any_of(control.channels.begin(), control.channels.end(),
+        [](int value) { return value < 0 || value > 255; })) throw AssetError("Invalid terrain 32-bit color controls");
+    std::array<std::uint8_t, 256> inverse{};
+    std::array<std::array<std::uint8_t, 256>, 3> channels{};
+    for (unsigned i = 0; i < 256; ++i) {
+        inverse[i] = static_cast<std::uint8_t>(std::pow(double(i) / 255.0, 0.8) * 255.0 + 0.5);
+        const int curve = static_cast<int>(std::sqrt(255.0 * i) - i + 0.5);
+        const int factor = control.brightness >= 128 ? (control.brightness - 128) * 2 : std::min(255, (128 - control.brightness) * 2);
+        const int base = std::max(0, int(i) + (control.brightness >= 128 ? 1 : -1) * ((curve * factor) >> 8));
+        for (unsigned channel = 0; channel < 3; ++channel) {
+            channels[channel][i] = static_cast<std::uint8_t>(std::min(255, ((base * control.channels[channel]) >> 8) * 2));
+        }
+    }
+    auto floor128 = [](int value) { return value >= 0 ? value / 128 : -((-value + 127) / 128); };
+    auto pack = [&](const std::array<std::uint8_t, 3>& rgb) {
+        const int luminance = (int(rgb[0]) + int(rgb[1]) * 2 + rgb[2]) >> 2;
+        std::array<unsigned, 3> corrected{};
+        for (unsigned channel = 0; channel < 3; ++channel) {
+            const int value = std::clamp(luminance + floor128((int(rgb[channel]) - luminance) * control.saturation), 0, 255);
+            corrected[channel] = channels[channel][static_cast<unsigned>(value)];
+        }
+        const auto light = (corrected[0] + corrected[1] * 2 + corrected[2]) >> 2;
+        return (light << 24) | (corrected[0] << 16) | (corrected[1] << 8) | corrected[2];
+    };
+    std::vector<std::uint32_t> result(64 * 256);
+    for (unsigned color = 0; color < 256; ++color) for (unsigned mode = 0; mode < 2; ++mode) {
+        std::array<int, 3> value{}, step{};
+        for (unsigned channel = 0; channel < 3; ++channel) {
+            const auto from = gamma_palette[color * 3 + channel];
+            value[channel] = int(from) * 65536;
+            step[channel] = ((mode ? int(light_color[channel]) : 0) - from) * 0x842;
+        }
+        for (unsigned shade = 0; shade < 32; ++shade) {
+            const auto row = mode ? shade + 32 : 31 - shade;
+            std::array<std::uint8_t, 3> rgb{};
+            for (unsigned channel = 0; channel < 3; ++channel) {
+                rgb[channel] = inverse[static_cast<unsigned>(value[channel]) >> 16];
+                value[channel] += step[channel];
+            }
+            result[row * 256 + color] = pack(rgb);
         }
     }
     return result;

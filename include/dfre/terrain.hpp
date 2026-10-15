@@ -39,6 +39,19 @@ struct TerrainRuntime {
 };
 
 TerrainRuntime load_terrain_runtime(const AssetStore& assets, std::string_view mission, unsigned pixel_bits = 8);
+
+struct TerrainPalette8 {
+    AssetLocation source;
+    AssetBytes raw_rgb;
+    AssetBytes gamma_rgb;
+    std::array<std::uint8_t, 3> fog{};
+    std::array<std::uint8_t, 3> light{};
+};
+
+AssetBytes load_terrain_gamma(const std::filesystem::path& path);
+TerrainPalette8 make_terrain_palette8(const AssetBytes& palette, const AssetBytes& sky_palette, const AssetBytes& gamma);
+TerrainPalette8 load_terrain_palette8(const AssetStore& assets, std::string_view mission,
+    const TerrainRuntime& terrain, const AssetBytes& gamma);
 AssetBytes terrain_height_mip(const AssetBytes& source, std::uint32_t width);
 AssetBytes terrain_sky_water_mip(const AssetBytes& source, std::uint32_t width);
 std::vector<AssetBytes> build_terrain_height_bounds(const TerrainGeometry& geometry);
@@ -58,6 +71,16 @@ std::vector<std::uint32_t> decode_terrain_blend_selectors(const AssetBytes& byte
 std::vector<std::uint32_t> load_terrain_blend_selectors(const std::filesystem::path& path);
 TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
     const std::array<std::uint8_t, 3>& light_color, std::vector<std::uint32_t> selectors);
+
+struct TerrainColorControl {
+    int brightness = 128;
+    int saturation = 128;
+    std::array<int, 3> channels{128, 128, 128};
+};
+
+// 64 rows by 256 colors. Words pack luminance, red, green, blue; the high byte is not alpha.
+std::vector<std::uint32_t> build_terrain_shades32(const AssetBytes& gamma_palette,
+    const std::array<std::uint8_t, 3>& light_color, const TerrainColorControl& control = {});
 
 TerrainDetailTile build_terrain_detail_tile(const TerrainGeometry& geometry, const AssetBytes& color,
     const TerrainBlendTables& tables, std::uint32_t x, std::uint32_t y);

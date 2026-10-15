@@ -14,6 +14,11 @@ Height mips select the maximum of four cells. Sky and water mips use rounded mea
 Water height uses the TRN integer multiplied by 16384. Missing water assets disable water.
 Sky and water index conversion follows the selected original 8-bit or 32-bit mode.
 
+`load_terrain_gamma` reads the first 256 bytes of `INTRO.KDV`, as original startup `0x401C60` does.
+`load_terrain_palette8` loads the mission `.PAL` PCX palette; BMS byte 122 bit `0x10` selects `NIGHT.PAL`.
+All 62 stock missions have palette members. Nine select the night palette.
+Fog and light RGB use sky-gradient palette entries 0 and 16, mapped through gamma.
+
 `initialize_voxel_columns` implements original function `0x489A00` with shared fixed-point sine and cosine.
 `build_voxel_projection` implements the LOD and depth tables from `0x489440`.
 Normal play uses density 2.2; zoom uses 3.2. The draw loop uses the first 11 of 14 LOD records.
@@ -22,6 +27,9 @@ Projection arithmetic uses `long double`. The 64 original output hashes also pas
 Its inputs include the original palette blend/shade lookups and authored blend selectors.
 `build_terrain_blend_tables` builds those lookups from a gamma-mapped 256-color palette and light RGB value.
 It preserves the original candidate bins, weighted color distance, index-zero rules, and 32-step shade gradients.
+`build_terrain_shades32` implements the original 64 × 256 color rows with brightness, saturation, and RGB controls.
+Its word layout is luminance, red, green, blue. The high byte stores `(R + 2G + B) / 4`.
+Inverse gamma and brightness curves are generated from verified power and square-root formulas.
 `load_terrain_blend_selectors` reads the local `detail-blend.u32le` sidecar: exactly 256 little-endian words with values 0 through 11.
 Detail render heights use centered interpolation and differ from collision detail samples.
 `render_voxel_pass_8` implements original function `0x459635` in its normal two-pixel mode.
@@ -44,6 +52,8 @@ python tools/check_terrain_projection_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_detail_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_bounds_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_palette_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_palette_assets_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_shades32_original.py GAME_FOLDER TERRAIN_PROBE
 ```
 
 Use the built `terrain_probe` path for `TERRAIN_PROBE`. Reports use `.local/reports`; `--report PATH` selects another report file.

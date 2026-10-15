@@ -34,7 +34,7 @@ Target executable SHA-256: `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43
 
 ## Window backend
 
-Windows uses Win32 input and a 32-bit DIB display. The Mac development window uses SDL2:
+Windows uses Win32 input and a 32-bit DIB display. Mac development builds use SDL2 and a local ad hoc code signature:
 
 ```sh
 cmake -S . -B build -DDFRE_BUILD_WINDOW=ON

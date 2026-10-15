@@ -174,6 +174,22 @@ void palette_fixture(std::uint32_t seed) {
     const auto tables = dfre::build_terrain_blend_tables(palette, {230, 210, 190}, std::vector<std::uint32_t>(256, 0));
     std::cout << "{\"blend\":\"" << fingerprint(tables.blend) << "\",\"shade\":\"" << fingerprint(tables.shade) << "\"}\n";
 }
+
+void shades32_fixture(std::uint32_t seed) {
+    dfre::AssetBytes palette(768);
+    for (unsigned i = 0; i < 256; ++i) for (unsigned channel = 0; channel < 3; ++channel) {
+        constexpr unsigned multipliers[] = {37, 67, 101};
+        palette[i * 3 + channel] = static_cast<std::uint8_t>(seed % 3 == 1 ? i : seed % 3 == 2 ? 0 : i * multipliers[channel]);
+    }
+    dfre::TerrainColorControl control;
+    if (seed / 3 == 1) { control.brightness = 64; control.saturation = 0; control.channels = {255, 64, 192}; }
+    if (seed / 3 == 2) { control.brightness = 255; control.saturation = 255; control.channels = {255, 128, 1}; }
+    const auto shades = dfre::build_terrain_shades32(palette, {230, 210, 190}, control);
+    dfre::AssetBytes bytes;
+    bytes.reserve(shades.size() * 4);
+    for (auto color : shades) for (unsigned shift = 0; shift < 32; shift += 8) bytes.push_back(static_cast<std::uint8_t>(color >> shift));
+    std::cout << "{\"shades\":\"" << fingerprint(bytes) << "\"}\n";
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -182,7 +198,7 @@ int main(int argc, char** argv) {
             samples(synthetic());
         } else if (argc == 2 && std::string_view(argv[1]) == "--bounds-fixture") {
             bounds_fixture();
-        } else if (argc == 3 && (std::string_view(argv[1]) == "--raster-fixture" || std::string_view(argv[1]) == "--camera-fixture" || std::string_view(argv[1]) == "--projection-fixture" || std::string_view(argv[1]) == "--detail-fixture" || std::string_view(argv[1]) == "--palette-fixture")) {
+        } else if (argc == 3 && (std::string_view(argv[1]) == "--raster-fixture" || std::string_view(argv[1]) == "--camera-fixture" || std::string_view(argv[1]) == "--projection-fixture" || std::string_view(argv[1]) == "--detail-fixture" || std::string_view(argv[1]) == "--palette-fixture" || std::string_view(argv[1]) == "--shades32-fixture")) {
             std::uint32_t seed = 0;
             const std::string_view input(argv[2]);
             const auto parsed = std::from_chars(input.data(), input.data() + input.size(), seed);
@@ -191,7 +207,25 @@ int main(int argc, char** argv) {
             else if (std::string_view(argv[1]) == "--camera-fixture") camera_fixture(seed);
             else if (std::string_view(argv[1]) == "--projection-fixture") projection_fixture(seed);
             else if (std::string_view(argv[1]) == "--detail-fixture") detail_fixture(seed);
-            else palette_fixture(seed);
+            else if (std::string_view(argv[1]) == "--palette-fixture") palette_fixture(seed);
+            else shades32_fixture(seed);
+        } else if (argc == 3 && std::string_view(argv[1]) == "--palette-assets") {
+            const dfre::AssetStore assets(argv[2]);
+            const auto gamma = dfre::load_terrain_gamma(std::filesystem::path(argv[2]) / "INTRO.KDV");
+            std::cout << "{\"missions\":[";
+            bool first = true;
+            for (const auto& name : assets.missions()) {
+                const auto runtime = dfre::load_terrain_runtime(assets, name);
+                const auto palette = dfre::load_terrain_palette8(assets, name, runtime, gamma);
+                if (!first) std::cout << ',';
+                first = false;
+                std::cout << "{\"mission\":\"" << name << "\",\"member\":\"" << palette.source.member
+                          << "\",\"raw\":\"" << fingerprint(palette.raw_rgb) << "\",\"gamma\":\""
+                          << fingerprint(palette.gamma_rgb) << "\",\"fog\":[" << unsigned(palette.fog[0]) << ','
+                          << unsigned(palette.fog[1]) << ',' << unsigned(palette.fog[2]) << "],\"light\":["
+                          << unsigned(palette.light[0]) << ',' << unsigned(palette.light[1]) << ',' << unsigned(palette.light[2]) << "]}";
+            }
+            std::cout << "]}\n";
         } else if (argc == 3 && std::string_view(argv[1]) == "--blend-sidecar") {
             const auto selectors = dfre::load_terrain_blend_selectors(argv[2]);
             std::cout << "{\"selectors\":" << selectors.size() << ",\"minimum\":";

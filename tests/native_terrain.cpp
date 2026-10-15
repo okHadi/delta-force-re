@@ -126,6 +126,38 @@ void palette_goldens() {
     rejects([&] { auto selectors = std::vector<std::uint32_t>(256, 0); selectors[0] = 12;
         dfre::build_terrain_blend_tables(dfre::AssetBytes(768), {0, 0, 0}, selectors); });
 }
+
+void shades32_goldens() {
+    constexpr std::uint64_t expected[] = {0x4c99a9c26266bb02ull, 0xb91f132617737cadull, 0xbe84ec9c21575725ull,
+        0x9b00226843bee316ull, 0x1eff5a0362238858ull, 0x91f973d98f658725ull,
+        0xd53dd503197c6a08ull, 0x6686dc7f85a14cb2ull, 0x5936385eace80125ull};
+    for (unsigned seed = 0; seed < 9; ++seed) {
+        dfre::AssetBytes palette(768);
+        for (unsigned i = 0; i < 256; ++i) for (unsigned channel = 0; channel < 3; ++channel) {
+            constexpr unsigned multipliers[] = {37, 67, 101};
+            palette[i * 3 + channel] = static_cast<std::uint8_t>(seed % 3 == 1 ? i : seed % 3 == 2 ? 0 : i * multipliers[channel]);
+        }
+        dfre::TerrainColorControl control;
+        if (seed / 3 == 1) { control.brightness = 64; control.saturation = 0; control.channels = {255, 64, 192}; }
+        if (seed / 3 == 2) { control.brightness = 255; control.saturation = 255; control.channels = {255, 128, 1}; }
+        const auto shades = dfre::build_terrain_shades32(palette, {230, 210, 190}, control);
+        std::uint64_t hash = 0xcbf29ce484222325ull;
+        for (auto value : shades) for (unsigned shift = 0; shift < 32; shift += 8) {
+            hash = (hash ^ ((value >> shift) & 255)) * 0x100000001b3ull;
+        }
+        require(hash == expected[seed], "Original 32-bit shade numeric hash failed");
+    }
+    const auto white = dfre::build_terrain_shades32(dfre::AssetBytes(768, 255), {255, 255, 255});
+    require(white[32 * 256] == 0xfefefefe && white[0] == 0,
+            "Original neutral channel rounding or luminance packing failed");
+    rejects([&] { dfre::build_terrain_shades32({}, {0, 0, 0}); });
+    rejects([&] { dfre::TerrainColorControl control; control.brightness = -1;
+        dfre::build_terrain_shades32(dfre::AssetBytes(768), {0, 0, 0}, control); });
+    rejects([&] { dfre::TerrainColorControl control; control.saturation = 256;
+        dfre::build_terrain_shades32(dfre::AssetBytes(768), {0, 0, 0}, control); });
+    rejects([&] { dfre::TerrainColorControl control; control.channels[2] = 256;
+        dfre::build_terrain_shades32(dfre::AssetBytes(768), {0, 0, 0}, control); });
+}
 } // namespace
 
 int main() {
@@ -166,6 +198,21 @@ int main() {
         rejects([&] { dfre::TerrainGeometry bad({}, character, detail); });
         rejects([&] { dfre::TerrainGeometry bad(height, {}, detail); });
         rejects([&] { dfre::TerrainGeometry bad(height, character, {}); });
+        dfre::AssetBytes palette_rgb(768), sky_rgb(768, 0), gamma(256);
+        for (unsigned i = 0; i < palette_rgb.size(); ++i) palette_rgb[i] = static_cast<std::uint8_t>(i);
+        for (unsigned i = 0; i < gamma.size(); ++i) gamma[i] = static_cast<std::uint8_t>(255 - i);
+        sky_rgb[0] = 10; sky_rgb[1] = 20; sky_rgb[2] = 30;
+        sky_rgb[48] = 100; sky_rgb[49] = 110; sky_rgb[50] = 120;
+        const auto mission_palette = dfre::make_terrain_palette8(palette_rgb, sky_rgb, gamma);
+        require(mission_palette.raw_rgb == palette_rgb && mission_palette.gamma_rgb[0] == 255 &&
+                mission_palette.gamma_rgb[255] == 0 && mission_palette.gamma_rgb[256] == 255,
+                "Original gamma palette mapping failed");
+        require(mission_palette.fog == std::array<std::uint8_t, 3>{245, 235, 225} &&
+                mission_palette.light == std::array<std::uint8_t, 3>{155, 145, 135},
+                "Original sky fog and light palette selection failed");
+        rejects([&] { dfre::make_terrain_palette8({}, sky_rgb, gamma); });
+        rejects([&] { dfre::make_terrain_palette8(palette_rgb, {}, gamma); });
+        rejects([&] { dfre::make_terrain_palette8(palette_rgb, sky_rgb, {}); });
         const dfre::AssetBytes values{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
         require(dfre::terrain_height_mip(values, 4) == dfre::AssetBytes({6, 8, 14, 16}), "Height mip must use maximum");
         require(dfre::terrain_sky_water_mip(values, 4) == dfre::AssetBytes({3, 5, 11, 13}), "Sky/water mip rounding failed");
@@ -239,6 +286,7 @@ int main() {
         rejects([&] { auto bad = dfre::VoxelCamera{}; bad.right = 638; dfre::initialize_voxel_columns(bad); });
         projection_goldens();
         palette_goldens();
+        shades32_goldens();
         const auto projection = dfre::build_voxel_projection(320);
         require(projection.levels.size() == 14 && projection.depths.size() == 1022,
                 "Original LOD record or depth count failed");
