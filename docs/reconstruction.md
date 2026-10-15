@@ -18,3 +18,20 @@ Target: `Df.exe`, SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43b
 ```
 
 On a Windows multi-configuration build, use `build/Release/filename_probe.exe`.
+
+## State loop
+
+- Original dispatcher: `0x461270`–`0x46133e`.
+- Code: `src/state_loop.cpp`.
+- State callbacks: enter at `+0x20`, update at `+0x24`, render at `+0x28`, leave at `+0x2c`.
+- Run updates in 16 ms steps. Start with one step ready. Carry pending time across state changes.
+- Render after completed updates. An update return value other than zero leaves the state.
+- Read the next state after the leave callback. A null next state returns from the loop.
+- Use unsigned 32-bit clock differences, including clock wrap.
+- 204 cases match original x86 callback order, clock reads, yield calls, and elapsed totals under Unicorn 2.1.4.
+
+```sh
+.local/tools/python/bin/python tools/check_state_loop.py "/path/to/Delta Force/Df.exe" build/state_loop_probe
+```
+
+Full local evidence: `startup-menu-start.json`, `state-loop-differential.json` in `.local/reports/`.
