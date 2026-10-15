@@ -90,5 +90,11 @@ struct CharacterBonePose {
 CharacterModel decode_character(const std::vector<std::uint8_t>& bytes);
 // Original 0x43a0e0 pose read; motion and interpolation are separate steps.
 std::vector<CharacterBonePose> character_frame_pose(const CharacterFrame& frame);
+// Core original per-bone deltas. Target pose includes any frame scale values.
+std::vector<CharacterBonePose> character_pose_delta(const std::vector<CharacterBonePose>& current,
+    const std::vector<CharacterBonePose>& target, std::uint16_t ticks);
+std::vector<CharacterBonePose> advance_character_pose(const std::vector<CharacterBonePose>& current,
+    const std::vector<CharacterBonePose>& delta);
+
 
 }

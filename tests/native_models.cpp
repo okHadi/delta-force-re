@@ -77,5 +77,18 @@ int main() {
     bad=b;put(bad,1236+4,2);rejects_character(bad);
     bad=b;put(bad,1256+28,0xffffffff);rejects_character(bad);
     bad=b;put(bad,0,0x30524843);rejects_character(bad);
+    std::vector<dfre::CharacterBonePose> current{{{33554431,0,0},{2147483647,(-2147483647-1),65536}}};
+    std::vector<dfre::CharacterBonePose> target{{{0,33554431,16777216},{(-2147483647-1),2147483647,0}}};
+    auto delta=dfre::character_pose_delta(current,target,2);
+    check(delta[0].angles==std::array<std::int32_t,3>{0,0,-8388608},"25-bit shortest angle delta changed");
+    check(delta[0].scale==std::array<std::int32_t,3>{0,0,-32768},"scale difference wrap or division changed");
+    auto advanced=dfre::advance_character_pose(current,delta);
+    check(advanced[0].angles[2]==25165824 && advanced[0].scale[2]==32768,"pose tick changed");
+    delta[0].angles={2,-3,0};delta[0].scale={1,-1,0};advanced=dfre::advance_character_pose(current,delta);
+    check(advanced[0].angles[0]==1 && advanced[0].angles[1]==33554429,"pose angle wrap changed");
+    check(advanced[0].scale[0]==(-2147483647-1) && advanced[0].scale[1]==2147483647,"pose scale wrap changed");
+    try{dfre::character_pose_delta(current,target,0);check(false,"accepted zero frame duration");}catch(const std::invalid_argument&){}
+    try{dfre::character_pose_delta(current,{},1);check(false,"accepted different pose counts");}catch(const std::invalid_argument&){}
+    try{dfre::advance_character_pose(current,{});check(false,"accepted different delta counts");}catch(const std::invalid_argument&){}
     std::cout<<"model bounds and geometry tests passed\n";
 }

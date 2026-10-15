@@ -5,25 +5,34 @@
 #include <stdexcept>
 int main(int argc,char** argv) {
     if(argc<2){std::cerr<<"Usage: models_probe MODEL...\n";return 2;}
+    const bool deltas=std::string(argv[1])=="--character-deltas-json";
     const bool character=std::string(argv[1])=="--character-poses-json";
-    if(character && argc!=3){std::cerr<<"Usage: models_probe --character-poses-json CHR\n";return 2;}
+    if((character||deltas) && argc!=3){std::cerr<<"Usage: models_probe --character-poses-json CHR\n";return 2;}
     const bool origins=std::string(argv[1])=="--origins-json";
     if(origins && argc!=3){std::cerr<<"Usage: models_probe --origins-json MODEL\n";return 2;}
     bool failed=false;
-    for(int i=(origins||character)?2:1;i<argc;++i)try {
+    for(int i=(origins||character||deltas)?2:1;i<argc;++i)try {
         std::ifstream file(argv[i],std::ios::binary);
         if(!file)throw std::runtime_error("cannot open model");
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});
-        if(character) {
+        if(character||deltas) {
             auto chr=dfre::decode_character(bytes);std::cout<<"[";bool first=true;
             for(const auto& animation:chr.animations)for(std::size_t j=0;j<animation.frames.size();++j) {
                 if(!first)std::cout<<",";first=false;
-                std::cout<<"{\"slot\":"<<animation.slot<<",\"frame\":"<<j<<",\"pose\":[";bool first_bone=true;
-                for(const auto& pose:dfre::character_frame_pose(animation.frames[j])) {
-                    if(!first_bone)std::cout<<",";first_bone=false;
-                    std::cout<<"["<<pose.angles[0]<<","<<pose.angles[1]<<","<<pose.angles[2]<<","<<pose.scale[0]<<","<<pose.scale[1]<<","<<pose.scale[2]<<"]";
-                }
-                std::cout<<"]}";
+                const auto target=dfre::character_frame_pose(animation.frames[j]);
+                auto values=target;std::vector<dfre::CharacterBonePose> advanced;
+                std::cout<<"{\"slot\":"<<animation.slot<<",\"frame\":"<<j;
+                if(deltas) {
+                    const auto& header=animation.frames[j].raw_header;
+                    const auto duration=std::uint16_t(header[8]|(std::uint16_t(header[9])<<8));
+                    const auto current=dfre::character_frame_pose(animation.frames[j?j-1:animation.frames.size()-1]);
+                    values=dfre::character_pose_delta(current,target,duration);advanced=dfre::advance_character_pose(current,values);
+                    std::cout<<",\"duration\":"<<duration<<",\"delta\":[";
+                }else std::cout<<",\"pose\":[";
+                auto write_pose=[](const auto& poses) {bool first_bone=true;for(const auto& pose:poses){if(!first_bone)std::cout<<",";first_bone=false;std::cout<<"["<<pose.angles[0]<<","<<pose.angles[1]<<","<<pose.angles[2]<<","<<pose.scale[0]<<","<<pose.scale[1]<<","<<pose.scale[2]<<"]";}};
+                write_pose(values);std::cout<<"]";
+                if(deltas){std::cout<<",\"advanced\":[";write_pose(advanced);std::cout<<"]";}
+                std::cout<<"}";
             }
             std::cout<<"]\n";continue;
         }

@@ -232,17 +232,81 @@ def check_character(path, executable, probe):
     return dict(source_sha256=source_hash,character_sha256=hashlib.sha256(data).hexdigest(),function=hex(start),function_bytes=len(code),function_sha256=hashlib.sha256(code).hexdigest(),frames=len(native),bone_poses=bones,mismatches=0,scope='original frame angle and unit-scale read; interpolation and motion are separate')
 
 
+def check_character_deltas(path, executable, probe):
+    import subprocess
+    import pefile
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESI, UC_X86_REG_EDI, UC_X86_REG_EBX, UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EIP
+    checked=check_character(path,executable,probe)
+    exe=Path(executable).read_bytes();data=Path(path).read_bytes()
+    probe=str(Path(probe).resolve())
+    native=json.loads(subprocess.check_output([probe,'--character-deltas-json',str(path)]))
+    poses=json.loads(subprocess.check_output([probe,'--character-poses-json',str(path)]))
+    by_key={(row['slot'],row['frame']):row['pose'] for row in poses}
+    pe=pefile.PE(data=exe);machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    machine.mem_map(0x43a000,4096);machine.mem_write(0x43a000,pe.get_data(0x43a000-pe.OPTIONAL_HEADER.ImageBase,4096))
+    machine.mem_map(0x439000,4096)
+    base=0x3000000
+    machine.mem_map(base,(len(data)+4095)&~4095);machine.mem_write(base,data)
+    for address in (0x2000000,0x4000000,0x5000000):
+        machine.mem_map(address,4096)
+    def word(offset):
+        return struct.unpack_from('<I',data,offset)[0]
+    slots={};table=word(20)
+    for slot in range(255):
+        pos=word(table+slot*4)
+        if not pos:
+            continue
+        count=word(pos);pos+=20;slots[slot]=[]
+        for _ in range(count):
+            slots[slot].append(pos);pos+=word(pos)
+    total=0
+    for item in native:
+        slot,frame=item['slot'],item['frame'];offset=slots[slot][frame]
+        if word(offset)&0x80000000 or word(offset+4)&0x80 or word(offset+40):
+            raise ModelError('delta check covers frames without head overrides or scale blocks')
+        current=by_key[(slot,frame-1 if frame else len(slots[slot])-1)]
+        if len(current)>1024//24:
+            raise ModelError('delta check bone count exceeds output buffer')
+        state=bytearray(256)
+        for field,value in ((0x14,len(current)),(0x58,52),(0x80,0x5000000),(0x84,0x5000400)):
+            struct.pack_into('<I',state,field,value)
+        machine.mem_write(0x4000000,bytes(state))
+        machine.mem_write(0x5000000,b''.join(struct.pack('<6i',*pose) for pose in current))
+        machine.reg_write(UC_X86_REG_ESI,0x4000000);machine.reg_write(UC_X86_REG_EDI,base+offset)
+        machine.reg_write(UC_X86_REG_EBX,item['duration']);machine.reg_write(UC_X86_REG_ESP,0x2000800);machine.reg_write(UC_X86_REG_EFLAGS,2)
+        machine.emu_start(0x43a2c7,0x43a45b,count=100000,timeout=1000000)
+        if machine.reg_read(UC_X86_REG_EIP)!=0x43a45b:
+            raise ModelError('original character delta block exceeded instruction limit')
+        raw=bytes(machine.mem_read(0x5000400,len(current)*24))
+        expected=[list(struct.unpack_from('<6i',raw,i*24)) for i in range(len(current))]
+        if item['delta']!=expected:
+            raise ModelError(f'character delta mismatch: slot {slot} frame {frame}')
+        machine.reg_write(UC_X86_REG_ESI,0x4000000)
+        machine.emu_start(0x43a7ea,0x43a848,count=100000,timeout=1000000)
+        if machine.reg_read(UC_X86_REG_EIP)!=0x43a848:
+            raise ModelError('original character advance block exceeded instruction limit')
+        raw=bytes(machine.mem_read(0x5000000,len(current)*24))
+        expected=[list(struct.unpack_from('<6i',raw,i*24)) for i in range(len(current))]
+        if item['advanced']!=expected:
+            raise ModelError(f'character advance mismatch: slot {slot} frame {frame}')
+        total+=len(current)
+    return dict(source_sha256=checked['source_sha256'],character_sha256=checked['character_sha256'],frames=len(native),bone_deltas=total,bone_advances=total,mismatches=0,delta_block_start='0x43a2c7',delta_block_end_exclusive='0x43a45b',delta_block_sha256=hashlib.sha256(pe.get_data(0x43a2c7-pe.OPTIONAL_HEADER.ImageBase,0x43a45b-0x43a2c7)).hexdigest(),advance_block_start='0x43a7ea',advance_block_end_exclusive='0x43a848',advance_block_sha256=hashlib.sha256(pe.get_data(0x43a7ea-pe.OPTIONAL_HEADER.ImageBase,0x43a848-0x43a7ea)).hexdigest(),scope='core per-bone deltas and one tick; unit scale; prior stored pose; frame head overrides absent')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input');parser.add_argument('--archive',action='store_true');parser.add_argument('--geometry',action='store_true')
-    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--check-character',metavar='EXE');parser.add_argument('--probe')
+    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--check-character',metavar='EXE');parser.add_argument('--check-deltas',metavar='EXE');parser.add_argument('--probe')
     args=parser.parse_args()
+    if args.check_deltas and (args.archive or not args.probe or args.check_origins or args.check_character):
+        parser.error('--check-deltas needs --probe and one CHR input')
     if args.check_character and (args.archive or not args.probe or args.check_origins):
         parser.error('--check-character needs --probe and one CHR input')
     if args.check_origins and (not args.archive or not args.probe):
         parser.error('--check-origins requires --archive and --probe')
     try:
-        result=check_character(args.input,args.check_character,args.probe) if args.check_character else check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
+        result=check_character_deltas(args.input,args.check_deltas,args.probe) if args.check_deltas else check_character(args.input,args.check_character,args.probe) if args.check_character else check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
         print(json.dumps(result,indent=2))
     except (OSError,ValueError) as error:
         parser.exit(1,f'model: {error}\n')

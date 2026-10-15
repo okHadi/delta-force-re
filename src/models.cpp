@@ -162,4 +162,31 @@ std::vector<CharacterBonePose> character_frame_pose(const CharacterFrame& frame)
     return result;
 }
 
+std::vector<CharacterBonePose> character_pose_delta(const std::vector<CharacterBonePose>& current,
+    const std::vector<CharacterBonePose>& target,std::uint16_t ticks) {
+    require(ticks!=0,"character pose duration is zero");
+    require(current.size()==target.size(),"character pose counts differ");
+    std::vector<CharacterBonePose> result(current.size());
+    for(std::size_t i=0;i<current.size();++i)for(std::size_t k=0;k<3;++k) {
+        const auto angle=(std::uint32_t(target[i].angles[k])-std::uint32_t(current[i].angles[k]))&0x1ffffff;
+        const auto signed_angle=angle<0x1000000?std::int32_t(angle):std::int32_t(angle)-0x2000000;
+        result[i].angles[k]=signed_angle/ticks;
+        const auto scale=std::uint32_t(target[i].scale[k])-std::uint32_t(current[i].scale[k]);
+        const auto signed_scale=scale<=2147483647?std::int32_t(scale):std::int32_t(std::int64_t(scale)-4294967296LL);
+        result[i].scale[k]=signed_scale/ticks;
+    }
+    return result;
+}
+std::vector<CharacterBonePose> advance_character_pose(const std::vector<CharacterBonePose>& current,
+    const std::vector<CharacterBonePose>& delta) {
+    require(current.size()==delta.size(),"character pose counts differ");
+    std::vector<CharacterBonePose> result(current.size());
+    for(std::size_t i=0;i<current.size();++i)for(std::size_t k=0;k<3;++k) {
+        result[i].angles[k]=std::int32_t((std::uint32_t(current[i].angles[k])+std::uint32_t(delta[i].angles[k]))&0x1ffffff);
+        const auto scale=std::uint32_t(current[i].scale[k])+std::uint32_t(delta[i].scale[k]);
+        result[i].scale[k]=scale<=2147483647?std::int32_t(scale):std::int32_t(std::int64_t(scale)-4294967296LL);
+    }
+    return result;
+}
+
 }

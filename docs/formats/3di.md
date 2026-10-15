@@ -91,4 +91,18 @@ The rebuilt pose read matches original function `0x43a0e0` for all 12,284 frames
 python tools/model_report.py /path/to/PLAYER01.CHR --check-character /path/to/Df.exe --probe /path/to/models_probe
 ```
 
-Frame timing, angle interpolation, root motion, bone matrices, and the remaining frame flags need further executable checks.
+Frame transitions, root motion, bone matrices, and the remaining frame flags need further executable checks.
+
+## Pose interpolation
+
+`character_pose_delta()` computes per-tick bone deltas. Angle differences use signed 25-bit wrap. Scale differences use signed 32-bit wrap. Division by the frame duration truncates towards zero. `advance_character_pose()` adds one tick, masks angles to 25 bits, and wraps scale to 32 bits. Both functions keep their input poses unchanged.
+
+The rebuilt core matches the original delta block `0x43a2c7–0x43a45a` and tick block `0x43a7ea–0x43a847` for all 12,284 frames: 184,260 bone deltas and 184,260 bone advances; zero mismatches. Each case starts at the prior stored frame pose. All checked frames use unit scale and have no head-look override. Frame durations range from 1 to 45 ticks.
+
+Delta block SHA-256: `a61afc8736f9fdda9629a29c113c762511ddb7336a6302b1f071f92c10369243`. Tick block SHA-256: `0a7dbd4f7590c1daa21eacb20ff991915ad378aa1527f18669c8153ef374c79d`. REA delta Evidence: `ev_c97764fdc10a0b312089af3879d895df1d72da0c6026fdacf768c4b6adcd9f04`.
+
+```sh
+python tools/model_report.py /path/to/PLAYER01.CHR --check-deltas /path/to/Df.exe --probe /path/to/models_probe
+```
+
+Frame transitions, head-look overrides, root motion, and bone matrices need separate checks.
