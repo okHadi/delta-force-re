@@ -7,6 +7,25 @@ target_sources(dfre_core PRIVATE src/movement.cpp)
 target_sources(dfre_core PRIVATE src/audio.cpp src/lobby.cpp)
 target_sources(dfre_core PRIVATE src/compression.cpp src/network_send.cpp)
 target_sources(dfre_core PRIVATE src/resource_plan.cpp)
+set(DFRE_RUNTIME_MODULES
+    actor_runtime
+    ai
+    ai_update
+    input_config
+    input_state
+    lobby_session
+    model_bindings
+    model_instances
+    model_visibility
+    motion_step
+    motion_queries
+    weapons
+)
+foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
+    target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
+    add_executable(${dfre_module}_probe tools/${dfre_module}_probe.cpp)
+    target_link_libraries(${dfre_module}_probe PRIVATE dfre_core)
+endforeach()
 target_include_directories(dfre_core PUBLIC include)
 target_compile_features(dfre_core PUBLIC cxx_std_17)
 set_target_properties(dfre_core PROPERTIES CXX_EXTENSIONS OFF)
@@ -117,6 +136,11 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
+        add_executable(native_${dfre_module} tests/native_${dfre_module}.cpp)
+        target_link_libraries(native_${dfre_module} PRIVATE dfre_core)
+        add_test(NAME native_${dfre_module} COMMAND native_${dfre_module})
+    endforeach()
     add_executable(native_palette_quantizer tests/native_palette_quantizer.cpp)
     target_link_libraries(native_palette_quantizer PRIVATE dfre_core)
     add_test(NAME native_palette_quantizer COMMAND native_palette_quantizer)

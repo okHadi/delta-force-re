@@ -47,10 +47,20 @@ void inject() {
     PostMessageW(handle, WM_KEYDOWN, VK_RETURN, 1);
     PostMessageW(handle, WM_KEYDOWN, VK_RETURN, 1L << 30);
     PostMessageW(handle, WM_KEYUP, VK_RETURN, 0);
+    PostMessageW(handle, WM_KEYDOWN, VK_OEM_PLUS, 1);
+    PostMessageW(handle, WM_KEYUP, VK_OEM_PLUS, 0);
+    PostMessageW(handle, WM_KEYDOWN, VK_NUMPAD8, 1);
+    PostMessageW(handle, WM_KEYUP, VK_NUMPAD8, 0);
+    PostMessageW(handle, WM_KEYDOWN, VK_UP, 1L << 24);
+    PostMessageW(handle, WM_KEYUP, VK_UP, 1L << 24);
     PostMessageW(handle, WM_CHAR, '!', 0);
     PostMessageW(handle, WM_MOUSEMOVE, 0, MAKELPARAM(12, 23));
     PostMessageW(handle, WM_LBUTTONDOWN, 0, MAKELPARAM(12, 23));
     PostMessageW(handle, WM_LBUTTONUP, 0, MAKELPARAM(12, 23));
+    PostMessageW(handle, WM_RBUTTONDOWN, 0, MAKELPARAM(12, 23));
+    PostMessageW(handle, WM_RBUTTONUP, 0, MAKELPARAM(12, 23));
+    PostMessageW(handle, WM_MBUTTONDOWN, 0, MAKELPARAM(12, 23));
+    PostMessageW(handle, WM_MBUTTONUP, 0, MAKELPARAM(12, 23));
     PostMessageW(handle, WM_CLOSE, 0, 0);
 #else
     SDL_Event event{};
@@ -62,10 +72,18 @@ void inject() {
     event.type = SDL_KEYUP;
     event.key.repeat = 0;
     check(SDL_PushEvent(&event) == 1, "Cannot queue key up");
+    for(const auto key:{SDLK_EQUALS,SDLK_KP_8,SDLK_UP}) {
+        event={};event.type=SDL_KEYDOWN;event.key.keysym.sym=key;event.key.keysym.mod=KMOD_NUM;
+        check(SDL_PushEvent(&event)==1,"Cannot queue game key down");
+        event.type=SDL_KEYUP;check(SDL_PushEvent(&event)==1,"Cannot queue game key up");
+    }
     event = {};
     event.type = SDL_MOUSEMOTION;
     event.motion.x = 12; event.motion.y = 23;
+    event.motion.xrel=5;event.motion.yrel=-7;
     check(SDL_PushEvent(&event) == 1, "Cannot queue pointer move");
+    event.motion.xrel=-2;event.motion.yrel=3;
+    check(SDL_PushEvent(&event)==1,"Cannot queue second pointer move");
     event = {};
     event.type = SDL_MOUSEBUTTONDOWN;
     event.button.button = SDL_BUTTON_LEFT;
@@ -73,6 +91,11 @@ void inject() {
     check(SDL_PushEvent(&event) == 1, "Cannot queue pointer down");
     event.type = SDL_MOUSEBUTTONUP;
     check(SDL_PushEvent(&event) == 1, "Cannot queue pointer up");
+    for(const auto button:{SDL_BUTTON_RIGHT,SDL_BUTTON_MIDDLE}) {
+        event.type=SDL_MOUSEBUTTONDOWN;event.button.button=button;
+        check(SDL_PushEvent(&event)==1,"Cannot queue game button down");
+        event.type=SDL_MOUSEBUTTONUP;check(SDL_PushEvent(&event)==1,"Cannot queue game button up");
+    }
     event.type = SDL_QUIT;
     check(SDL_PushEvent(&event) == 1, "Cannot queue close");
 #endif
@@ -117,6 +140,21 @@ int main() {
         check(std::count_if(events.begin(), events.end(), [](const auto& event) {
             return event.kind == dfre::InputKind::key_down && event.key == 13;
         }) == 1, "Repeated key down was not filtered");
+        for(const auto key:{187,104,38})for(const auto kind:{dfre::InputKind::key_down,dfre::InputKind::key_up})
+            check(std::any_of(events.begin(),events.end(),[&](const auto& event){return event.kind==kind && event.key==key;}),"Game key code differs");
+        check(std::any_of(events.begin(),events.end(),[](const auto& event){return event.kind==dfre::InputKind::key_down && event.key==38 && event.extended;}),"Extended arrow key flag differs");
+        for(unsigned button:{1,2,3})for(const auto kind:{dfre::InputKind::pointer_down,dfre::InputKind::pointer_up})
+            check(std::any_of(events.begin(),events.end(),[&](const auto& event){return event.kind==kind && event.button==button;}),"Game pointer button differs");
+#ifndef _WIN32
+        check(std::any_of(events.begin(),events.end(),[](const auto& event){return event.kind==dfre::InputKind::pointer_delta && event.x==3 && event.y==-4;}),"Relative pointer total differs");
+        SDL_Event focus{};focus.type=SDL_WINDOWEVENT;focus.window.event=SDL_WINDOWEVENT_FOCUS_LOST;
+        check(SDL_PushEvent(&focus)==1,"Cannot queue focus loss");
+#else
+        PostMessageW(FindWindowW(L"DeltaForceREWindow",L"DFRE platform test"),WM_KILLFOCUS,0,0);
+#endif
+        const auto lost=window->poll();
+        check(std::any_of(lost.begin(),lost.end(),[](const auto& event){return event.kind==dfre::InputKind::focus_lost;}),"Missing focus loss event");
+        window->capture_pointer(false);
         window->yield();
         window->ticks();
         window.reset();

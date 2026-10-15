@@ -152,6 +152,7 @@ private:
         if (screen_ == GameScreen::campaign) campaign_->update();
         if (screen_ == GameScreen::mission_setup) setup_->update();
         for (const auto& event : window_->poll()) {
+            if ((event.kind == InputKind::pointer_down || event.kind == InputKind::pointer_up) && event.button > 1) continue;
             if (event.kind == InputKind::pointer_move || event.kind == InputKind::pointer_down || event.kind == InputKind::pointer_up) {
                 if (screen_ == GameScreen::campaign) campaign_->pointer(event.x, event.y);
                 if (screen_ == GameScreen::mission_setup) setup_->pointer(event.x, event.y);
@@ -168,7 +169,7 @@ private:
             case InputKind::pointer_move: actions = menu_.pointer_move(event.x, event.y); break;
             case InputKind::pointer_down: actions = menu_.pointer_down(event.x, event.y); break;
             case InputKind::pointer_up: actions = menu_.pointer_up(event.x, event.y); break;
-            case InputKind::key_up: break;
+            case InputKind::key_up: case InputKind::pointer_delta: case InputKind::focus_lost: break;
             }
             for (const auto& item : actions) action(item);
             if (change_) { change_ = false; return 1; }

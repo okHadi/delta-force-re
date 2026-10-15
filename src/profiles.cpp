@@ -1,5 +1,6 @@
 #include "dfre/profiles.hpp"
 #include "dfre/menu.hpp"
+#include "dfre/input_config.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -55,14 +56,14 @@ void safe_save_folder(const std::filesystem::path& game,const std::filesystem::p
     if(a==source.end())throw AssetError("Profile saves must be outside the original game folder");
 }
 AssetBytes control_defaults(const AssetBytes& source) {
-    AssetBytes out(46*12,0);std::istringstream lines(std::string(source.begin(),source.end()));std::string line;
-    while(std::getline(lines,line)) {
-        const auto start=line.find_first_not_of(" \t\r");if(start==std::string::npos||line.compare(start,4,"KEY=")!=0)continue;
-        line=line.substr(start+4);const auto comment=line.find(';');if(comment!=std::string::npos)line.resize(comment);
-        std::replace(line.begin(),line.end(),',',' ');std::istringstream values(line);long long index,key,mouse,joy;
-        if(!(values>>index>>key>>mouse>>joy)||index<0||index>=46||key<0||mouse<0||joy<0||key>0xffffffffll||mouse>0xffffffffll||joy>0xffffffffll)
-            throw AssetError("Invalid DFDK.KEY binding");
-        put(out,index*12,std::uint32_t(key));put(out,index*12+4,std::uint32_t(mouse));put(out,index*12+8,std::uint32_t(joy));
+    ActionBindings bindings{};
+    load_action_bindings_text(bindings,std::string_view(
+        reinterpret_cast<const char*>(source.data()),source.size()));
+    AssetBytes out(action_count*12,0);
+    for(std::size_t i=0;i<bindings.size();++i){
+        put(out,i*12,bindings[i].key);
+        put(out,i*12+4,bindings[i].mouse);
+        put(out,i*12+8,bindings[i].joystick);
     }
     return out;
 }
