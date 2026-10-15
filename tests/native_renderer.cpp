@@ -66,5 +66,28 @@ int main() {
     check(model_camera.projection.focal_length==320 && model_camera.projection.centre==std::array<std::int32_t,2>{320,240} && model_camera.projection.near_depth==4096,"camera projection changed");
     check(model_camera.planes.size()==5 && model_camera.planes[0].offset==4096 && model_camera.planes[3].normal[2]>0 && model_camera.planes[4].normal[2]<0,"camera plane order changed");
     try{dfre::make_model_camera({},{},{0,0,639,479},0);check(false,"zero camera field of view accepted");}catch(const std::invalid_argument&){}
+    dfre::ModelFace assembled_face{};assembled_face.vertices={0,1,2};assembled_face.normals={0,1,2};
+    std::vector<dfre::ModelProjectedVertex> projected(3);
+    for(auto& point:projected){point.camera[0]=65536;point.projected=true;}
+    projected[1].screen={0,2*65536};projected[2].screen={2*65536,0};
+    std::vector<dfre::ModelNormal> face_normals{{{16384,0,0},0},{{-16384,0,0},0},{{0,0,0},0}};
+    dfre::ModelLighting face_light{{4194304,0,0},{0,0,0},0,65536,0};
+    std::vector<dfre::ModelMaterial> face_materials(3);face_materials[0].flags=0x41;
+    auto prepared=dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light);
+    check(prepared && prepared->flags==0x14 && prepared->vertices[0].depth==0x3ffff0,"original material depth bias changed");
+    face_materials[0].flags=0x801;
+    check(!dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light),"hidden material produced a triangle");
+    face_materials[0].flags=1;assembled_face.flags=1;
+    prepared=dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light);
+    check(prepared && prepared->flags==0x18 && prepared->vertices[0].shade!=prepared->vertices[1].shade,"smooth face lost its separate normal shades");
+    std::swap(projected[1],projected[2]);
+    check(!dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light),"one-sided back face reached the raster path");
+    face_materials[0].flags=0x4003;face_materials[0].animation_parameter=127;face_materials[1].flags=1;
+    prepared=dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light);
+    check(prepared && prepared->material==1 && prepared->vertices[1].x==projected[2].screen[0],"reverse material or vertex order changed");
+    face_materials[0].animation_parameter=0;std::array<std::uint32_t,11> counters{};counters[0]=3;
+    try{dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light,counters);check(false,"animated material outside table accepted");}catch(const std::invalid_argument&){}
+    face_materials[0].flags=3;assembled_face.normals[0]=3;
+    try{dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light);check(false,"normal outside table accepted");}catch(const std::invalid_argument&){}
     std::cout<<"raster classification tests passed\n";
 }

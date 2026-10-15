@@ -141,6 +141,68 @@ std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std:
     return writes;
 }
 
+std::optional<ModelRasterTriangle> prepare_model_face(const ModelFace& face,
+    const std::vector<ModelProjectedVertex>& positions,const std::vector<ModelNormal>& normals,
+    std::size_t normal_start,const std::vector<ModelMaterial>& materials,const ModelLighting& lighting,
+    const std::array<std::uint32_t,11>& animation_counters) {
+    auto index=std::size_t(face.material);
+    if(index>=materials.size())throw std::invalid_argument("face material outside table");
+    const auto& initial=materials[index];
+    if((initial.flags&0x4000) && initial.animation_parameter<11) {
+        const auto delta=animation_counters[initial.animation_parameter];
+        if(delta>=materials.size()-index)throw std::invalid_argument("animated face material outside table");
+        index+=delta;
+    }
+    if(materials[index].flags&0x800)return {};
+    ModelRasterTriangle result;
+    for(std::size_t k=0;k<3;++k) {
+        if(face.vertices[k]>=positions.size())throw std::invalid_argument("face vertex outside table");
+        const auto& point=positions[face.vertices[k]];
+        if(!point.projected)throw std::invalid_argument("face vertex is not projected");
+        result.vertices[k]={point.screen[0],point.screen[1],signed_value(std::uint32_t(point.camera[0])<<6),face.u[k],face.v[k],0};
+    }
+    const auto& t=result.vertices;
+    const auto determinant=sub(product(shift(sub(t[1].x,t[0].x),4),shift(sub(t[2].y,t[0].y),4)),
+        product(shift(sub(t[1].y,t[0].y),4),shift(sub(t[2].x,t[0].x),4)));
+    const bool reverse=determinant>0;
+    if(reverse) {
+        const auto& material=materials[index];
+        if(!(material.flags&2))return {};
+        if((material.flags&0x4000) && material.animation_parameter==127) {
+            if(++index>=materials.size())throw std::invalid_argument("reverse face material outside table");
+        }
+    }
+    const auto& material=materials[index];result.material=index;
+    if(material.flags&0x40) {
+        const auto depth=sub(std::min({t[0].depth,t[1].depth,t[2].depth}),16);
+        for(auto& vertex:result.vertices)vertex.depth=depth;
+    }
+    if(material.flags&2)result.flags|=0x40;
+    if(material.flags&1)result.flags|=0x10;
+    if((material.flags&0x200) && !(material.flags&0x8000))result.flags|=0x20;
+    if(material.flags&8)result.flags|=0x100;
+    if(material.flags&0x8000)result.flags|=0x200;
+    if(material.flags&0x80)result.flags|=0x400;
+    auto shade=[&](std::size_t normal) {
+        if(normal>=normals.size())throw std::invalid_argument("face normal outside table");
+        return shade_model_normal(normals[normal],material,lighting,reverse);
+    };
+    if(face.flags&1) {
+        for(std::size_t k=0;k<3;++k)result.vertices[k].shade=shade(face.normals[k]);
+        const auto a=std::int64_t(t[0].shade)-t[1].shade,b=std::int64_t(t[1].shade)-t[2].shade;
+        if(std::abs(a)<65536 && std::abs(b)<65536) {
+            result.vertices[1].shade=result.vertices[2].shade=t[0].shade;result.flags|=4;
+        } else result.flags|=8;
+    } else {
+        if(normal_start>normals.size() || face.face_normal>=normals.size()-normal_start)throw std::invalid_argument("flat face normal outside table");
+        const auto value=shade(normal_start+face.face_normal);
+        for(auto& vertex:result.vertices)vertex.shade=value;
+        result.flags|=4;
+    }
+    if(reverse)std::swap(result.vertices[1],result.vertices[2]);
+    return result;
+}
+
 ModelLighting localize_model_lighting(const ModelMatrix& matrix,const ModelLighting& camera,std::int32_t scale) {
     const auto a=product(matrix[0],product(matrix[5],matrix[10],22),22);
     const auto b=product(matrix[1],product(matrix[6],matrix[8],22),22);

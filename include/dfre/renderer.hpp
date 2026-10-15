@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <optional>
 
 namespace dfre {
 struct RasterVertex {
@@ -38,10 +39,20 @@ enum class RasterTextureMode { uniform=0x14, varying_shade=0x18, cutout=0x34 };
 std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
     std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,
     RasterTextureMode mode=RasterTextureMode::uniform);
+struct ModelRasterTriangle {
+    std::array<RasterVertex,3> vertices;
+    std::uint32_t flags{};
+    std::size_t material{};
+};
 struct ModelLighting {
     std::array<std::int32_t,3> light_direction{},view_direction{}; // Mesh-local 22-bit fixed directions.
     std::int32_t ambient{},diffuse{},specular{}; // 16.16 strengths.
 };
+// Original 0x46b1d0 face assembly. UV coordinates remain normalized 16.16.
+std::optional<ModelRasterTriangle> prepare_model_face(const ModelFace& face,
+    const std::vector<ModelProjectedVertex>& positions,const std::vector<ModelNormal>& normals,
+    std::size_t normal_start,const std::vector<ModelMaterial>& materials,const ModelLighting& lighting,
+    const std::array<std::uint32_t,11>& animation_counters={});
 // Original 0x46b140 context conversion for one camera-space mesh matrix.
 ModelLighting localize_model_lighting(const ModelMatrix& camera_matrix,const ModelLighting& camera_lighting,
     std::int32_t scale=65536);

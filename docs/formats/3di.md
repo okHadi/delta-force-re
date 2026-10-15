@@ -220,3 +220,11 @@ The replay matches 1,000 non-singular generated matrices and contexts, including
 The replay matches 1,000 cases with generated positions, full-turn angles, viewport sizes, and viewport offsets. It covers every field of view from 1 through 179. Focal length, centre, near depth, all 12 matrix components, and all 20 plane fields match. The check uses native long-double math and original x87 control word `0x037f`. Windows camera math needs the same probe replay before cross-platform equality is claimed.
 
 The original code-region SHA-256 is `2b60892158d2a8570175a9b6535ed1db16d8603ca191fbab50d1a09c9138f8b3`. Run the renderer replay command above. The renderer probe links both `src/models.cpp` and `src/renderer.cpp`.
+
+## Face assembly
+
+`prepare_model_face()` implements the face stage of `0x46B1D0`. Supply projected positions, LOD normal indices, the mesh normal start, material records, local lighting, and 11 animation counters. The result keeps normalized UV values and the selected material index. An empty result marks a hidden material or a rejected back face.
+
+Material flag `0x800` hides the face. Flag `0x40` sets all three depths to the signed minimum depth minus 16. Two-sided faces reverse vertex order on their back side. Animation parameter 127 selects the next material on the back side. Smooth shades within 65536 of their neighbours use one shade. Other smooth faces retain three shades.
+
+Run `python tools/check_model_faces_original.py /path/to/Df.exe --probe /path/to/renderer_probe`. The replay checks 4096 cases against original face assembly and normal lighting: 1817 accepted faces, 2279 hidden or rejected faces, 666 reverse faces, 665 varying-shade faces, 725 depth-biased faces, and 479 changed material frames. All output flags, material indices, positions, depths, UV values, and shades match. Transform, projection, and local light setup use fixed inputs in this check; each has a separate original-code check.

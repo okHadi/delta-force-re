@@ -2,7 +2,43 @@
 #include <iostream>
 #include <string>
 int main(int argc,char** argv) {
-    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera"))return 2;
+    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera" && std::string(argv[1])!="faces"))return 2;
+    if(argc==2 && std::string(argv[1])=="faces") {
+        std::uint32_t flags,flat_normal,material_index,normal_start;
+        while(std::cin>>flags>>flat_normal>>material_index>>normal_start) {
+            dfre::ModelFace face{};face.flags=std::uint16_t(flags);face.face_normal=std::uint16_t(flat_normal);face.material=material_index;face.vertices={0,1,2};
+            for(auto& value:face.normals)if(!(std::cin>>value))return 2;
+            std::array<std::uint32_t,11> counters{};for(auto& value:counters)if(!(std::cin>>value))return 2;
+            std::uint32_t count;if(!(std::cin>>count) || count>1024)return 2;
+            std::vector<dfre::ModelMaterial> materials(count);
+            for(auto& material:materials) {
+                std::uint32_t parameter,power;std::int32_t specular,constant;
+                if(!(std::cin>>material.flags>>parameter>>specular>>constant>>power) || parameter>255 || power>255)return 2;
+                material.animation_parameter=std::uint8_t(parameter);material.raw[64]=std::uint8_t(power);
+                for(std::size_t i=0;i<4;++i){material.raw[56+i]=std::uint8_t(std::uint32_t(specular)>>(i*8));material.raw[60+i]=std::uint8_t(std::uint32_t(constant)>>(i*8));}
+            }
+            if(!(std::cin>>count) || count>32768)return 2;
+            std::vector<dfre::ModelNormal> normals(count);
+            for(auto& normal:normals)for(auto& value:normal.direction)if(!(std::cin>>value))return 2;
+            dfre::ModelLighting lighting;
+            for(auto& value:lighting.light_direction)if(!(std::cin>>value))return 2;
+            for(auto& value:lighting.view_direction)if(!(std::cin>>value))return 2;
+            if(!(std::cin>>lighting.ambient>>lighting.diffuse>>lighting.specular))return 2;
+            std::vector<dfre::ModelProjectedVertex> positions(3);
+            for(std::size_t k=0;k<3;++k) {
+                auto& point=positions[k];point.projected=true;
+                if(!(std::cin>>point.screen[0]>>point.screen[1]>>point.camera[0]>>face.u[k]>>face.v[k]))return 2;
+            }
+            const auto result=dfre::prepare_model_face(face,positions,normals,normal_start,materials,lighting,counters);
+            if(!result)std::cout<<"0\n";
+            else {
+                std::cout<<"1 "<<result->flags<<' '<<result->material;
+                for(const auto& v:result->vertices)std::cout<<' '<<v.x<<' '<<v.y<<' '<<v.depth<<' '<<v.u<<' '<<v.v<<' '<<v.shade;
+                std::cout<<'\n';
+            }
+        }
+        return std::cin.eof()?0:2;
+    }
     if(argc==2 && std::string(argv[1])=="camera") {
         std::array<std::int32_t,3> position;std::array<std::uint32_t,3> angles;dfre::RasterClip clip;std::uint32_t fov;
         while(std::cin>>clip.left>>clip.top>>clip.right>>clip.bottom>>fov>>position[0]>>position[1]>>position[2]>>angles[0]>>angles[1]>>angles[2]) {
