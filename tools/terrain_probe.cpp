@@ -117,7 +117,7 @@ void raster32_fixture(std::uint32_t seed, bool detail = false) {
     }
     columns[1].position[2] = 0x11000000; columns[1].step[2] = 0;
     dfre::TerrainRuntime runtime{synthetic(), {}, {}, {}, {}, {}, {}, {}, 0, 32};
-    dfre::TerrainScene32 scene{std::move(runtime), {}, {}, std::vector<dfre::AssetBytes>(10), std::vector<dfre::AssetBytes>(10)};
+    dfre::TerrainScene32 scene{std::move(runtime), {}, {}, std::vector<dfre::AssetBytes>(10), std::vector<dfre::AssetBytes>(10), {}, 1236, 65536};
     scene.height_mips[pass.lod] = heights; scene.color_mips[pass.lod] = colors;
     scene.palettes.coarse[pass.lod].resize(512);
     for (auto& value : scene.palettes.coarse[pass.lod]) value = next();
@@ -291,6 +291,28 @@ void color_mips32_fixture(std::uint32_t seed) {
     std::cout << "]\n";
 }
 
+void clouds32_fixture(std::uint32_t seed) {
+    dfre::VoxelCamera camera;
+    camera.width = camera.row_stride = 64; camera.height = 48; camera.right = 63; camera.bottom = 47; camera.focal_distance = 32;
+    camera.yaw = seed * 0x01234567u; camera.pitch = seed * 0x04000000u;
+    camera.position = {static_cast<std::int32_t>(seed * 123456u), static_cast<std::int32_t>(0u - seed * 34567u), 10 * 65536};
+    dfre::TerrainRuntime runtime{synthetic(), {}, {}, {}, {}, {}, {}, {}, 0, 32};
+    dfre::TerrainScene32 scene{std::move(runtime), {}, {}, {}, {}, {}, 1236, 65536};
+    scene.palettes.sky.resize(32768);
+    for (unsigned i = 0; i < 32768; ++i) scene.palettes.sky[i] = i * 0x01020304u;
+    scene.sky_mips.emplace_back(512 * 512);
+    for (unsigned y = 0; y < 512; ++y) for (unsigned x = 0; x < 512; ++x) scene.sky_mips[0][y * 512 + x] = static_cast<std::uint8_t>((x * 3 + y * 5) & 63);
+    for (unsigned width = 512; width > 2; width /= 2) scene.sky_mips.push_back(dfre::terrain_sky_water_mip(scene.sky_mips.back(), width));
+    std::vector<std::uint32_t> pixels(64 * 48, 0xaaaaaaaa);
+    const auto horizon = dfre::build_terrain_horizon32(camera);
+    dfre::render_terrain_sky32(scene, camera, horizon, seed * 17, pixels);
+    dfre::AssetBytes pixel_bytes, ray_bytes;
+    for (auto word : pixels) for (unsigned shift = 0; shift < 32; shift += 8) pixel_bytes.push_back(static_cast<std::uint8_t>(word >> shift));
+    for (const auto& ray : dfre::build_terrain_sky_rays(camera)) for (auto word : ray)
+        for (unsigned shift = 0; shift < 32; shift += 8) ray_bytes.push_back(static_cast<std::uint8_t>(std::uint32_t(word) >> shift));
+    std::cout << "{\"pixels\":\"" << fingerprint(pixel_bytes) << "\",\"rays\":\"" << fingerprint(ray_bytes) << "\"}\n";
+}
+
 void horizon32_fixture(std::uint32_t seed) {
     dfre::VoxelCamera camera;
     camera.pitch = seed * 0x04000000u;
@@ -346,7 +368,7 @@ int main(int argc, char** argv) {
             samples(synthetic());
         } else if (argc == 2 && std::string_view(argv[1]) == "--bounds-fixture") {
             bounds_fixture();
-        } else if (argc == 3 && (std::string_view(argv[1]) == "--raster-fixture" || std::string_view(argv[1]) == "--camera-fixture" || std::string_view(argv[1]) == "--projection-fixture" || std::string_view(argv[1]) == "--detail-fixture" || std::string_view(argv[1]) == "--palette-fixture" || std::string_view(argv[1]) == "--shades32-fixture" || std::string_view(argv[1]) == "--palettes32-fixture" || std::string_view(argv[1]) == "--detail32-fixture" || std::string_view(argv[1]) == "--horizon32-fixture" || std::string_view(argv[1]) == "--color-mips32-fixture" || std::string_view(argv[1]) == "--raster32-fixture" || std::string_view(argv[1]) == "--raster32-detail-fixture")) {
+        } else if (argc == 3 && (std::string_view(argv[1]) == "--raster-fixture" || std::string_view(argv[1]) == "--camera-fixture" || std::string_view(argv[1]) == "--projection-fixture" || std::string_view(argv[1]) == "--detail-fixture" || std::string_view(argv[1]) == "--palette-fixture" || std::string_view(argv[1]) == "--shades32-fixture" || std::string_view(argv[1]) == "--palettes32-fixture" || std::string_view(argv[1]) == "--detail32-fixture" || std::string_view(argv[1]) == "--horizon32-fixture" || std::string_view(argv[1]) == "--clouds32-fixture" || std::string_view(argv[1]) == "--color-mips32-fixture" || std::string_view(argv[1]) == "--raster32-fixture" || std::string_view(argv[1]) == "--raster32-detail-fixture")) {
             std::uint32_t seed = 0;
             const std::string_view input(argv[2]);
             const auto parsed = std::from_chars(input.data(), input.data() + input.size(), seed);
@@ -361,6 +383,7 @@ int main(int argc, char** argv) {
             else if (std::string_view(argv[1]) == "--raster32-detail-fixture") raster32_fixture(seed, true);
             else if (std::string_view(argv[1]) == "--raster32-fixture") raster32_fixture(seed);
             else if (std::string_view(argv[1]) == "--color-mips32-fixture") color_mips32_fixture(seed);
+            else if (std::string_view(argv[1]) == "--clouds32-fixture") clouds32_fixture(seed);
             else if (std::string_view(argv[1]) == "--horizon32-fixture") horizon32_fixture(seed);
             else detail32_fixture(seed);
         } else if ((argc == 4 || argc == 5) && std::string_view(argv[1]) == "--frame32") {

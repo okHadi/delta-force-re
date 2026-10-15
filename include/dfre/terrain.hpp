@@ -184,6 +184,9 @@ struct TerrainScene32 {
     std::array<std::vector<std::uint32_t>, 5> detail_mips;
     std::vector<AssetBytes> height_mips;
     std::vector<AssetBytes> color_mips;
+    std::vector<AssetBytes> sky_mips;
+    std::int32_t sky_height = 1236;
+    std::int32_t horizon_scale = 65536;
 };
 TerrainScene32 prepare_terrain_scene32(TerrainRuntime terrain, const AssetBytes& gamma,
     const TerrainColorControl& control = {});
@@ -196,8 +199,16 @@ struct TerrainFrame32 {
 void render_voxel_pass32(const TerrainScene32& scene, bool detail, const VoxelPass8& pass,
     const std::vector<std::uint32_t>& depth_table, std::vector<VoxelColumn>& columns,
     std::vector<std::uint32_t>& pixels, std::vector<std::uint16_t>& depths);
-// Draws original flat sky and terrain. Water and world objects use later passes.
-TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCamera& camera);
+std::vector<std::array<std::int32_t, 3>> build_terrain_sky_rays(const VoxelCamera& camera);
+void render_terrain_sky32(const TerrainScene32& scene, const VoxelCamera& camera,
+    const TerrainHorizon32& horizon, std::uint32_t time, std::vector<std::uint32_t>& pixels);
+struct TerrainFrameOptions32 {
+    bool clouds = true;
+    std::uint32_t time = 0;
+};
+// Draws original sky and terrain. Water and world objects use later passes.
+TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCamera& camera,
+    const TerrainFrameOptions32& options = {});
 
 // Original 0x459635 byte-color kernel, normal two-pixel-column mode.
 // Coordinates use the original wrapping 10.22 representation. The depth table has one guard entry.

@@ -359,6 +359,23 @@ int main() {
         require(frame32.depths[47 * 64] != 0xffff && frame32.depths[0] == 0xffff,
             "Terrain frame must draw ground below the sky");
         rejects([&] { auto bad = frame_camera; bad.right = 64; dfre::render_terrain_frame32(scene32, bad); });
+        auto sky_scene = scene32;
+        for (unsigned level = 0; level < 9; ++level) sky_scene.sky_mips.emplace_back((512 >> level) * (512 >> level), 0);
+        sky_scene.palettes.sky.assign(32768, 0x12345678);
+        std::vector<std::uint32_t> sky_pixels(64 * 48, 0xaaaaaaaa);
+        const auto sky_horizon = dfre::build_terrain_horizon32(frame_camera);
+        dfre::render_terrain_sky32(sky_scene, frame_camera, sky_horizon, 0, sky_pixels);
+        require(sky_pixels[0] == 0x12345678 && sky_pixels[24 * 64] == 0x12345678 && sky_pixels[25 * 64] == 0xaaaaaaaa,
+            "Sky plane sampling or horizon fallback boundary failed");
+        const auto sky_rays = dfre::build_terrain_sky_rays(frame_camera);
+        require(sky_rays.size() == 48 && sky_rays[0][0] == sky_rays[0][1] && sky_rays[24][2] > 0 && sky_rays[25][2] < 0,
+            "Sky row ray direction failed");
+        rejects([&] { auto bad = sky_scene; bad.sky_mips[0][0] = 64;
+            dfre::render_terrain_sky32(bad, frame_camera, sky_horizon, 0, sky_pixels); });
+        rejects([&] { auto bad = sky_horizon; bad.gradient.pop_back();
+            dfre::render_terrain_sky32(sky_scene, frame_camera, bad, 0, sky_pixels); });
+        rejects([&] { auto bad = sky_scene; bad.sky_mips.pop_back();
+            dfre::render_terrain_sky32(bad, frame_camera, sky_horizon, 0, sky_pixels); });
         const auto horizon = dfre::build_terrain_horizon32(dfre::VoxelCamera{});
         require(horizon.row == 245 && horizon.gradient[245] == 0 && horizon.gradient[244] == 2 &&
                 horizon.gradient[0] == 255 && horizon.gradient[246] == 0,

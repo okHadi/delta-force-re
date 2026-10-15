@@ -48,10 +48,13 @@ Original x86 checks match 2192 generated and 3720 mission sample points, 30 rast
 All 62 missions load through the native terrain API. Local proof is in `.local/reports/terrain-*-differential.json` and `native-terrain-runtime-corpus.json`.
 
 `prepare_terrain_scene32` owns the source terrain, palettes, detail levels, and coarse maps.
-`render_terrain_frame32` draws the original flat-sky branch and the first 11 ground LODs into RGB words and 16-bit depths.
+`render_terrain_frame32` draws the original sky and first 11 ground LODs into RGB words and 16-bit depths.
+`render_terrain_sky32` implements `0x48C650` / `0x459532`: row rays, cloud-plane intersection, nine map levels, wrapped sampling, and two-pixel color pairs.
+Sky height and horizon scale use TRN values. Frame options supply the time value for cloud movement.
+Cloud checks match 64 camera cases, 9216 row-ray values, and 786432 pixel bytes against original instructions.
 The scalar ground loop uses the selected `0x458BFE` / `0x458F14` sample, row rollback, and depth rules.
 Ground tests compare 30 coarse passes and 30 detail passes with original instructions. Detail draw tests use uniform cache samples; cache builders have separate full-data checks.
-All 62 stock missions produce 640 × 480 terrain frames. Cloud, water, and world-object pixels use separate passes.
+All 62 stock missions produce 640 × 480 terrain frames. Water and world-object pixels use separate passes.
 `remap_palette8` maps source RGB through gamma and matches target gamma RGB with original `0x480A30` rules; palette entry zero stays zero.
 
 Export one local terrain frame with `terrain_probe --frame32 GAME_FOLDER BMS_MEMBER .local/reports/NEW.ppm`.
@@ -74,6 +77,7 @@ python tools/check_terrain_palettes32_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_detail32_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_colormips32_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_sky32_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_clouds32_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_raster32_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_raster32_original.py GAME_FOLDER TERRAIN_PROBE --detail
 ```

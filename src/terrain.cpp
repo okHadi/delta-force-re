@@ -10,6 +10,8 @@
 #include <limits>
 #include <utility>
 #include <unordered_map>
+#include <sstream>
+#include <locale>
 
 namespace dfre {
 namespace {
@@ -733,7 +735,29 @@ TerrainScene32 prepare_terrain_scene32(TerrainRuntime terrain, const AssetBytes&
     auto color = build_terrain_color_mips32(terrain.color.pixels, terrain.color.palette, gamma);
     std::vector<AssetBytes> height{terrain.geometry.height_bytes()};
     for (unsigned width = 1024; width > 2; width /= 2) height.push_back(terrain_height_mip(height.back(), width));
-    return {std::move(terrain), std::move(palettes), std::move(detail), std::move(height), std::move(color)};
+    std::vector<AssetBytes> sky;
+    if (terrain.sky) {
+        if (terrain.sky->width != 512 || terrain.sky->height != 512 || terrain.sky->pixels.size() != 512 * 512 ||
+            std::any_of(terrain.sky->pixels.begin(), terrain.sky->pixels.end(), [](auto value) { return value > 63; }))
+            throw AssetError("Terrain sky requires a 512-square 6-bit map");
+        sky.push_back(terrain.sky->pixels);
+        for (unsigned width = 512; width > 2; width /= 2) sky.push_back(terrain_sky_water_mip(sky.back(), width));
+    }
+    int sky_height = 1236, horizon_scale = 65536;
+    for (const auto& item : terrain.config.fields) {
+        if (same(item.name, "sky_height")) sky_height = integer(terrain.config, "sky_height");
+        if (same(item.name, "horizon")) {
+            const auto value = field(terrain.config, "horizon");
+            std::istringstream stream(value); stream.imbue(std::locale::classic());
+            double number = 0; stream >> number;
+            if (!stream || stream.peek() != std::char_traits<char>::eof() || !std::isfinite(number) || number <= 0 || number > 256)
+                throw AssetError("Invalid terrain horizon scale");
+            horizon_scale = static_cast<int>(number * 65536);
+        }
+    }
+    if (sky_height < -32768 || sky_height > 32767 || horizon_scale <= 0) throw AssetError("Terrain sky parameters exceed fixed-point bounds");
+    return {std::move(terrain), std::move(palettes), std::move(detail), std::move(height), std::move(color),
+        std::move(sky), sky_height, horizon_scale};
 }
 
 void render_voxel_pass32(const TerrainScene32& scene, bool detail, const VoxelPass8& pass,
@@ -816,13 +840,83 @@ void render_voxel_pass32(const TerrainScene32& scene, bool detail, const VoxelPa
     }
 }
 
-TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCamera& camera) {
+std::vector<std::array<std::int32_t, 3>> build_terrain_sky_rays(const VoxelCamera& camera) {
+    initialize_voxel_columns(camera);
+    const long double forward = camera.focal_distance;
+    const long double horizontal = (camera.right - camera.left + 1) >> 1;
+    const auto center_y = camera.top + ((camera.bottom - camera.top + 1) >> 1);
+    std::vector<std::array<std::int32_t, 3>> result;
+    result.reserve(camera.height);
+    for (unsigned row = 0; row < camera.height; ++row) {
+        const long double vertical = static_cast<long double>(center_y) - row + 0.5L;
+        const auto inverse = 1.0L / std::sqrt(forward * forward + horizontal * horizontal + vertical * vertical);
+        result.push_back({static_cast<std::int32_t>(forward * inverse * 4194304.0L),
+            static_cast<std::int32_t>(horizontal * inverse * 4194304.0L),
+            static_cast<std::int32_t>(vertical * inverse * 4194304.0L)});
+    }
+    return result;
+}
+
+void render_terrain_sky32(const TerrainScene32& scene, const VoxelCamera& camera,
+    const TerrainHorizon32& horizon, std::uint32_t time, std::vector<std::uint32_t>& pixels) {
+    const auto rays = build_terrain_sky_rays(camera);
+    if (horizon.gradient.size() != camera.height || pixels.size() != std::size_t(camera.row_stride) * camera.height ||
+        scene.sky_mips.size() != 9 || scene.palettes.sky.size() != 32768 || scene.sky_height < -32768 || scene.sky_height > 32767)
+        throw AssetError("Invalid terrain sky frame inputs");
+    for (unsigned level = 0; level < 9; ++level) {
+        const unsigned width = 512 >> level;
+        if (scene.sky_mips[level].size() != width * width ||
+            std::any_of(scene.sky_mips[level].begin(), scene.sky_mips[level].end(), [](auto value) { return value > 63; }))
+            throw AssetError("Invalid terrain sky mip data");
+    }
+    auto shift = [](std::int64_t value, unsigned bits) {
+        const auto scale = std::int64_t(1) << bits;
+        return static_cast<std::int32_t>(value >= 0 ? value / scale : -((-value + scale - 1) / scale));
+    };
+    auto mul22 = [&](std::int32_t a, std::int32_t b) { return shift(std::int64_t(a) * b, 22); };
+    auto add = [](std::int32_t a, std::int32_t b) { return static_cast<std::int32_t>(std::uint32_t(a) + std::uint32_t(b)); };
+    auto sub = [](std::int32_t a, std::int32_t b) { return static_cast<std::int32_t>(std::uint32_t(a) - std::uint32_t(b)); };
+    const auto yaw = fixed_sine_cosine(camera.yaw), pitch = fixed_sine_cosine(camera.pitch);
+    const auto yc_pc = mul22(yaw[1], pitch[1]), yc_ps = mul22(yaw[1], pitch[0]);
+    const auto ys_pc = mul22(yaw[0], pitch[1]), ys_ps = mul22(yaw[0], pitch[0]);
+    for (int row = camera.top; row <= std::min(camera.bottom, horizon.row); ++row) {
+        const auto ray = rays[static_cast<std::size_t>(row)];
+        const auto dx = sub(sub(mul22(yc_pc, ray[0]), mul22(yaw[0], ray[1])), mul22(yc_ps, ray[2]));
+        const auto dy = sub(add(mul22(ys_pc, ray[0]), mul22(yaw[1], ray[1])), mul22(ys_ps, ray[2]));
+        const auto dz = add(mul22(pitch[0], ray[0]), mul22(pitch[1], ray[2]));
+        if (dz <= 256) continue;
+        const auto reciprocal = static_cast<std::int32_t>((std::int64_t(1) << 32) / (dz >> 6));
+        const auto plane_delta = sub(static_cast<std::int32_t>(std::uint32_t(scene.sky_height) << 16), camera.position[2]);
+        const auto factor = floor_shift16(std::int64_t(reciprocal) * plane_delta);
+        const auto step = shift(mul22(factor, ray[0]) / camera.focal_distance, 3);
+        const auto du = mul22(step, yaw[0]), dv = sub(0, mul22(step, yaw[1]));
+        const auto wind = static_cast<std::int32_t>(time << 13);
+        const auto u = shift(add(add(mul22(dx, factor), camera.position[0]), wind), 3);
+        const auto v = shift(add(add(mul22(dy, factor), camera.position[1]), wind), 3);
+        unsigned level = 0;
+        for (auto value = step; value > 65536; value >>= 1) ++level;
+        level = std::min(level, 8u);
+        std::uint32_t at_u = static_cast<std::uint32_t>(shift(u, level)), at_v = static_cast<std::uint32_t>(shift(v, level));
+        const auto delta_u = std::uint32_t(shift(du, level)) * 2, delta_v = std::uint32_t(shift(dv, level)) * 2;
+        const unsigned width = 512 >> level, mask = width - 1;
+        const auto palette = unsigned(horizon.gradient[static_cast<std::size_t>(row)]) * 128;
+        for (int x = camera.left; x <= camera.right; x += 2) {
+            const auto sample = ((at_v >> 16) & mask) * width + ((at_u >> 16) & mask);
+            const auto color = palette + unsigned(scene.sky_mips[level][sample]) * 2;
+            const auto at = std::size_t(row) * camera.row_stride + x;
+            pixels[at] = scene.palettes.sky[color]; pixels[at + 1] = scene.palettes.sky[color + 1];
+            at_u += delta_u; at_v += delta_v;
+        }
+    }
+}
+
+TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCamera& camera, const TerrainFrameOptions32& options) {
     auto rays = initialize_voxel_columns(camera);
     const auto projection = build_voxel_projection(camera.focal_distance, camera.field_of_view < 90 ? 3.2f : 2.2f,
         camera.field_of_view < 90 ? 3.2f : 2.2f);
     TerrainFrame32 result{std::vector<std::uint32_t>(std::size_t(camera.row_stride) * camera.height),
         std::vector<std::uint16_t>(std::size_t(camera.row_stride) * camera.height, 0xffff), std::move(rays.columns)};
-    const auto horizon = build_terrain_horizon32(camera);
+    const auto horizon = build_terrain_horizon32(camera, scene.horizon_scale);
     const auto& sky = scene.terrain.sky_palette.palette;
     if (sky.size() != 768) throw AssetError("Terrain sky palette is incomplete");
     const auto flat_sky = std::uint32_t((unsigned(sky[0]) + 2 * sky[1] + sky[2]) / 4) << 24 |
@@ -830,6 +924,7 @@ TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCa
     for (int y = camera.top; y <= std::min(camera.bottom, horizon.row); ++y) {
         for (int x = camera.left; x < camera.right; ++x) result.pixels[std::size_t(y) * camera.row_stride + x] = flat_sky;
     }
+    if (options.clouds && !scene.sky_mips.empty()) render_terrain_sky32(scene, camera, horizon, options.time, result.pixels);
     for (unsigned i = 0; i < 11; ++i) {
         const auto& level = projection.levels[i];
         VoxelPass8 pass;
