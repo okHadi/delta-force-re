@@ -262,7 +262,7 @@ struct MenuRuntime::Impl {
         return width;
     }
     void dimensions(MenuButton& b) {
-        if(!b.image.empty()) {const auto& picture=image(b.image);b.width=int(picture.width);b.height=int(picture.height)/((b.attributes&2048)?1:4);}
+        if(!b.image.empty()) {const auto& picture=image(b.image);b.width=int(picture.width);b.height=int(picture.height)/((b.type==1 && !(b.attributes&2048))?4:1);}
         else if(!b.font.empty()) {const auto& atlas=font(b.font);b.width=text_width(atlas,label(b));b.height=atlas.glyphs[65].height;}
     }
     bool enabled(const MenuButton& b) const {return b.state!=0 && b.state!=4 && !(b.attributes&2);}

@@ -67,7 +67,8 @@ void test_runtime() {
     struct Cleanup {std::filesystem::path p;~Cleanup(){std::error_code ignored;std::filesystem::remove_all(p,ignored);}} cleanup{folder};
     const auto config=bytes("RGB=G,0,255,0\nFONT=F,f.pcx,G,G,G,G,G,G\nIMAGE=BG,bg.pcx,1,1,0,0,1\n"
         "IMAGE=I,i.pcx,1,4,0,0,1\nBUTTON=B,1,192,Name,Action,NULL,NULL,17,29,F,I,0,0,0,0,0,1,65,9,Draw\n"
-        "MENU=M,BG,F,NULL,B,NULL,B,NULL,NULL,NULL,NULL,Group\nMENUBUTTON=M,B,.STOP\n");
+        "BUTTON=P,6,0,NULL,NULL,NULL,NULL,50,29,F,I,0,0,0,0,0,1,0,0,NULL\n"
+        "MENU=M,BG,F,NULL,B,NULL,B,NULL,NULL,NULL,NULL,Group\nMENUBUTTON=M,B,P,.STOP\n");
     dfre::AssetBytes font(40,0);font[1]=255;font[9]=255;font[16]=1;
     archive(folder/"Df.pff",{});
     archive(folder/"Dfbase.pff",{{"DF.MNU",config},{"DFMENU.BIN",rtxt()},
@@ -76,6 +77,8 @@ void test_runtime() {
     const dfre::AssetStore store(folder);dfre::MenuRuntime runtime(store);runtime.select_menu("m");
     require(runtime.button_text("b")=="Hello","Original RTXT button label");
     require(runtime.hit_test(17,29)=="B" && runtime.hit_test(25,29).empty(),"Button exclusive right edge");
+    require(runtime.hit_test(50,36)=="P" && runtime.hit_test(50,37).empty(),"Full-height panel hit area");
+    require(runtime.hit_test(17,30)=="B" && runtime.hit_test(17,31).empty(),"Four-frame button hit area");
     auto actions=runtime.pointer_down(17,29);require(actions.size()==2 && actions[0].action==1 && actions[1].action==6,"Mouse down action order");
     actions=runtime.pointer_up(17,29);require(actions.size()==2 && actions[0].action==2,"Mouse release action");
     actions=runtime.key(13);require(actions.size()==2 && actions[0].handler=="Action" && actions[1].action==2,"Keyboard accept actions");
