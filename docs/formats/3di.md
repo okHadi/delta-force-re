@@ -169,14 +169,14 @@ These checks cover camera-space vertices and screen projection. Face clipping, l
 
 `renderer.hpp` provides the original triangle sort, inclusive screen clip, fixed-point gradients, and scanline spans. Gradient flags select texture (1), depth (2), and shade (4). Each span carries its initial values and per-pixel changes. Set raster depth to camera depth shifted left by 6 with 32-bit wrap. Scale normalized 16.16 UV values by the material's texture-size bit counts before span generation.
 
-`draw_textured_span32()` implements original mode `0x14`: opaque indexed texture, uniform shade, and a strict unsigned 16-bit depth test. It wraps texture coordinates at each dimension. Each pixel pair shares one depth value. Supply 64 shade rows of 256 packed colours. Target, texture, table, and span bounds are checked.
+`draw_textured_span32()` supports modes `0x14` (uniform shade), `0x18` (varying shade), and `0x34` (uniform shade with zero-texel cutout). Each mode wraps texture coordinates and uses a strict unsigned 16-bit depth test. Each pixel pair shares one depth value. Mode `0x18` also shares one shade value per pair. Mode `0x34` keeps both colour and depth when a texel is zero. Supply 64 shade rows of 256 packed colours. Target, texture, table, mode, and span bounds are checked.
 
-Instruction replay matches 10,000 classifications and all 133,840 spans from 1,000 triangles, including clipped, tiny, tied, and reversed cases. It also matches 1,000 textured spans with 16,386 span pixels. All 512,000 target colour and depth pairs match. Texture bit counts range from 0 to 8; UV and depth steps include signed wrap. The replay uses original `0x462280`, `0x461690`, `0x461b10`, `0x461cd0`, `0x461e30`, `0x468a6c`, and `0x468cda`. The report includes source and code-region hashes.
+Instruction replay matches 10,000 classifications and all 133,840 spans from 1,000 triangles, including clipped, tiny, tied, and reversed cases. It also matches 1,000 spans for each of the three textured modes. All 1,536,000 target colour and depth pairs match. Texture bit counts range from 0 to 8; UV and depth steps include signed wrap. The replay uses original `0x462280`, `0x461690`, `0x461b10`, `0x461cd0`, `0x461e30`, `0x468a6c`, and `0x468cda`. The report includes source and code-region hashes.
 
-REA scanline Evidence: `ev_6321ef8512cf179f8fe85414996fd40e27d7c8fb0a4120f2b136aec8d03da0ab`. Textured span Evidence: `ev_0e3c16aa98c3958487228952d0bacfa6e44b3dee2b3548083208d50c09e56d4c`. Setup `0x468a6c` uses direct Ghidra entry definition because REA could not define the entry.
+REA scanline Evidence: `ev_6321ef8512cf179f8fe85414996fd40e27d7c8fb0a4120f2b136aec8d03da0ab`. Textured span Evidence: `ev_0e3c16aa98c3958487228952d0bacfa6e44b3dee2b3548083208d50c09e56d4c`. Setup `0x468a6c` uses direct Ghidra entry definition because REA could not define the entry. Mode `0x18` matches original setup `0x469258` and span `0x4694df`, Evidence `ev_81d4e19ef5238b09557d1d2b7609af46b856cdf0f5b8dd23b4a3270f9539455d`. Mode `0x34` matches setup `0x468e56` and span `0x4690cc`, Evidence `ev_d45d24a45767dbdd4261c3aa57548c18886a77cd1e971960af51c12d6d08b0e1`. The setup checks use original bytes; those two setup entries are not defined in the REA function map.
 
 ```sh
 python tools/check_renderer_original.py /path/to/Df.exe --probe /path/to/renderer_probe
 ```
 
-This covers span setup and one pixel mode. Tiny-triangle pixels, shade-table creation, near-plane face clipping, lighting, blending, and other pixel modes need separate checks.
+This covers span setup and three pixel modes. Tiny-triangle pixels, shade-table creation, near-plane face clipping, lighting, blending, and other pixel modes need separate checks.

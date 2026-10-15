@@ -113,14 +113,15 @@ std::vector<RasterSpan> raster_triangle_spans(const std::array<RasterVertex,3>& 
 }
 
 std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
-    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture) {
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,RasterTextureMode mode) {
+    if(mode!=RasterTextureMode::uniform && mode!=RasterTextureMode::varying_shade && mode!=RasterTextureMode::cutout)throw std::invalid_argument("unsupported textured raster mode");
     const auto size=std::uint64_t(width)*height;
     if(size!=colour.size() || size!=depth.size())throw std::invalid_argument("raster target size differs from bounds");
     if(texture.width_bits>16 || texture.height_bits>16)throw std::invalid_argument("texture coordinate bits exceed MMX range");
     const auto tw=std::uint64_t(1)<<texture.width_bits,th=std::uint64_t(1)<<texture.height_bits;
     if(tw*th!=texture.pixels.size() || texture.shade_colours.size()!=64*256)throw std::invalid_argument("texture or shade table size differs from bounds");
     if(span.x<0 || span.y<0 || std::uint32_t(span.y)>=height || span.length<0 || std::uint32_t(span.x)>width || std::uint32_t(span.length)>width-std::uint32_t(span.x))throw std::invalid_argument("raster span exceeds target");
-    const auto row=(texture.uniform_shade>>16)&63;std::size_t writes=0;
+    const auto uniform_row=(texture.uniform_shade>>16)&63;std::size_t writes=0;
     const auto offset=std::size_t(span.y)*width+std::uint32_t(span.x);
     for(std::int32_t i=0;i<span.length;++i) {
         const auto u=std::uint32_t(span.u)+std::uint32_t(i)*std::uint32_t(span.du);
@@ -130,6 +131,9 @@ std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std:
         if(value<depth[offset+i]) {
             const auto index=((u>>16)&(tw-1))+(((v>>16)&(th-1))<<texture.width_bits);
             const auto texel=texture.pixels[std::size_t(index)];
+            if(mode==RasterTextureMode::cutout && texel==0)continue;
+            const auto shade=std::uint32_t(span.shade)+std::uint32_t(i&~1)*std::uint32_t(span.dshade);
+            const auto row=mode==RasterTextureMode::varying_shade?((shade>>16)&63):uniform_row;
             depth[offset+i]=value;colour[offset+i]=texture.shade_colours[row*256+texel];++writes;
         }
     }

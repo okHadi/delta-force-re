@@ -32,7 +32,9 @@ struct RasterTexture32 {
     std::vector<std::uint32_t> shade_colours; // 64 shade rows of 256 colours.
     std::uint32_t uniform_shade{}; // Bits 16-21 select the row.
 };
-// Original 0x14 span mode: opaque indexed texture, 32-bit colour, paired depth.
+enum class RasterTextureMode { uniform=0x14, varying_shade=0x18, cutout=0x34 };
+// Original 32-bit indexed-texture modes; shade and depth advance per pixel pair.
 std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
-    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture);
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,
+    RasterTextureMode mode=RasterTextureMode::uniform);
 }

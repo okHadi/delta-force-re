@@ -27,6 +27,11 @@ int main() {
     std::vector<std::uint32_t> colours(4);std::vector<std::uint16_t> depths{1,1,2,2};dfre::RasterSpan span;span.length=3;span.du=65536;span.ddepth=65536;
     check(dfre::draw_textured_span32(span,4,1,colours,depths,texture)==2,"textured depth write count changed");
     check(colours==std::vector<std::uint32_t>{0x1234,0x5678,0,0} && depths==std::vector<std::uint16_t>{0,0,2,2},"paired depth or texture wrap changed");
+    depths={1,1,1,1};colours.assign(4,0);texture.shade_colours[2*256+4]=0xabcd;span.ddepth=0;span.dshade=65536;
+    dfre::draw_textured_span32(span,4,1,colours,depths,texture,dfre::RasterTextureMode::varying_shade);
+    check(colours==std::vector<std::uint32_t>{0x1234,0x5678,0xabcd,0},"paired shade step changed");
+    depths={1,1,1,1};colours.assign(4,0);texture.pixels[0]=0;
+    check(dfre::draw_textured_span32(span,4,1,colours,depths,texture,dfre::RasterTextureMode::cutout)==1 && depths==std::vector<std::uint16_t>{1,0,1,1},"zero texel changed colour or depth");
     span.x=3;span.length=2;
     try{dfre::draw_textured_span32(span,4,1,colours,depths,texture);check(false,"out-of-range texture span accepted");}catch(const std::invalid_argument&){}
     texture.shade_colours.pop_back();
