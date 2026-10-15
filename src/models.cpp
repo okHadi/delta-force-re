@@ -189,4 +189,34 @@ std::vector<CharacterBonePose> advance_character_pose(const std::vector<Characte
     return result;
 }
 
+CharacterModel prepare_character_runtime(const CharacterModel& source) {
+    require(!source.runtime_prepared,"character runtime fields are already prepared");
+    CharacterModel result=source;Reader r(result.raw);
+    auto put=[&](std::size_t pos,std::uint32_t value) {r.range(pos,4);for(std::size_t k=0;k<4;++k)result.raw[pos+k]=std::uint8_t(value>>(k*8));};
+    auto scaled=[&](std::size_t pos) {
+        const std::int64_t product=std::int64_t(r.i32(pos))*0x1d2b0;
+        const auto shifted=product>=0?product/65536:-((-product+65535)/65536);
+        put(pos,std::uint32_t(shifted));
+    };
+    for(std::size_t offset:{56,60,64})scaled(offset);
+    for(auto& bone:result.bones) {
+        require(bone.raw.size()==92,"character runtime preparation requires 92-byte bones");
+        const auto& a=bone.tracks[0];const auto& b=bone.tracks[1];
+        for(std::uint32_t i=0;i<a.count;++i)for(std::size_t k=0;k<3;++k)scaled(std::size_t(a.offset)+std::size_t(i)*68+k*4);
+        for(std::uint32_t i=0;i<b.count;++i) {
+            const auto pos=std::size_t(b.offset)+std::size_t(i)*88;
+            for(std::size_t k=0;k<3;++k) {
+                const auto pointer=r.u32(pos+k*4);
+                require(pointer>=a.offset && (pointer-a.offset)%68==0,"character key pointer is outside track A");
+                const auto index=(pointer-a.offset)/68;
+                require(index<a.count,"character key index is outside track A");put(pos+k*4,index);
+            }
+            put(pos+40,0);
+        }
+        for(std::size_t offset:{28,32,36,40,44,48,52,60,64,68,72,76,80})scaled(std::size_t(bone.offset)+offset);
+        bone.raw=r.copy(bone.offset,bone.raw.size());
+    }
+    result.runtime_prepared=true;return result;
+}
+
 }

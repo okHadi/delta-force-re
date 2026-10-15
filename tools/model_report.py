@@ -294,11 +294,65 @@ def check_character_deltas(path, executable, probe):
     return dict(source_sha256=checked['source_sha256'],character_sha256=checked['character_sha256'],frames=len(native),bone_deltas=total,bone_advances=total,mismatches=0,delta_block_start='0x43a2c7',delta_block_end_exclusive='0x43a45b',delta_block_sha256=hashlib.sha256(pe.get_data(0x43a2c7-pe.OPTIONAL_HEADER.ImageBase,0x43a45b-0x43a2c7)).hexdigest(),advance_block_start='0x43a7ea',advance_block_end_exclusive='0x43a848',advance_block_sha256=hashlib.sha256(pe.get_data(0x43a7ea-pe.OPTIONAL_HEADER.ImageBase,0x43a848-0x43a7ea)).hexdigest(),scope='core per-bone deltas and one tick; unit scale; prior stored pose; frame head overrides absent')
 
 
+def check_character_prepare(path, executable, probe):
+    import subprocess
+    import pefile
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EIP
+    exe=Path(executable).read_bytes();data=Path(path).read_bytes()
+    source_hash='abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff'
+    if hashlib.sha256(exe).hexdigest()!=source_hash:
+        raise ModelError('expected the documented original executable SHA-256')
+    if len(data)>0x800000:
+        raise ModelError('character preparation exceeds its mapped range')
+    native=subprocess.check_output([str(Path(probe).resolve()),'--character-prepared',str(path)])
+    pe=pefile.PE(data=exe);start,end=0x42c9a0,0x42cbad
+    code=pe.get_data(start-pe.OPTIONAL_HEADER.ImageBase,end-start)
+    machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    machine.mem_map(0x42c000,4096);machine.mem_write(start,code)
+    base=0x3000000
+    machine.mem_map(base,(len(data)+4095)&~4095);machine.mem_write(base,data)
+    for address in (0x2000000,0x6ba000,0x6000000):
+        machine.mem_map(address,4096)
+    def word(offset):
+        return struct.unpack_from('<I',data,offset)[0]
+    bones=[];pos=word(4);keys=0
+    machine.mem_write(base+4,struct.pack('<I',base+pos))
+    for _ in range(word(8)):
+        if not word(pos+24)&1:
+            raise ModelError('original preparation check requires 92-byte bones')
+        a,b,count=word(pos),word(pos+4),word(pos+16)
+        keys+=word(pos+12);bones.append(pos)
+        for field in (0,4):
+            machine.mem_write(base+pos+field,struct.pack('<I',base+word(pos+field)))
+        for i in range(count):
+            for field in (0,4,8):
+                offset=b+i*88+field
+                machine.mem_write(base+offset,struct.pack('<I',base+word(offset)))
+        pos+=92
+    machine.mem_write(0x6ba4a0,struct.pack('<I',base))
+    machine.mem_write(0x2000800,struct.pack('<II',0x6000000,0))
+    machine.reg_write(UC_X86_REG_ESP,0x2000800);machine.reg_write(UC_X86_REG_EFLAGS,2)
+    machine.emu_start(start,0x6000000,count=2000000,timeout=1000000)
+    if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+        raise ModelError('original character preparation exceeded instruction limit')
+    expected=bytearray(machine.mem_read(base,len(data)))
+    struct.pack_into('<I',expected,4,word(4))
+    for pos in bones:
+        for field in (0,4):
+            struct.pack_into('<I',expected,pos+field,word(pos+field))
+    if native!=expected:
+        raise ModelError('character preparation differs from original bytes')
+    return dict(source_sha256=source_hash,character_sha256=hashlib.sha256(data).hexdigest(),function=hex(start),function_bytes=len(code),function_sha256=hashlib.sha256(code).hexdigest(),bones=len(bones),track_a_keys=keys,compared_bytes=len(data),mismatches=0,scope='original 92-byte-bone preparation; process addresses normalized to stored offsets')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input');parser.add_argument('--archive',action='store_true');parser.add_argument('--geometry',action='store_true')
-    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--check-character',metavar='EXE');parser.add_argument('--check-deltas',metavar='EXE');parser.add_argument('--probe')
+    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--check-character',metavar='EXE');parser.add_argument('--check-deltas',metavar='EXE');parser.add_argument('--check-prepare',metavar='EXE');parser.add_argument('--probe')
     args=parser.parse_args()
+    if args.check_prepare and (args.archive or not args.probe or args.check_origins or args.check_character or args.check_deltas):
+        parser.error('--check-prepare needs --probe and one CHR input')
     if args.check_deltas and (args.archive or not args.probe or args.check_origins or args.check_character):
         parser.error('--check-deltas needs --probe and one CHR input')
     if args.check_character and (args.archive or not args.probe or args.check_origins):
@@ -306,7 +360,7 @@ def main():
     if args.check_origins and (not args.archive or not args.probe):
         parser.error('--check-origins requires --archive and --probe')
     try:
-        result=check_character_deltas(args.input,args.check_deltas,args.probe) if args.check_deltas else check_character(args.input,args.check_character,args.probe) if args.check_character else check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
+        result=check_character_prepare(args.input,args.check_prepare,args.probe) if args.check_prepare else check_character_deltas(args.input,args.check_deltas,args.probe) if args.check_deltas else check_character(args.input,args.check_character,args.probe) if args.check_character else check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
         print(json.dumps(result,indent=2))
     except (OSError,ValueError) as error:
         parser.exit(1,f'model: {error}\n')

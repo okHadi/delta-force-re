@@ -106,3 +106,15 @@ python tools/model_report.py /path/to/PLAYER01.CHR --check-deltas /path/to/Df.ex
 ```
 
 Frame transitions, head-look overrides, root motion, and bone matrices need separate checks.
+
+## Game character preparation
+
+`prepare_character_runtime()` returns a prepared copy. It applies the original game factor `0x1d2b0 / 65536` to track A XYZ values, header fields +56/+60/+64, and bone fields +28 through +52 and +60 through +80. Signed products shift right by 16 and keep the low 32 bits. Track B's first three stored pointers become track A indexes; field +40 becomes zero. The function checks key alignment and range and accepts the observed 92-byte bones. A prepared copy has `runtime_prepared=true`.
+
+Game loader `0x42cbb0` calls this step after CHR relocation. REA Evidence: `ev_eae55a343a655fc9694ef6f45fa538550ed943a34f71fcb2aef7b7c2350ab78c`. Original step `0x42c9a0`, Evidence `ev_a5cb4fefd1ab7a5b319af1e007e446c55caea7579d6bfd0a0f46f3f6b1b38f9b`, matches all 2,117,896 output bytes after process pointers are normalized to file offsets: 15 bones, 684 track A keys, zero mismatches. Its 525-byte block has SHA-256 `2fe67a637da2d1fd52dd60240c28b1add64a227eeb2e9fc699d9b3d448432ed8`.
+
+```sh
+python tools/model_report.py /path/to/PLAYER01.CHR --check-prepare /path/to/Df.exe --probe /path/to/models_probe
+```
+
+The actor tick bridge at `0x42ce40` converts game position and heading before calling CHR tick `0x43a7a0`. REA Evidence: `ev_927f0931ff3114f1d5fff8d903e7e4b8ffad60720b053d9782faead40d218321`. Bone matrices and vertex posing need the draw path next.

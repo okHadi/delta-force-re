@@ -90,5 +90,16 @@ int main() {
     try{dfre::character_pose_delta(current,target,0);check(false,"accepted zero frame duration");}catch(const std::invalid_argument&){}
     try{dfre::character_pose_delta(current,{},1);check(false,"accepted different pose counts");}catch(const std::invalid_argument&){}
     try{dfre::advance_character_pose(current,{});check(false,"accepted different delta counts");}catch(const std::invalid_argument&){}
+    b=character();b.resize(1604);put(b,124,1312);put(b,128,1516);put(b,124+12,3);put(b,124+16,1);
+    put(b,1312,65536);put(b,1316,0xffffffff);put(b,1320,0xffff0000);
+    put(b,1516,1312);put(b,1520,1380);put(b,1524,1448);put(b,1516+40,99);put(b,124+28,0xffffffff);
+    auto source_chr=dfre::decode_character(b);auto prepared=dfre::prepare_character_runtime(source_chr);
+    auto word=[](const Bytes& data,std::size_t pos){return std::uint32_t(data[pos])|(std::uint32_t(data[pos+1])<<8)|(std::uint32_t(data[pos+2])<<16)|(std::uint32_t(data[pos+3])<<24);};
+    check(prepared.runtime_prepared && word(prepared.raw,1312)==0x1d2b0 && word(prepared.raw,1316)==0xfffffffe && word(prepared.raw,1320)==0xfffe2d50,"character fixed scale changed");
+    check(word(prepared.raw,1516)==0 && word(prepared.raw,1520)==1 && word(prepared.raw,1524)==2 && word(prepared.raw,1556)==0,"character key preparation changed");
+    check(source_chr.raw==b,"character preparation changed source bytes");
+    try{dfre::prepare_character_runtime(prepared);check(false,"accepted repeated character preparation");}catch(const std::invalid_argument&){}
+    put(source_chr.raw,1516,1313);
+    try{dfre::prepare_character_runtime(source_chr);check(false,"accepted unaligned character key");}catch(const std::invalid_argument&){}
     std::cout<<"model bounds and geometry tests passed\n";
 }

@@ -77,6 +77,7 @@ struct CharacterAnimation {
 };
 struct CharacterModel {
     std::vector<std::uint8_t> raw;
+    bool runtime_prepared{};
     std::vector<CharacterBone> bones;
     std::vector<std::uint32_t> bone_map;
     std::uint32_t declared_animation_count{};
@@ -88,6 +89,8 @@ struct CharacterBonePose {
 };
 // Reads the observed DF1 CHR1 layout. Track and frame flags stay raw.
 CharacterModel decode_character(const std::vector<std::uint8_t>& bytes);
+// Copy and prepare character fields using original 0x42c9a0; source stays unchanged.
+CharacterModel prepare_character_runtime(const CharacterModel& source);
 // Original 0x43a0e0 pose read; motion and interpolation are separate steps.
 std::vector<CharacterBonePose> character_frame_pose(const CharacterFrame& frame);
 // Core original per-bone deltas. Target pose includes any frame scale values.

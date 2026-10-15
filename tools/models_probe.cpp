@@ -5,16 +5,21 @@
 #include <stdexcept>
 int main(int argc,char** argv) {
     if(argc<2){std::cerr<<"Usage: models_probe MODEL...\n";return 2;}
+    const bool prepare=std::string(argv[1])=="--character-prepared";
     const bool deltas=std::string(argv[1])=="--character-deltas-json";
     const bool character=std::string(argv[1])=="--character-poses-json";
-    if((character||deltas) && argc!=3){std::cerr<<"Usage: models_probe --character-poses-json CHR\n";return 2;}
+    if((character||deltas||prepare) && argc!=3){std::cerr<<"Usage: models_probe --character-poses-json CHR\n";return 2;}
     const bool origins=std::string(argv[1])=="--origins-json";
     if(origins && argc!=3){std::cerr<<"Usage: models_probe --origins-json MODEL\n";return 2;}
     bool failed=false;
-    for(int i=(origins||character||deltas)?2:1;i<argc;++i)try {
+    for(int i=(origins||character||deltas||prepare)?2:1;i<argc;++i)try {
         std::ifstream file(argv[i],std::ios::binary);
         if(!file)throw std::runtime_error("cannot open model");
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});
+        if(prepare) {
+            auto prepared=dfre::prepare_character_runtime(dfre::decode_character(bytes));
+            std::cout.write(reinterpret_cast<const char*>(prepared.raw.data()),static_cast<std::streamsize>(prepared.raw.size()));continue;
+        }
         if(character||deltas) {
             auto chr=dfre::decode_character(bytes);std::cout<<"[";bool first=true;
             for(const auto& animation:chr.animations)for(std::size_t j=0;j<animation.frames.size();++j) {
