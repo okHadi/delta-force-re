@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.16)
 project(delta_force_re LANGUAGES C CXX)
 
-add_library(dfre_core STATIC src/filename.cpp src/network.cpp src/assets.cpp src/models.cpp src/state_loop.cpp src/mission.cpp src/menu.cpp src/terrain.cpp src/profiles.cpp src/soldier_menu.cpp src/scripts.cpp src/items.cpp src/renderer.cpp src/resources.cpp src/campaign.cpp src/player.cpp)
+add_library(dfre_core STATIC src/filename.cpp src/network.cpp src/assets.cpp src/models.cpp src/state_loop.cpp src/mission.cpp src/menu.cpp src/terrain.cpp src/profiles.cpp src/soldier_menu.cpp src/scripts.cpp src/items.cpp src/renderer.cpp src/resources.cpp src/campaign.cpp src/player.cpp src/world.cpp)
 target_include_directories(dfre_core PUBLIC include)
 target_compile_features(dfre_core PUBLIC cxx_std_17)
 set_target_properties(dfre_core PROPERTIES CXX_EXTENSIONS OFF)
@@ -41,6 +41,9 @@ target_link_libraries(campaign_probe PRIVATE dfre_core)
 
 add_executable(resources_probe tools/resources_probe.cpp)
 target_link_libraries(resources_probe PRIVATE dfre_core)
+
+add_executable(world_probe tools/world_probe.cpp)
+target_link_libraries(world_probe PRIVATE dfre_core)
 
 add_executable(player_probe tools/player_probe.cpp)
 target_link_libraries(player_probe PRIVATE dfre_core)
@@ -116,6 +119,9 @@ if(BUILD_TESTING)
     add_executable(native_terrain tests/native_terrain.cpp)
     target_link_libraries(native_terrain PRIVATE dfre_core)
     add_test(NAME native_terrain COMMAND native_terrain)
+    add_executable(native_world tests/native_world.cpp)
+    target_link_libraries(native_world PRIVATE dfre_core)
+    add_test(NAME native_world COMMAND native_world)
     add_executable(native_player tests/native_player.cpp)
     target_link_libraries(native_player PRIVATE dfre_core)
     add_test(NAME native_player COMMAND native_player)

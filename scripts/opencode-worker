@@ -3,9 +3,9 @@ set -eu
 for arg in "$@"; do
     case "$arg" in
         -m|--model|--model=*|-m?*)
-            echo 'Worker model is fixed to opencode-go/muse-spark-1.3-contributor.' >&2
+            echo 'Worker model is fixed to opencode/deepseek-v4.1-flash-free.' >&2
             exit 2
             ;;
     esac
 done
-exec opencode run --standalone --model opencode-go/muse-spark-1.3-contributor#xhigh --format json "$@"
+exec opencode run --standalone --model opencode/deepseek-v4.1-flash-free#max --format json "$@"

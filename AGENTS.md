@@ -10,5 +10,6 @@
 - Use short, simple text in code, docs, and replies.
 - Use `emil-design-eng` for UI work.
 - Test each complete iteration, then commit and push it. Group related changes to limit GitHub Actions runs.
+- Sign own Mac test executables with `codesign --force --sign -` before running them.
 
-- Run delegated workers through `scripts/opencode-worker` with Muse Spark 1.3 Contributor at `xhigh` effort on OpenCode Go. The lead agent reviews changes and test evidence, then commits and pushes.
+- Run delegated workers through `scripts/opencode-worker` with free DeepSeek V4.1 Flash at `max` effort on OpenCode. The lead agent reviews changes and test evidence, then commits and pushes.
