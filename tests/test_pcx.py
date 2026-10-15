@@ -55,6 +55,24 @@ class PcxTests(unittest.TestCase):
             with self.subTest(length=len(tail)), self.assertRaises(pcx.PcxError):
                 pcx.decode(fixture() + tail)
 
+    def test_observed_cerp_block(self):
+        base = fixture(width=4, height=4, stride=4, body=b'\xc4\x07' * 4)
+        block = b'CerP' + bytes(1024)
+        palette = b'\x0c' + bytes(range(256)) * 3
+        image = pcx.decode(base + block + palette)
+        self.assertEqual(image.pixels, b'\x07' * 16)
+        self.assertEqual(image.ancillary, block)
+        self.assertEqual(image.palette, palette[1:])
+        for data in (base + block[:-1] + palette,
+                     base + block + b'X' + palette,
+                     base + b'NOPE' + block[4:] + palette,
+                     base + block + b'\x0b' + palette[1:],
+                     fixture(width=4, height=4, stride=6, body=b'\xc6\x07' * 4) + block + palette,
+                     fixture(width=4, height=2, stride=4, body=b'\xc4\x07' * 2) + block + palette,
+                     fixture() + block + palette):
+            with self.subTest(length=len(data)), self.assertRaises(pcx.PcxError):
+                pcx.decode(data)
+
 
 if __name__ == '__main__':
     unittest.main()

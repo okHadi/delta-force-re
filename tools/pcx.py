@@ -19,6 +19,7 @@ class Image:
     height: int
     pixels: bytes
     palette: bytes | None
+    ancillary: bytes | None = None
 
 
 def decode(data):
@@ -58,9 +59,13 @@ def decode(data):
             row.extend(bytes((value,)) * count)
         pixels.extend(row[:width])
     tail = data[at:]
+    ancillary = None
+    # Observed DF1 sky gradients carry one fixed-size opaque CerP block.
+    if (width, height, stride) == (4, 4, 4) and len(tail) == 1797 and tail[:4] == b'CerP':
+        ancillary, tail = tail[:1028], tail[1028:]
     if tail and (len(tail) != 769 or tail[0] != 12):
         raise PcxError('Invalid palette or trailing data')
-    return Image(width, height, bytes(pixels), tail[1:] if tail else None)
+    return Image(width, height, bytes(pixels), tail[1:] if tail else None, ancillary)
 
 
 def main():
@@ -77,7 +82,8 @@ def main():
         print(json.dumps({'width': image.width, 'height': image.height,
                           'pixels': len(image.pixels), 'minimum': min(image.pixels),
                           'maximum': max(image.pixels), 'unique_indices': len(set(image.pixels)),
-                          'palette_entries': 256 if image.palette else 0}, indent=2))
+                          'palette_entries': 256 if image.palette else 0,
+                          'ancillary_bytes': len(image.ancillary or b'')}, indent=2))
     except (OSError, PcxError) as error:
         print(f'pcx: {error}', file=sys.stderr)
         return 1

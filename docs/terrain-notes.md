@@ -14,7 +14,11 @@ Archive hashes are in [PFF notes](formats/pff.md). All archive offsets below are
 
 All three decode to 1024 × 1024 byte indices with PCX RLE, one 8-bit plane, and 1024-byte row stride. Each has a 256-entry RGB palette. The elevation file has a grayscale palette and index range 7–252. The color file has index range 1–255. The detail file has index range 64–255.
 
+Six sky-gradient PCX members use 4 × 4 indices, a 1028-byte `CerP` block, and a final RGB palette. The decoder preserves that block as opaque data. Its field meanings require code checks.
+
 Run `python3 tools/pcx.py FILE` for data checks. Add `--pgm .local/FILE.pgm` to export raw indices. PGM values are byte indices; physical height units require code checks.
+
+Run `python3 tools/mission.py GAME_FOLDER C04M07.BMS` to resolve one mission, its terrain configuration, and its three maps as JSON. Each name must match exactly one live archive member, ignoring letter case.
 
 `Dfbase.pff` has 62 `.BMS` members. All start with `BMS` plus byte `0x0d`; all contain a null-terminated `.TRN` name at member offset 84. Example: `C04M07.BMS` (archive offset 560499, 102632 bytes) names `C4M7.TRN`. Its SHA-256 is `8e08d647436678fc6634e8782cf24efdcd2e204d9fe3914696afc55b58b333d8`.
 
