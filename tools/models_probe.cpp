@@ -5,6 +5,8 @@
 #include <stdexcept>
 int main(int argc,char** argv) {
     if(argc<2){std::cerr<<"Usage: models_probe MODEL...\n";return 2;}
+    const bool mesh_matrices=std::string(argv[1])=="--character-mesh-matrices-json";
+    if(mesh_matrices && argc!=4){std::cerr<<"Usage: models_probe --character-mesh-matrices-json CHR MODEL\n";return 2;}
     const bool matrix_cases=std::string(argv[1])=="--character-matrix-cases-json";
     const bool matrices=std::string(argv[1])=="--character-matrices-json";
     const bool prepare=std::string(argv[1])=="--character-prepared";
@@ -14,20 +16,39 @@ int main(int argc,char** argv) {
     const bool origins=std::string(argv[1])=="--origins-json";
     if(origins && argc!=3){std::cerr<<"Usage: models_probe --origins-json MODEL\n";return 2;}
     bool failed=false;
-    for(int i=(origins||character||deltas||prepare||matrices||matrix_cases)?2:1;i<argc;++i)try {
+    for(int i=(origins||character||deltas||prepare||matrices||matrix_cases||mesh_matrices)?2:1;i<argc;++i)try {
         std::ifstream file(argv[i],std::ios::binary);
         if(!file)throw std::runtime_error("cannot open model");
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});
+        if(mesh_matrices) {
+            auto chr=dfre::prepare_character_runtime(dfre::decode_character(bytes));
+            std::ifstream model_file(argv[3],std::ios::binary);if(!model_file)throw std::runtime_error("cannot open mesh model");
+            std::vector<std::uint8_t> model_bytes((std::istreambuf_iterator<char>(model_file)),{});auto model=dfre::decode_model(model_bytes);
+            std::cout<<"[";bool first=true;
+            for(std::size_t l=0;l<model.lods.size();++l) {
+                const auto lod=dfre::localize_model_lod(model.lods[l]);
+                for(std::size_t selected:{0,3,51}) {
+                    if(selected>=chr.animations.size())continue;const auto& animation=chr.animations[selected];
+                    const auto frame=std::min<std::size_t>(3,animation.frames.size()-1);const auto pose=dfre::character_frame_pose(animation.frames[frame]);
+                    const auto values=dfre::character_mesh_matrices(chr,lod,pose);
+                    if(!first)std::cout<<",";first=false;
+                    std::cout<<"{\"lod\":"<<l<<",\"slot\":"<<animation.slot<<",\"frame\":"<<frame<<",\"matrices\":[";bool first_matrix=true;
+                    for(const auto& matrix:values){if(!first_matrix)std::cout<<",";first_matrix=false;std::cout<<"[";for(std::size_t k=0;k<matrix.size();++k){if(k)std::cout<<",";std::cout<<matrix[k];}std::cout<<"]";}
+                    std::cout<<"]}";
+                }
+            }
+            std::cout<<"]\n";return 0;
+        }
         if(matrix_cases) {
             auto chr=dfre::prepare_character_runtime(dfre::decode_character(bytes));std::cout<<"[";bool first=true;
-            for(const auto& animation:chr.animations)for(std::uint32_t heading:{0u,1u,0x40000000u,0x7fffffffu,0x80000000u,0xffffffffu}) {
+            for(const auto& animation:chr.animations)for(std::uint32_t pitch:{0u,1u,0x40000000u,0x7fffffffu,0x80000000u,0xffffffffu}) {
                 auto pose=dfre::character_frame_pose(animation.frames[0]);
                 for(std::size_t j=0;j<pose.size();++j)for(std::size_t k=0;k<3;++k)pose[j].angles[k]=(pose[j].angles[k]+std::int32_t(12345*(j+1)*(k+1)))&0x1ffffff;
                 const auto world=dfre::model_local_matrix({1234567,-2345678,3456789},{0x12345678u,0x3456789au,0x56789abcu});
-                const bool use_world=(heading&1)!=0;
-                const auto values=dfre::character_bone_matrices(chr,pose,heading,use_world?&world:nullptr);
+                const bool use_world=(pitch&1)!=0;
+                const auto values=dfre::character_bone_matrices(chr,pose,pitch,use_world?&world:nullptr);
                 if(!first)std::cout<<",";first=false;
-                std::cout<<"{\"slot\":"<<animation.slot<<",\"frame\":0,\"heading\":"<<heading<<",\"pose\":[";bool first_bone=true;
+                std::cout<<"{\"slot\":"<<animation.slot<<",\"frame\":0,\"pitch\":"<<pitch<<",\"pose\":[";bool first_bone=true;
                 for(const auto& p:pose){if(!first_bone)std::cout<<",";first_bone=false;std::cout<<"["<<p.angles[0]<<","<<p.angles[1]<<","<<p.angles[2]<<","<<p.scale[0]<<","<<p.scale[1]<<","<<p.scale[2]<<"]";}
                 std::cout<<"],\"world\":[";if(use_world)for(std::size_t k=0;k<world.size();++k){if(k)std::cout<<",";std::cout<<world[k];}
                 std::cout<<"],\"matrices\":[";bool first_matrix=true;

@@ -121,11 +121,11 @@ The actor tick bridge at `0x42ce40` converts game position and heading before ca
 
 ## Bone matrices
 
-`character_bone_matrices()` builds the original 3x4 bone matrices from a prepared character and a pose. Rotation uses 22 fractional bits. Parent positions use the stored CHR hierarchy. The function supports the original heading adjustment and an optional world matrix. `model_local_matrix()`, `model_multiply_matrix()`, and `model_transform_point()` keep the original per-product shifts and 32-bit wrap.
+`character_bone_matrices()` builds the original 3x4 bone matrices from a prepared character and a pose. Rotation uses 22 fractional bits. Parent positions use the stored CHR hierarchy. The function supports the original pitch adjustment and an optional world matrix. `model_local_matrix()`, `model_multiply_matrix()`, and `model_transform_point()` keep the original per-product shifts and 32-bit wrap.
 
 `fixed_sine_cosine()` returns sine and cosine in 22-bit fixed units for an unsigned full-turn angle. Its table uses `int(sin(i * 0.00306796162109375) * 4194304)`. Original initializer `0x477510` produces the same 2,561 entries: SHA-256 `26388a2149d995579e6814e15a8ee65baee3f19446e037c08e3219f305c149af`. Function `0x4776c0` interpolates with the low 21 angle bits; cosine starts 512 entries after sine. REA Evidence: `ev_86b26411d600ec8a6f59fa51f5857ba1eca575702a891c8ab87595bf138d9724`.
 
-The rebuilt matrices match original function `0x46bc00`, Evidence `ev_a44bd337e601e1534fa60a247f1a5af58cc4618ca7709715353e2a715fb6bdf3`: 12,284 stored poses plus 1,224 cases with fractional angles, six heading values, and world transforms. All 202,620 matrices and 2,431,440 components match. The 517-byte function span has SHA-256 `e3a2ba99b436227f35d444243cd26f30b8b31577de6919e5ed91a29c808344f3`. Matrix padding is outside the comparison.
+The rebuilt matrices match original function `0x46bc00`, Evidence `ev_a44bd337e601e1534fa60a247f1a5af58cc4618ca7709715353e2a715fb6bdf3`: 12,284 stored poses plus 1,224 cases with fractional angles, six pitch values, and world transforms. All 202,620 matrices and 2,431,440 components match. The 517-byte function span has SHA-256 `e3a2ba99b436227f35d444243cd26f30b8b31577de6919e5ed91a29c808344f3`. Matrix padding is outside the comparison.
 
 ```sh
 python tools/model_report.py /path/to/PLAYER01.CHR --check-matrices /path/to/Df.exe --probe /path/to/models_probe
@@ -134,3 +134,17 @@ python tools/model_report.py /path/to/PLAYER01.CHR --check-matrices /path/to/Df.
 This is static function and instruction-emulation proof. The checked caller at `0x463a37` uses bone centres against a ray; draw-path use still needs tracing. Mesh vertex posing, projection, and face drawing need their own checks.
 
 `ITEMS.DEF` has no whole-word `kaboom` or `mc` reference. This search alone does not establish whether either unsupported model is used by executable code.
+
+## Character draw matrices
+
+`character_mesh_matrices()` uses the CHR parent table and each localized 3DI mesh's `delta_origin`. Localize flagged LODs once before use. The function checks mesh and pose counts. Bone collision matrices use the separate CHR positions.
+
+Original callback table `0x500cc8` assigns `org0` draw function `0x481330` and matrix function `0x481130`. The draw function combines these matrices with actor and camera matrices before mesh dispatch `0x46b1d0`. These callback entries were recovered with direct Ghidra entry definitions after REA could not define them.
+
+The rebuilt function matches original `0x481130` for all 50 primary `org0` models and 194 LODs, with three sampled poses per LOD and zero pitch: 582 cases, 8,730 matrices, 104,760 components, zero mismatches. The original loader origin step runs before each comparison. The 503-byte function span has SHA-256 `f26c548638e5c9453a878b9641bc0bc5ed941d6b683e8b555b977886a1e556b4`.
+
+```sh
+python tools/model_report.py /path/to/PLAYER01.CHR --check-mesh-matrices /path/to/Df.exe --models-archive /path/to/Df.pff --probe /path/to/models_probe
+```
+
+This check covers character draw matrices. Vertex projection, face drawing, and held-item attachments need separate checks.

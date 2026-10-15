@@ -55,6 +55,8 @@ int main() {
     auto raw=dfre::decode_model(triangle(5)).lods[0];raw.flags=1;
     raw.meshes[0].origin={-257,2147483647,(-2147483647-1)};
     auto local=dfre::localize_model_lod(raw);
+    check(local.origins_localized,"localized marker missing");
+    try{dfre::localize_model_lod(local);check(false,"accepted repeated model localization");}catch(const std::invalid_argument&){}
     check(local.vertices[0].position==std::array<std::int16_t,3>{1,1,0},"signed origin shift or word wrap changed");
     check(local.meshes[0].delta_origin==std::array<std::int32_t,3>{0,0,0},"self parent delta changed");
     check(raw.vertices[0].position[0]==-1,"origin step changed its input");
@@ -116,6 +118,15 @@ int main() {
     put(skeleton.raw,56,0xffffffff);put(skeleton.raw,92+56,0);put(skeleton.raw,92+28,256);put(skeleton.raw,92+32,512);put(skeleton.raw,92+36,768);
     std::vector<dfre::CharacterBonePose> zero_pose(2);auto skeleton_matrices=dfre::character_bone_matrices(skeleton,zero_pose);
     check(skeleton_matrices[1][3]==-768 && skeleton_matrices[1][7]==-256 && skeleton_matrices[1][11]==512,"bone hierarchy axes changed");
+    dfre::ModelLod mesh_lod;mesh_lod.flags=1;mesh_lod.meshes.resize(2);
+    mesh_lod.meshes[1].delta_origin={123,-456,789};
+    try{dfre::character_mesh_matrices(skeleton,mesh_lod,zero_pose);check(false,"accepted raw mesh origins");}catch(const std::invalid_argument&){}
+    mesh_lod.origins_localized=true;
+    auto mesh_matrices=dfre::character_mesh_matrices(skeleton,mesh_lod,zero_pose);
+    check(mesh_matrices[0][3]==0 && mesh_matrices[1][3]==123 && mesh_matrices[1][7]==-456 && mesh_matrices[1][11]==789,"mesh draw offsets changed");
+    check(mesh_lod.meshes[1].delta_origin==std::array<std::int32_t,3>{123,-456,789},"mesh matrices changed input");
+    mesh_lod.meshes.pop_back();
+    try{dfre::character_mesh_matrices(skeleton,mesh_lod,zero_pose);check(false,"accepted different mesh counts");}catch(const std::invalid_argument&){}
     put(skeleton.raw,92+56,1);
     try{dfre::character_bone_matrices(skeleton,zero_pose);check(false,"accepted forward bone parent");}catch(const std::invalid_argument&){}
     skeleton.runtime_prepared=false;

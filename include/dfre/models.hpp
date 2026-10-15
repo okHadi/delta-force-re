@@ -38,6 +38,7 @@ struct ModelMaterial {
 };
 struct ModelLod {
     std::uint32_t flags{};
+    bool origins_localized{};
     std::vector<ModelVertex> vertices;
     std::vector<ModelNormal> normals;
     std::vector<ModelFace> faces;
@@ -110,7 +111,11 @@ std::array<std::int32_t,3> model_transform_point(const ModelMatrix& matrix,
 ModelMatrix model_local_matrix(const std::array<std::int32_t,3>& translation,
     const std::array<std::uint32_t,3>& angles);
 std::vector<ModelMatrix> character_bone_matrices(const CharacterModel& prepared,
-    const std::vector<CharacterBonePose>& pose,std::uint32_t heading_adjustment=0,
+    const std::vector<CharacterBonePose>& pose,std::uint32_t pitch_adjustment=0,
+    const ModelMatrix* world=nullptr);
+// Original org0 drawing matrices use localized 3DI mesh offsets.
+std::vector<ModelMatrix> character_mesh_matrices(const CharacterModel& prepared,const ModelLod& localized,
+    const std::vector<CharacterBonePose>& pose,std::uint32_t pitch_adjustment=0,
     const ModelMatrix* world=nullptr);
 
 }

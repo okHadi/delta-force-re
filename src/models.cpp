@@ -83,6 +83,7 @@ Model decode_model(const std::vector<std::uint8_t>& bytes) {
 ModelLod localize_model_lod(const ModelLod& source) {
     ModelLod lod=source;
     if(!(lod.flags&1))return lod;
+    require(!source.origins_localized,"model origins are already localized");
     for(const auto& mesh:lod.meshes) {
         require(mesh.has_v5_transform,"origin step requires v5 meshes");
         require(mesh.parent_index<lod.meshes.size(),"mesh parent outside table");
@@ -100,7 +101,7 @@ ModelLod localize_model_lod(const ModelLod& source) {
         const auto value=std::uint32_t(mesh.origin[k])-std::uint32_t(lod.meshes[mesh.parent_index].origin[k]);
         mesh.delta_origin[k]=value<=2147483647?std::int32_t(value):std::int32_t(std::int64_t(value)-4294967296LL);
     }
-    return lod;
+    lod.origins_localized=true;return lod;
 }
 
 CharacterModel decode_character(const std::vector<std::uint8_t>& bytes) {
@@ -281,8 +282,8 @@ ModelMatrix model_local_matrix(const std::array<std::int32_t,3>& translation,con
     auto result=model_identity_matrix();for(std::size_t k=0;k<3;++k)result[k*4+3]=translation[k];
     return model_multiply_matrix(result,rotation);
 }
-std::vector<ModelMatrix> character_bone_matrices(const CharacterModel& prepared,const std::vector<CharacterBonePose>& pose,
-    std::uint32_t heading_adjustment,const ModelMatrix* world) {
+static std::vector<ModelMatrix> character_matrices(const CharacterModel& prepared,const std::vector<CharacterBonePose>& pose,
+    std::uint32_t pitch_adjustment,const ModelMatrix* world,const ModelLod* localized) {
     require(prepared.runtime_prepared,"character matrices require prepared fields");
     require(pose.size()==prepared.bone_map.size(),"character matrix pose count differs from map");
     Reader r(prepared.raw);std::vector<ModelMatrix> result;
@@ -292,7 +293,7 @@ std::vector<ModelMatrix> character_bone_matrices(const CharacterModel& prepared,
         std::array<std::int32_t,3> translation{};
         if(parent!=-1 && pose.size()!=1) {
             require(parent>=0 && std::size_t(parent)<i,"character matrix parent must precede child");
-            const std::array<std::int32_t,3> local{
+            const std::array<std::int32_t,3> local=localized?localized->meshes[i].delta_origin:std::array<std::int32_t,3>{
                 signed_word(0-std::uint32_t(r.i32(std::size_t(bone.offset)+36))),
                 signed_word(0-std::uint32_t(r.i32(std::size_t(bone.offset)+28))),
                 r.i32(std::size_t(bone.offset)+32)};
@@ -300,14 +301,25 @@ std::vector<ModelMatrix> character_bone_matrices(const CharacterModel& prepared,
         }
         std::array<std::uint32_t,3> angles{(0-std::uint32_t(pose[i].angles[0]))<<7,std::uint32_t(pose[i].angles[1])<<7,(0-std::uint32_t(pose[i].angles[2]))<<7};
         if(i==1 || i==2) {
-            const auto amount=heading_adjustment<0x80000000?heading_adjustment:~heading_adjustment;
+            const auto amount=pitch_adjustment<0x80000000?pitch_adjustment:~pitch_adjustment;
             const auto adjustment=(amount>>2)+(i==2?(amount>>1):0);
-            if(heading_adjustment<0x80000000)angles[1]+=adjustment;else angles[1]-=adjustment;
+            if(pitch_adjustment<0x80000000)angles[1]+=adjustment;else angles[1]-=adjustment;
         }
         result.push_back(model_local_matrix(translation,angles));
     }
     if(world)for(auto& matrix:result)matrix=model_multiply_matrix(*world,matrix);
     return result;
+}
+
+std::vector<ModelMatrix> character_bone_matrices(const CharacterModel& prepared,const std::vector<CharacterBonePose>& pose,
+    std::uint32_t pitch_adjustment,const ModelMatrix* world) {
+    return character_matrices(prepared,pose,pitch_adjustment,world,nullptr);
+}
+std::vector<ModelMatrix> character_mesh_matrices(const CharacterModel& prepared,const ModelLod& localized,
+    const std::vector<CharacterBonePose>& pose,std::uint32_t pitch_adjustment,const ModelMatrix* world) {
+    require(!(localized.flags&1) || localized.origins_localized,"mesh matrices require localized origins");
+    require(localized.meshes.size()==pose.size(),"mesh matrix count differs from pose");
+    return character_matrices(prepared,pose,pitch_adjustment,world,&localized);
 }
 
 }
