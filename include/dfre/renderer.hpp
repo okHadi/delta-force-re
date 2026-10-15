@@ -45,4 +45,11 @@ struct ModelLighting {
 // Original normal lighting 0x46aff0, including material constant and specular fields.
 std::int32_t shade_model_normal(const ModelNormal& normal,const ModelMaterial& material,
     const ModelLighting& lighting,bool reverse=false);
+// Camera planes use 22-bit normals. Face indices address the supplied positions.
+
+struct ModelClipPlane {std::array<std::int32_t,3> normal{};std::int32_t offset{};};
+struct ClippedModelFace {ModelFace face;bool rejected{};};
+struct ModelClipGeometry {std::vector<std::array<std::int32_t,3>> positions;std::vector<ClippedModelFace> faces;};
+ModelClipGeometry clip_model_geometry(const std::vector<std::array<std::int32_t,3>>& positions,
+    const std::vector<ModelFace>& faces,const std::vector<ModelClipPlane>& planes);
 }

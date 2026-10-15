@@ -2,7 +2,33 @@
 #include <iostream>
 #include <string>
 int main(int argc,char** argv) {
-    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting"))return 2;
+    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip"))return 2;
+    if(argc==2 && std::string(argv[1])=="clip") {
+        std::uint32_t count;
+        while(std::cin>>count) {
+            if(count>5)return 2;
+            std::vector<std::array<std::int32_t,3>> positions(3);dfre::ModelFace face{};face.vertices={0,1,2};
+            for(auto& point:positions)for(auto& value:point)if(!(std::cin>>value))return 2;
+            for(auto& value:face.u)if(!(std::cin>>value))return 2;
+            for(auto& value:face.v)if(!(std::cin>>value))return 2;
+            std::vector<dfre::ModelClipPlane> planes(count);
+            for(auto& plane:planes) {
+                for(auto& value:plane.normal)if(!(std::cin>>value))return 2;
+                if(!(std::cin>>plane.offset))return 2;
+            }
+            const auto result=dfre::clip_model_geometry(positions,{face},planes);
+            std::cout<<result.positions.size()<<' '<<result.faces.size();
+            for(const auto& point:result.positions)for(auto value:point)std::cout<<' '<<value;
+            for(const auto& clipped:result.faces) {
+                std::cout<<' '<<clipped.rejected;
+                for(auto value:clipped.face.vertices)std::cout<<' '<<value;
+                for(auto value:clipped.face.u)std::cout<<' '<<value;
+                for(auto value:clipped.face.v)std::cout<<' '<<value;
+            }
+            std::cout<<'\n';
+        }
+        return std::cin.eof()?0:2;
+    }
     if(argc==2 && std::string(argv[1])=="lighting") {
         dfre::ModelNormal normal;dfre::ModelMaterial material;dfre::ModelLighting lighting;std::int32_t specular,constant;std::uint32_t power,reverse;
         while(std::cin>>normal.direction[0]>>normal.direction[1]>>normal.direction[2]>>material.flags>>specular>>constant>>power>>reverse

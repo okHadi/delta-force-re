@@ -179,7 +179,7 @@ REA scanline Evidence: `ev_6321ef8512cf179f8fe85414996fd40e27d7c8fb0a4120f2b136a
 python tools/check_renderer_original.py /path/to/Df.exe --probe /path/to/renderer_probe
 ```
 
-This covers span setup and three pixel modes. Tiny-triangle pixels, shade-table creation, near-plane face clipping, lighting, blending, and other pixel modes need separate checks.
+This covers span setup and three pixel modes. Tiny-triangle pixels, shade-table binding, local lighting context, blending, and other pixel modes need separate checks.
 
 ## Normal lighting
 
@@ -192,3 +192,13 @@ python tools/check_renderer_original.py /path/to/Df.exe --probe /path/to/rendere
 ```
 
 REA Evidence: `ev_424fdf27de1316ab7fd46705c6a4e532ff1790ae64c33525d959b7f6fb3226c5`. The replay report includes the archive and original code-region hashes.
+
+## Camera-plane face clipping
+
+`clip_model_geometry()` clips camera-space positions and indexed faces against up to five ordered planes. Plane normals use 22-bit fixed units. Each face index addresses the supplied position vector. For mesh-only positions, first subtract the decoded mesh's vertex start from its face indices. Pass the original camera plane slots in dispatch order: 0, 1, 2, 4, 3.
+
+The function preserves source geometry, face fields, split order, and UV interpolation. It appends intersection vertices and split faces. A rejected face has `rejected=true`; skip it during drawing. Output is bounded to 32,768 positions and 65,536 faces. Original invalid division cases raise an error.
+
+The replay matches original `0x46a250` and interpolation `0x46a110` for 1,000 triangles against 3,000 planes: 6,682 positions, 1,933 faces, and 804 rejected faces. All eight initial outside masks, one through five planes, wrapped UV values, vertex order, and split-face order are checked. Every compared value matches. The native rejection bool is normalized to the original first-index `-1` marker for the comparison.
+
+REA Evidence: `ev_d7369740c43869a2e5c2c69f1dcd46b84aed1dcf2f1b6e2667890cbe14c31e79`. Run the renderer replay command above; its report includes the original code-region hash.

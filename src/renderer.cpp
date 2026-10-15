@@ -168,4 +168,47 @@ std::int32_t shade_model_normal(const ModelNormal& normal,const ModelMaterial& m
     return std::max(0x10000,std::min(0x3c0000,shade));
 }
 
+
+ModelClipGeometry clip_model_geometry(const std::vector<std::array<std::int32_t,3>>& positions,
+    const std::vector<ModelFace>& faces,const std::vector<ModelClipPlane>& planes) {
+    if(positions.size()>32768 || faces.size()>65536 || planes.size()>5)throw std::invalid_argument("model clip input exceeds bounds");
+    ModelClipGeometry output;output.positions=positions;
+    for(const auto& face:faces){for(auto index:face.vertices)if(index>=positions.size())throw std::invalid_argument("clip face vertex outside table");output.faces.push_back({face,false});}
+    for(const auto& plane:planes) {
+        const auto count=output.faces.size();
+        for(std::size_t index=0;index<count;++index) {
+            if(output.faces[index].rejected)continue;
+            const auto source=output.faces[index].face;std::array<std::int32_t,3> distance{};unsigned outside=0;
+            for(std::size_t corner=0;corner<3;++corner) {
+                const auto& point=output.positions[source.vertices[corner]];std::int32_t value=0;
+                for(std::size_t k=0;k<3;++k)value=add(value,product(point[k],plane.normal[k],22));
+                distance[corner]=sub(value,plane.offset);if(distance[corner]<0)outside|=1u<<corner;
+            }
+            if(!outside)continue;
+            if(outside==7){output.faces[index].rejected=true;continue;}
+            auto intersection=[&](std::size_t inside,std::size_t outside_corner) {
+                if(output.positions.size()>=32768)throw std::invalid_argument("model clip output vertex limit exceeded");
+                const auto a=signed_value(std::uint32_t(distance[inside])<<6),b=signed_value(std::uint32_t(distance[outside_corner])<<6);
+                const auto absolute_a=a<0?negate(a):a,absolute_b=b<0?negate(b):b;
+                const auto fraction=std::min(0x400000,divide(std::int64_t(absolute_a)*0x400000,add(absolute_a,absolute_b)));
+                std::array<std::int32_t,3> point{};for(std::size_t k=0;k<3;++k)point[k]=add(output.positions[source.vertices[inside]][k],product(fraction,sub(output.positions[source.vertices[outside_corner]][k],output.positions[source.vertices[inside]][k]),22));
+                const auto vertex=std::uint32_t(output.positions.size());output.positions.push_back(point);
+                return std::array<std::int32_t,3>{std::int32_t(vertex),add(source.u[inside],product(fraction,sub(source.u[outside_corner],source.u[inside]),22)),add(source.v[inside],product(fraction,sub(source.v[outside_corner],source.v[inside]),22))};
+            };
+            auto replace=[&](std::size_t face,std::size_t corner,const std::array<std::int32_t,3>& vertex) {
+                output.faces[face].face.vertices[corner]=std::uint32_t(vertex[0]);output.faces[face].face.u[corner]=vertex[1];output.faces[face].face.v[corner]=vertex[2];
+            };
+            if(outside==1 || outside==2 || outside==4) {
+                if(output.faces.size()>=65536)throw std::invalid_argument("model clip output face limit exceeded");
+                const auto appended=output.faces.size();output.faces.push_back({source,false});
+                if(outside==1){const auto a=intersection(1,0);replace(appended,0,a);const auto b=intersection(2,0);replace(index,0,b);replace(appended,2,b);}
+                else if(outside==2){const auto a=intersection(2,1);replace(appended,1,a);const auto b=intersection(0,1);replace(index,1,b);replace(appended,0,b);}
+                else {const auto a=intersection(0,2);replace(appended,2,a);const auto b=intersection(1,2);replace(index,2,b);replace(appended,1,b);}
+            } else if(outside==3){replace(index,0,intersection(2,0));replace(index,1,intersection(2,1));}
+            else if(outside==5){replace(index,0,intersection(1,0));replace(index,2,intersection(1,2));}
+            else if(outside==6){replace(index,1,intersection(0,1));replace(index,2,intersection(0,2));}
+        }
+    }
+    return output;
+}
 }

@@ -45,5 +45,14 @@ int main() {
     check(dfre::shade_model_normal(normal,material,lighting)==0x200000,"constant material shade changed");
     material.raw[62]=0;material.raw[58]=1;
     check(dfre::shade_model_normal(normal,material,lighting)==0x200000,"specular factor changed");
+    std::vector<std::array<std::int32_t,3>> camera{{-65536,0,0},{65536,0,0},{65536,65536,0}};dfre::ModelFace face{};face.vertices={0,1,2};face.u={0,65536,65536};face.flags=7;face.material=12;
+    auto clipped=dfre::clip_model_geometry(camera,{face},{{{4194304,0,0},0}});
+    check(clipped.positions.size()==5 && clipped.faces.size()==2 && clipped.positions[3]==std::array<std::int32_t,3>{0,0,0} && clipped.positions[4]==std::array<std::int32_t,3>{0,32768,0},"clip intersections changed");
+    check(clipped.faces[0].face.vertices==std::array<std::uint32_t,3>{4,1,2} && clipped.faces[1].face.vertices==std::array<std::uint32_t,3>{3,1,4} && clipped.faces[1].face.u[0]==32768,"clip triangle split order or UV changed");
+    check(clipped.faces[1].face.flags==7 && clipped.faces[1].face.material==12 && camera[0][0]==-65536,"clip source fields changed");
+    clipped=dfre::clip_model_geometry(camera,{face},{{{4194304,0,0},131072}});
+    check(clipped.faces[0].rejected && clipped.positions.size()==3,"outside face not marked rejected");
+    face.vertices[2]=3;
+    try{dfre::clip_model_geometry(camera,{face},{});check(false,"out-of-range clip vertex accepted");}catch(const std::invalid_argument&){}
     std::cout<<"raster classification tests passed\n";
 }

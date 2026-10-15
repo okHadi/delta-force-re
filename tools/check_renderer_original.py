@@ -70,7 +70,7 @@ def check(executable, probe, count,archive_path=None):
         if list(map(int,line.split()))!=expected:
             raise ValueError(f'triangle gradient/span mismatch at case {number}')
         total+=size
-    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},lighting=check_lighting(pe,probe,count,archive_path),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
+    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
 
 
 def check_texture32(pe,probe,count,mode):
@@ -158,6 +158,58 @@ def check_lighting(pe,probe,count,archive_path=None):
                             rows.append((*normal[:3],material['flags'],specular,constant,power,reverse,0x123456,-0x234567,0x345678,-0x345678,0x234567,0x123456,20000,40000,30000))
                     batch(rows);cases+=len(rows)
     return dict(cases=cases,models=models,normals=normals,material_records=materials,mismatches=0,function='0x46aff0',code_region='0x46a000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),archive_sha256=hashlib.sha256(Path(archive_path).read_bytes()).hexdigest() if archive_path else None,scope='generated wrap, clamp, constant and specular cases; all v5 stored normals paired cyclically with material records; both face directions; mesh-local light/view directions')
+
+
+def check_clipping(pe,probe,count):
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP,UC_X86_REG_EIP
+    machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    for address,size in ((0x46a000,0x2000),(0xa1c000,0x10000),(0xaaa000,0x10000),(0xad3000,4096),(0x2000000,4096),(0x6000000,4096)):
+        machine.mem_map(address,size)
+    code=pe.get_data(0x6a000,0x2000);machine.mem_write(0x46a000,code)
+    rng=random.Random(771);cases=[]
+    for test in range(count):
+        points=[tuple(rng.randrange(-0x100000,0x100001) for _ in range(3)) for _ in range(3)]
+        if test<8:
+            points=[((-65536 if test&(1<<j) else 65536),p[1],p[2]) for j,p in enumerate(points)]
+        uv=[rng.randrange(-0x80000000,0x80000000) for _ in range(6)]
+        planes=[(0x400000,0,0,0)]+[tuple(rng.randrange(-0x400000,0x400001) for _ in range(3))+(rng.randrange(-0x20000,0x20001),) for _ in range(test%5)]
+        cases.append((points,uv,planes))
+    text=''.join(str(len(planes))+' '+' '.join(str(v) for p in points for v in p)+' '+' '.join(map(str,uv))+' '+' '.join(str(v) for p in planes for v in p)+'\n' for points,uv,planes in cases)
+    native=subprocess.check_output([probe,'clip'],input=text.encode()).decode().splitlines()
+    if len(native)!=len(cases):
+        raise ValueError('native clip case count differs from input')
+    total_vertices=total_faces=rejected=plane_count=0
+    for number,((points,uv,planes),line) in enumerate(zip(cases,native)):
+        machine.mem_write(0xaaacb0,b''.join(struct.pack('<3i20x',*p) for p in points))
+        face=bytearray(72);struct.pack_into('<6i',face,4,*uv);struct.pack_into('<3H',face,28,0,1,2)
+        machine.mem_write(0xa1c370,bytes(face));machine.mem_write(0xad3db4,struct.pack('<II',3,1))
+        for plane in planes:
+            machine.mem_write(0x2000800,struct.pack('<I4i',0x6000000,*plane));machine.reg_write(UC_X86_REG_ESP,0x2000800)
+            machine.emu_start(0x46a250,0x6000000,count=1000000)
+            if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+                raise ValueError('original clipping exceeded instruction limit')
+            plane_count+=1
+        vertices,faces=struct.unpack('<II',machine.mem_read(0xad3db4,8))
+        if vertices>512 or faces>512:
+            raise ValueError('original clip check exceeds mapped buffers')
+        expected=[vertices,faces];positions=machine.mem_read(0xaaacb0,vertices*32);face_bytes=machine.mem_read(0xa1c370,faces*72)
+        for index in range(vertices):
+            expected.extend(struct.unpack_from('<3i',positions,index*32))
+        for index in range(faces):
+            indexes=struct.unpack_from('<3H',face_bytes,index*72+28);uvs=struct.unpack_from('<6i',face_bytes,index*72+4)
+            dead=int(indexes[0]==65535);expected.extend([dead,*indexes,*uvs]);rejected+=dead
+        actual=list(map(int,line.split()));offset=2+vertices*3
+        if len(actual)!=len(expected):
+            raise ValueError(f'clipped geometry output count differs at case {number}')
+        for index in range(faces):
+            # Native rejection uses a bool; the original replaces the first index with -1.
+            if actual[offset+index*10]:
+                actual[offset+index*10+1]=65535
+        if actual!=expected:
+            raise ValueError(f'plane clipping mismatch at case {number}')
+        total_vertices+=vertices;total_faces+=faces
+    return dict(cases=len(cases),planes=plane_count,vertices=total_vertices,faces=total_faces,rejected=rejected,mismatches=0,functions=['0x46a250','0x46a110'],code_region='0x46a000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),scope='generated camera-space triangles; all eight initial outside masks; one to five planes; wrapped UV interpolation; exact vertex and split-face order; native rejected bool normalized to original -1 marker')
 
 
 def main():
