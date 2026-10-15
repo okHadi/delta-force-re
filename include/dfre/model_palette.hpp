@@ -17,6 +17,8 @@ struct ModelPaletteInput {
 };
 struct ModelPaletteBank32 {
     AssetBytes gamma_rgb;
+    AssetBytes display_rgb; // BFBB00: inverse gamma applied to BFBE00.
+    AssetBytes matching_rgb; // 480600 applies forward gamma to display_rgb.
     std::vector<std::uint32_t> shades;
 };
 using ModelPaletteBanks32=std::array<ModelPaletteBank32,6>;

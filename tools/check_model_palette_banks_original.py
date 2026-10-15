@@ -38,7 +38,7 @@ def check(executable, probe, count):
 
     word(0x500b0c, 0x2005000)
     word(0x500b10, 0x2004000)
-    u.mem_write(0x2004000, bytes(range(256)))
+    u.mem_write(0x2004000, pefile.PE(data=source).get_data(0xcebe0, 256))
     rng = random.Random(0x402940)
     cases = []
     payload = []
@@ -75,13 +75,13 @@ def check(executable, probe, count):
             flags, sequence, palette, pixels = texture
             row = [1, level, *gamma, *light, 2, 1, 2, flags, sequence, len(pixels),
                    *palette, *pixels, 0, *data, 1, *data]
-        cases.append((level, gamma, models))
+        cases.append((level, gamma, light, models))
         payload.append(' '.join(map(str, row)))
     lines = subprocess.check_output([str(Path(probe).resolve())],
                                     input=('\n'.join(payload) + '\n').encode()).splitlines()
     if len(lines) != count:
         raise ValueError('Native case count differs')
-    for case, ((level, gamma, models), line) in enumerate(zip(cases, lines)):
+    for case, ((level, gamma, light, models), line) in enumerate(zip(cases, lines)):
         u.mem_write(0xbf6f00, bytes(256 * 76))
         # The original loader retains selected textures and writes the loader bank.
         texture_index = 0
@@ -116,6 +116,8 @@ def check(executable, probe, count):
             word(0xc65dd0 + model_index * 184 + 168, len(materials))
             word(0xc65dd0 + model_index * 184 + 172, material_ptr)
         word(0xc54480, texture_index)
+        u.mem_write(0xc22ad0, bytes(light) + b'\0')
+        call(0x480bb0, 128, 128, 128, 128, 128)
         expected = []
         for bank in range(6):
             call(0x47ec10, 0x3000000)
@@ -124,13 +126,25 @@ def check(executable, probe, count):
             call(0x47e6d0, bank, 0, 0, 0, 0)
             call(0x47e6d0, bank, 255, 255, 255, 255)
             expected.extend(u.mem_read(0xbfbe00 + bank * 0x614, 768))
+            display = u.mem_read(0xbfbb00 + bank * 0x614, 768)
+            expected.extend(display)
+            expected.extend(gamma[v] for v in display)
+            call(0x480490, 0xbfbe00 + bank * 0x614, 0x3700000)
+            call(0x4801b0, 0xbfbe00 + bank * 0x614, 0x3708000)
+            fingerprint = 0xcbf29ce484222325
+            for byte in u.mem_read(0x3700000, 65536):
+                fingerprint = ((fingerprint ^ byte) * 0x100000001b3) & 0xffffffffffffffff
+            expected.append(fingerprint)
         actual = list(map(int, line.split()))
+        if len(actual) != len(expected):
+            raise ValueError(f'Case {case}: native result length differs')
         if actual != expected:
             first = next(i for i, (a, b) in enumerate(zip(actual, expected)) if a != b)
             raise ValueError(f'Case {case}, byte {first}: native={actual[first]}, original={expected[first]}')
         print(f'case {case + 1}/{count}: six banks match', flush=True)
     return {'source_sha256': digest, 'cases': count, 'banks': count * 6,
-            'mismatches': 0, 'addresses': ['486670', '47EDD0', '47E6D0']}
+            'mismatches': 0, 'addresses': ['486670', '47EDD0', '47E6D0', '480490', '4801B0'],
+            'compared': ['gamma_rgb', 'display_rgb', 'matching_rgb', 'all_shade_bytes_hash']}
 
 
 if __name__ == '__main__':

@@ -24,6 +24,12 @@ builds six banks and their shade tables. Texture selection uses the full stored
 sequence and the selected level. A material with a missing texture uses its
 flat color. Entry 0 is black; entry 255 is white, both mapped through gamma.
 
+Each bank stores quantized gamma RGB, inverse-gamma display RGB, and the
+forward-gamma display values used for texture matching. Shade rows 0..31
+run toward black. Rows 32..63 run toward the scene light color at C22AD0.
+The bank checker compares all three palettes and all 65,536 shade bytes
+per bank with the original code across 48 banks.
+
 Original `47EAA0` includes all 256 source palette colors. `47E8E0` with flags 10
 adds the first shade 31 times for each enabled shade path. Texture frequency
 uses the original extended precision and truncation. The gather and bank

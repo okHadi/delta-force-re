@@ -20,6 +20,13 @@ int main(){try{
             for(unsigned i=0;i<materials;++i){dfre::ModelMaterial material;material.flags=read();for(unsigned j=40;j<56;++j)material.raw[j]=byte();model.lods[0].materials.push_back(material);}
         }
         auto banks=dfre::build_model_palette_banks32(inputs,gamma,light,level);
-        bool first=true;for(const auto& bank:banks)for(auto v:bank.gamma_rgb){if(!first)std::cout<<' ';first=false;std::cout<<unsigned(v);}std::cout<<'\n';
+        bool first=true;for(const auto& bank:banks){
+            for(const auto* palette:{&bank.gamma_rgb,&bank.display_rgb,&bank.matching_rgb})
+                for(auto v:*palette){if(!first)std::cout<<' ';first=false;std::cout<<unsigned(v);}
+            std::uint64_t hash=14695981039346656037ull;
+            for(auto color:bank.shades)for(unsigned shift=0;shift<32;shift+=8)
+                hash=(hash^std::uint8_t(color>>shift))*1099511628211ull;
+            std::cout<<' '<<hash;
+        }std::cout<<'\n';
     }return std::cin.eof()?0:2;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

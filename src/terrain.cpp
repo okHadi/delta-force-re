@@ -910,12 +910,38 @@ void render_terrain_sky32(const TerrainScene32& scene, const VoxelCamera& camera
     }
 }
 
+TerrainCacheRow32 make_terrain_cache_row32(const std::vector<VoxelColumn>& columns,
+    std::uint32_t row_stride,std::uint32_t depth) {
+    if(row_stride==0 || row_stride>65535)throw AssetError("Invalid terrain row stride");
+    std::int32_t maximum=0;
+    for(const auto& column:columns)maximum=std::max(maximum,column.pixel_offset);
+    const auto top=std::uint32_t(maximum/std::int32_t(row_stride))+1;
+    std::int32_t signed_top;std::memcpy(&signed_top,&top,sizeof(top));
+    return {signed_top,depth};
+}
+
+std::vector<std::uint32_t> build_terrain_row_depths32(const VoxelCamera& camera,
+    const std::vector<TerrainCacheRow32>& cache) {
+    if(camera.height==0 || camera.height>768 || camera.top<0 || camera.bottom<camera.top ||
+        camera.bottom>=int(camera.height))throw AssetError("Invalid terrain row bounds");
+    std::vector<std::uint32_t> result(camera.height,0);
+    int row=camera.bottom;
+    for(const auto& entry:cache) {
+        if(entry.top_row<camera.top || entry.top_row>camera.bottom+1)
+            throw AssetError("Terrain cache row is outside the view");
+        while(entry.top_row<row)result[std::size_t(row--)]=entry.depth;
+    }
+    for(;row>=camera.top;--row)result[std::size_t(row)]=0x7d00000;
+    return result;
+}
+
 TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCamera& camera, const TerrainFrameOptions32& options) {
     auto rays = initialize_voxel_columns(camera);
     const auto projection = build_voxel_projection(camera.focal_distance, camera.field_of_view < 90 ? 3.2f : 2.2f,
         camera.field_of_view < 90 ? 3.2f : 2.2f);
     TerrainFrame32 result{std::vector<std::uint32_t>(std::size_t(camera.row_stride) * camera.height),
-        std::vector<std::uint16_t>(std::size_t(camera.row_stride) * camera.height, 0xffff), std::move(rays.columns)};
+        std::vector<std::uint16_t>(std::size_t(camera.row_stride) * camera.height, 0xffff), std::move(rays.columns),{}};
+    std::vector<TerrainCacheRow32> cache_rows;
     const auto horizon = build_terrain_horizon32(camera, scene.horizon_scale);
     const auto& sky = scene.terrain.sky_palette.palette;
     if (sky.size() != 768) throw AssetError("Terrain sky palette is incomplete");
@@ -926,6 +952,9 @@ TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCa
     }
     if (options.clouds && !scene.sky_mips.empty()) render_terrain_sky32(scene, camera, horizon, options.time, result.pixels);
     for (unsigned i = 0; i < 11; ++i) {
+        // 48DC70 stops when the pass starts with every column finished.
+        // Kernel result CBEDC0 uses column flags seen at pass entry.
+        if (std::all_of(result.columns.begin(), result.columns.end(), [](const auto& column) { return column.finished != 0; })) break;
         const auto& level = projection.levels[i];
         VoxelPass8 pass;
         pass.lod = level.lod; pass.stop_depth = level.depth_end; pass.row_stride = camera.row_stride;
@@ -933,8 +962,9 @@ TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCa
         pass.acceleration_step = rays.acceleration_step; pass.step_scale = level.next_step_scale;
         render_voxel_pass32(scene, level.detail, pass, projection.depths, result.columns, result.pixels, result.depths);
         for (auto& value : rays.acceleration_step) value = static_cast<std::uint32_t>(floor_shift16(std::int64_t(static_cast<std::int32_t>(value)) * pass.step_scale));
-        if (std::all_of(result.columns.begin(), result.columns.end(), [](const auto& column) { return column.finished != 0; })) break;
+        cache_rows.push_back(make_terrain_cache_row32(result.columns,camera.row_stride,std::uint32_t(level.world_bound)));
     }
+    result.row_depths=build_terrain_row_depths32(camera,cache_rows);
     return result;
 }
 

@@ -10,6 +10,7 @@ Bytes triangle(unsigned version) {
     const std::size_t hs=version==5?184:176,ms=version==2?88:(version==5?112:104),base=128+hs;
     Bytes b(base+24+8+72+ms+76);b[0]='3';b[1]='D';b[2]='I';b[3]=version;put(b,20,1);
     put(b,24,0x12345678);put(b,36,0xfffffedc);put(b,40,0x676e7263);put(b,52,0x6f726730);
+    put(b,96,0x12340000);
     put(b,128+20,std::uint32_t(b.size()-base));put(b,128+128,3);put(b,128+136,1);put(b,128+144,1);put(b,128+152,1);put(b,128+168,1);
     b[base]=255;b[base+1]=255;b[base+8+2]=10;b[base+16+4]=20;
     const auto face=base+32;b[face+30]=1;b[face+32]=2;
@@ -31,6 +32,7 @@ int main() {
     for(unsigned version: {2,3,4,5}) {
         const auto b=triangle(version);const auto m=dfre::decode_model(b);
         check(m.version==version && m.lods.size()==1,"version or LOD changed");
+        check(m.bounding_radius==0x12340000,"model bounding radius changed");
         check(m.lod_thresholds[0]==0x12345678 && m.lod_thresholds[3]==-292 &&
             m.render_types[0]==0x676e7263 && m.render_types[3]==0x6f726730,"model LOD thresholds or callback tags changed");
         check(m.lods[0].vertices[0].position[0]==-1,"signed vertex changed");

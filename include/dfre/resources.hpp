@@ -1,6 +1,7 @@
 #pragma once
 #include "dfre/items.hpp"
 #include "dfre/mission.hpp"
+#include "dfre/resource_plan.hpp"
 #include "dfre/models.hpp"
 #include <map>
 namespace dfre {
@@ -12,10 +13,22 @@ struct MissionScene {
     MissionData mission;
     std::array<std::vector<ObjectAppearance>,4> objects;
 };
+struct MissionModelResource {
+    std::string name;
+    std::uint8_t bank{};
+};
+struct MissionRuntimeResources {
+    MissionData mission;
+    ResourcePlan plan;
+    std::vector<MissionModelResource> models; // First loads in original registry order.
+    std::vector<std::string> missing_models; // Original failed loads keep a null model handle.
+};
 class MissionAssetCache {
 public:
     explicit MissionAssetCache(const AssetStore& assets);
     MissionScene load(std::string_view mission);
+    // Start with an empty cache. Load the original single-player resource plan.
+    MissionRuntimeResources load_runtime(std::string_view mission,const ResourcePlanOptions& options={});
     const ObjectAppearance& appearance(std::uint32_t item_id);
     const Model& model(std::string_view name) const;
     const CharacterModel& character(std::string_view name) const;

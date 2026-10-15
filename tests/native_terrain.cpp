@@ -416,6 +416,12 @@ int main() {
         rejects([&] { dfre::build_voxel_projection(320, 0.0f); });
         rejects([&] { dfre::build_voxel_projection(320, 2.2f, 2.2f, 0.0f); });
         rejects([&] { dfre::build_voxel_projection(32767, 1.0f, 1.0f, 0.5f); });
+        dfre::VoxelCamera row_camera;row_camera.height=8;row_camera.top=1;row_camera.bottom=6;
+        const auto rows=dfre::build_terrain_row_depths32(row_camera,{{4,1000},{2,2000},{5,3000}});
+        require(rows==std::vector<std::uint32_t>({0,0x7d00000,0x7d00000,2000,2000,1000,1000,0}),"Terrain row depth coverage differs");
+        dfre::VoxelColumn row_column;row_column.pixel_offset=std::numeric_limits<std::int32_t>::max();
+        require(dfre::make_terrain_cache_row32({row_column},1,50).top_row==std::numeric_limits<std::int32_t>::min(),"Terrain row index wrap differs");
+        rejects([&]{dfre::make_terrain_cache_row32({},0,0);});
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

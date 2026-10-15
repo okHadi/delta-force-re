@@ -1,5 +1,6 @@
 #include "dfre/model_palette.hpp"
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -51,6 +52,14 @@ ModelPaletteBanks32 build_model_palette_banks32(const std::vector<ModelPaletteIn
         const auto colors=quantizer.build();auto& output=banks[bank];output.gamma_rgb.resize(768);
         std::copy(colors.begin(),colors.end(),output.gamma_rgb.begin()+3);
         for(std::size_t channel=0;channel<3;++channel){output.gamma_rgb[channel]=gamma[0];output.gamma_rgb[765+channel]=gamma[255];}
+        output.display_rgb.resize(768);output.matching_rgb.resize(768);
+        for(std::size_t i=0;i<768;++i) {
+            // 401C60 copies the original inverse table from 4CEBE0.
+            output.display_rgb[i]=std::uint8_t(std::pow(double(output.gamma_rgb[i])/255.0,0.8)*255.0+0.5);
+            output.matching_rgb[i]=gamma[output.display_rgb[i]];
+        }
+        // 4809B0 builds rows 0..31 with 480490, then rows 32..63 with
+        // 4801B0, whose target is the scene light color at C22AD0.
         output.shades=build_terrain_shades32(output.gamma_rgb,gamma_light,control);
     }
     return banks;

@@ -1,8 +1,27 @@
 #include "dfre/resources.hpp"
 #include <iostream>
+#include <set>
 int main(int argc,char** argv){
-    if(argc<2||argc>3)return 2;
+    if(argc<2||argc>4)return 2;
     try {
+        if(argc>=3 && std::string(argv[2])=="--runtime") {
+            const dfre::AssetStore assets(argv[1]);
+            const auto names=argc==4?std::vector<std::string>{argv[3]}:assets.missions();
+            std::set<std::string> unique;std::size_t loaded=0,missing=0;
+            for(const auto& name:names) {
+                dfre::MissionAssetCache cache(assets);const auto scene=cache.load_runtime(name);
+                if(scene.models.size()!=cache.model_count())throw dfre::AssetError("Runtime model registry count differs");
+                for(const auto& entry:scene.models) {
+                    if(entry.bank>=6 || cache.model(entry.name).version!=5)throw dfre::AssetError("Invalid runtime model binding");
+                    unique.insert(entry.name);
+                }
+                loaded+=scene.models.size();missing+=scene.missing_models.size();
+                for(const auto& model:scene.missing_models)std::clog<<name<<": null model handle for "<<model<<'\n';
+            }
+            std::cout<<names.size()<<" missions; "<<loaded<<" model loads; "<<unique.size()<<" unique models; "<<missing<<" null model handles\n";
+            return 0;
+        }
+        if(argc==4)return 2;
         const dfre::AssetStore assets(argv[1]);dfre::MissionAssetCache cache(assets);
         const auto names=argc==3?std::vector<std::string>{argv[2]}:assets.missions();std::size_t objects=0,visible=0;
         for(const auto& name:names){const auto scene=cache.load(name);

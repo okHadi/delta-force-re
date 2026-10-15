@@ -83,3 +83,5 @@ python tools/check_terrain_raster32_original.py GAME_FOLDER TERRAIN_PROBE --deta
 ```
 
 Use the built `terrain_probe` path for `TERRAIN_PROBE`. Reports use `.local/reports`; `--report PATH` selects another report file.
+
+`TerrainFrame32.row_depths` supplies the original row table for water and model culling. Cache rows follow `4892E0`; coverage follows `489260`. `48DC70` counts passes that start with an unfinished column. The row checker compares 512 coverage cases, 512 cache-row producer cases, and 104,566 row values with original x86 code.

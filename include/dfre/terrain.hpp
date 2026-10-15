@@ -195,7 +195,17 @@ struct TerrainFrame32 {
     std::vector<std::uint32_t> pixels;
     std::vector<std::uint16_t> depths;
     std::vector<VoxelColumn> columns;
+    std::vector<std::uint32_t> row_depths{}; // Original C93EA0 table for water and model culling.
 };
+struct TerrainCacheRow32 {
+    std::int32_t top_row{}; // Cache +0x2C, maximum column pixel offset / stride + 1.
+    std::uint32_t depth{}; // Cache +0x0C, distance * 4096.
+};
+TerrainCacheRow32 make_terrain_cache_row32(const std::vector<VoxelColumn>& columns,
+    std::uint32_t row_stride,std::uint32_t depth);
+// Original 489260: rows outside the view are zero; remaining rows use 0x7D00000.
+std::vector<std::uint32_t> build_terrain_row_depths32(const VoxelCamera& camera,
+    const std::vector<TerrainCacheRow32>& cache);
 void render_voxel_pass32(const TerrainScene32& scene, bool detail, const VoxelPass8& pass,
     const std::vector<std::uint32_t>& depth_table, std::vector<VoxelColumn>& columns,
     std::vector<std::uint32_t>& pixels, std::vector<std::uint16_t>& depths);

@@ -364,7 +364,28 @@ void detail32_fixture(std::uint32_t seed) {
 
 int main(int argc, char** argv) {
     try {
-        if (argc == 2 && std::string_view(argv[1]) == "--synthetic") {
+        if(argc==2 && std::string_view(argv[1])=="--cache-row32") {
+            unsigned stride,count;std::uint32_t depth;
+            while(std::cin>>stride>>depth>>count) {
+                if(count>512)throw dfre::AssetError("Too many terrain columns");
+                std::vector<dfre::VoxelColumn> columns(count);
+                for(auto& column:columns)if(!(std::cin>>column.pixel_offset))throw dfre::AssetError("Missing terrain column");
+                const auto row=dfre::make_terrain_cache_row32(columns,stride,depth);
+                std::cout<<row.top_row<<' '<<row.depth<<'\n';
+            }
+            if(!std::cin.eof())return 2;
+        } else if (argc == 2 && std::string_view(argv[1]) == "--row-depths32") {
+            unsigned height,count;int top,bottom;
+            while(std::cin>>height>>top>>bottom>>count) {
+                if(count>1000)throw dfre::AssetError("Too many terrain cache entries");
+                dfre::VoxelCamera camera;camera.height=height;camera.top=top;camera.bottom=bottom;
+                std::vector<dfre::TerrainCacheRow32> cache(count);
+                for(auto& entry:cache)if(!(std::cin>>entry.top_row>>entry.depth))throw dfre::AssetError("Missing terrain cache entry");
+                const auto rows=dfre::build_terrain_row_depths32(camera,cache);
+                for(std::size_t i=0;i<rows.size();++i){if(i)std::cout<<' ';std::cout<<rows[i];}std::cout<<'\n';
+            }
+            if(!std::cin.eof())return 2;
+        } else if (argc == 2 && std::string_view(argv[1]) == "--synthetic") {
             samples(synthetic());
         } else if (argc == 2 && std::string_view(argv[1]) == "--bounds-fixture") {
             bounds_fixture();
