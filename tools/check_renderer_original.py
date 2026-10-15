@@ -9,7 +9,7 @@ import struct
 import subprocess
 
 
-def check(executable, probe, count):
+def check(executable, probe, count,archive_path=None):
     import pefile
     import unicorn
     from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EAX
@@ -70,7 +70,7 @@ def check(executable, probe, count):
         if list(map(int,line.split()))!=expected:
             raise ValueError(f'triangle gradient/span mismatch at case {number}')
         total+=size
-    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
+    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},lighting=check_lighting(pe,probe,count,archive_path),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
 
 
 def check_texture32(pe,probe,count,mode):
@@ -107,12 +107,65 @@ def check_texture32(pe,probe,count,mode):
         pixels+=length
     return dict(cases=len(cases),span_pixels=pixels,target_pixels=len(cases)*512,mismatches=0,functions=[hex(setup),hex(draw)],code_region='0x468000+0x2000',code_sha256=hashlib.sha256(pe.get_data(0x68000,0x2000)).hexdigest(),scope=f'32-bit {mode} texture; texture bits 0-8; signed UV, shade and step wrap; 64 shade rows; odd/even spans; strict paired depth test')
 
+def check_lighting(pe,probe,count,archive_path=None):
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP,UC_X86_REG_EIP,UC_X86_REG_EAX
+    machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    for address,size in ((0x46a000,0x2000),(0xad3000,4096),(0x2000000,0x10000),(0x6000000,4096)):
+        machine.mem_map(address,size)
+    code=pe.get_data(0x6a000,0x2000);machine.mem_write(0x46a000,code)
+    cases=models=normals=materials=0
+    def batch(rows):
+        text=''.join(' '.join(map(str,row))+'\n' for row in rows)
+        values=subprocess.check_output([probe,'lighting'],input=text.encode()).decode().splitlines()
+        if len(values)!=len(rows):
+            raise ValueError('native normal-shade count differs from input')
+        for index,(row,value) in enumerate(zip(rows,values)):
+            x,y,z,flags,specular,constant,power,reverse,*context=row
+            material=bytearray(76);struct.pack_into('<I',material,16,flags);struct.pack_into('<iiB',material,56,specular,constant,power)
+            machine.mem_write(0x2001000,struct.pack('<4h',x,y,z,0));machine.mem_write(0x2002000,bytes(material))
+            machine.mem_write(0xad3d80,struct.pack('<3i',*context[:3]));machine.mem_write(0xad3d90,struct.pack('<3i',*context[3:6]));machine.mem_write(0xad3da0,struct.pack('<3i',*context[6:]))
+            machine.mem_write(0x2000800,struct.pack('<4I',0x6000000,0x2001000,0x2002000,reverse));machine.reg_write(UC_X86_REG_ESP,0x2000800)
+            machine.emu_start(0x46aff0,0x6000000,count=100000)
+            if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+                raise ValueError('original normal lighting exceeded instruction limit')
+            if int(value)!=machine.reg_read(UC_X86_REG_EAX):
+                raise ValueError(f'normal lighting mismatch in batch case {index}')
+    rng=random.Random(681);rows=[]
+    for index in range(count):
+        rows.append(tuple(rng.randrange(-32768,32768) for _ in range(3))+(0x20 if index&1 else 0,rng.randrange(-0x80000000,0x80000000),rng.randrange(-0x80000000,0x80000000),255 if index<10 else rng.randrange(8),index&1)+tuple(rng.randrange(-0x400000,0x400001) for _ in range(6))+tuple(rng.randrange(-0x80000000,0x80000000) for _ in range(3)))
+    batch(rows);cases+=len(rows)
+    if archive_path:
+        from pff import Archive
+        from model_report import decode
+        archive=Archive(archive_path)
+        with archive.path.open('rb') as source:
+            for entry in archive.entries:
+                if entry.deleted or not entry.name.lower().endswith('.3di'):
+                    continue
+                source.seek(entry.offset);data=source.read(entry.size)
+                if data[:4]!=b'3DI\x05':
+                    continue
+                model=decode(data,True);models+=1
+                for lod in model['lods']:
+                    if not lod['materials']:
+                        continue
+                    rows=[];materials+=len(lod['materials']);normals+=len(lod['normals'])
+                    for index,normal in enumerate(lod['normals']):
+                        material=lod['materials'][index%len(lod['materials'])];offset=material['offset']
+                        specular,constant,power=struct.unpack_from('<iiB',data,offset+56)
+                        for reverse in (0,1):
+                            rows.append((*normal[:3],material['flags'],specular,constant,power,reverse,0x123456,-0x234567,0x345678,-0x345678,0x234567,0x123456,20000,40000,30000))
+                    batch(rows);cases+=len(rows)
+    return dict(cases=cases,models=models,normals=normals,material_records=materials,mismatches=0,function='0x46aff0',code_region='0x46a000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),archive_sha256=hashlib.sha256(Path(archive_path).read_bytes()).hexdigest() if archive_path else None,scope='generated wrap, clamp, constant and specular cases; all v5 stored normals paired cyclically with material records; both face directions; mesh-local light/view directions')
+
+
 def main():
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('executable');parser.add_argument('--probe',required=True);parser.add_argument('--cases',type=int,default=1000)
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('executable');parser.add_argument('--probe',required=True);parser.add_argument('--cases',type=int,default=1000);parser.add_argument('--models-archive')
     args=parser.parse_args()
     if not 1<=args.cases<=100000:
         parser.error('--cases must be between 1 and 100000')
-    print(json.dumps(check(args.executable,str(Path(args.probe).resolve()),args.cases),indent=2))
+    print(json.dumps(check(args.executable,str(Path(args.probe).resolve()),args.cases,args.models_archive),indent=2))
 
 
 if __name__=='__main__':

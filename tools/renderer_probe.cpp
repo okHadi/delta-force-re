@@ -2,7 +2,19 @@
 #include <iostream>
 #include <string>
 int main(int argc,char** argv) {
-    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans"))return 2;
+    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting"))return 2;
+    if(argc==2 && std::string(argv[1])=="lighting") {
+        dfre::ModelNormal normal;dfre::ModelMaterial material;dfre::ModelLighting lighting;std::int32_t specular,constant;std::uint32_t power,reverse;
+        while(std::cin>>normal.direction[0]>>normal.direction[1]>>normal.direction[2]>>material.flags>>specular>>constant>>power>>reverse
+            >>lighting.light_direction[0]>>lighting.light_direction[1]>>lighting.light_direction[2]>>lighting.view_direction[0]>>lighting.view_direction[1]>>lighting.view_direction[2]
+            >>lighting.ambient>>lighting.diffuse>>lighting.specular) {
+            if(power>255)return 2;
+            for(std::size_t i=0;i<4;++i){material.raw[56+i]=std::uint8_t(std::uint32_t(specular)>>(i*8));material.raw[60+i]=std::uint8_t(std::uint32_t(constant)>>(i*8));}
+            material.raw[64]=std::uint8_t(power);
+            std::cout<<dfre::shade_model_normal(normal,material,lighting,reverse!=0)<<'\n';
+        }
+        return std::cin.eof()?0:2;
+    }
     const bool texture=argc>1 && std::string(argv[1])!="spans";
     const auto mode=argc>1 && std::string(argv[1])=="texture32-shade"?dfre::RasterTextureMode::varying_shade:argc>1 && std::string(argv[1])=="texture32-cutout"?dfre::RasterTextureMode::cutout:dfre::RasterTextureMode::uniform;
     const bool spans=argc>1;

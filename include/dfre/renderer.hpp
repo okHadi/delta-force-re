@@ -1,4 +1,5 @@
 #pragma once
+#include "dfre/models.hpp"
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -37,4 +38,11 @@ enum class RasterTextureMode { uniform=0x14, varying_shade=0x18, cutout=0x34 };
 std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
     std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,
     RasterTextureMode mode=RasterTextureMode::uniform);
+struct ModelLighting {
+    std::array<std::int32_t,3> light_direction{},view_direction{}; // Mesh-local 22-bit fixed directions.
+    std::int32_t ambient{},diffuse{},specular{}; // 16.16 strengths.
+};
+// Original normal lighting 0x46aff0, including material constant and specular fields.
+std::int32_t shade_model_normal(const ModelNormal& normal,const ModelMaterial& material,
+    const ModelLighting& lighting,bool reverse=false);
 }

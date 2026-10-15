@@ -36,5 +36,14 @@ int main() {
     try{dfre::draw_textured_span32(span,4,1,colours,depths,texture);check(false,"out-of-range texture span accepted");}catch(const std::invalid_argument&){}
     texture.shade_colours.pop_back();
     try{dfre::draw_textured_span32({},4,1,colours,depths,texture);check(false,"short shade table accepted");}catch(const std::invalid_argument&){}
+    dfre::ModelNormal normal{{16384,0,0},0};dfre::ModelMaterial material;
+    dfre::ModelLighting lighting{{4194304,0,0},{4194304,0,0},65536,65536,65536};
+    check(dfre::shade_model_normal(normal,material,lighting)==0x3c0000,"normal shade upper clamp changed");
+    lighting.ambient=0;
+    check(dfre::shade_model_normal(normal,material,lighting,true)==0x80000,"back-facing light attenuation changed");
+    material.flags=0x20;material.raw[62]=1;
+    check(dfre::shade_model_normal(normal,material,lighting)==0x200000,"constant material shade changed");
+    material.raw[62]=0;material.raw[58]=1;
+    check(dfre::shade_model_normal(normal,material,lighting)==0x200000,"specular factor changed");
     std::cout<<"raster classification tests passed\n";
 }

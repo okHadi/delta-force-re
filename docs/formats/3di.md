@@ -180,3 +180,15 @@ python tools/check_renderer_original.py /path/to/Df.exe --probe /path/to/rendere
 ```
 
 This covers span setup and three pixel modes. Tiny-triangle pixels, shade-table creation, near-plane face clipping, lighting, blending, and other pixel modes need separate checks.
+
+## Normal lighting
+
+`shade_model_normal()` applies original `0x46aff0` to a stored normal, material, and mesh-local light/view context. It uses the material's fixed fields at +56/+60 and power byte +64. It handles constant shade, reversed faces, diffuse light, and repeated-square specular light. Each product keeps the original shift and wrap. Output clamps to shade rows 1 through 60 in 16.16 units.
+
+The replay matches 367,970 original calls: 1,000 generated wrap/specular cases, plus both face directions for all 183,485 stored normals in 355 v5 models. Normals are paired cyclically with 10,369 material records. All results match. Mesh-local light/view conversion is a separate step.
+
+```sh
+python tools/check_renderer_original.py /path/to/Df.exe --probe /path/to/renderer_probe --models-archive /path/to/Df.pff
+```
+
+REA Evidence: `ev_424fdf27de1316ab7fd46705c6a4e532ff1790ae64c33525d959b7f6fb3226c5`. The replay report includes the archive and original code-region hashes.

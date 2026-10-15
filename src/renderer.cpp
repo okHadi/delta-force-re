@@ -140,4 +140,32 @@ std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std:
     return writes;
 }
 
+std::int32_t shade_model_normal(const ModelNormal& normal,const ModelMaterial& material,
+    const ModelLighting& lighting,bool reverse) {
+    auto field=[&](std::size_t offset) {
+        std::uint32_t value=0;for(std::size_t i=0;i<4;++i)value|=std::uint32_t(material.raw[offset+i])<<(i*8);
+        return signed_value(value);
+    };
+    auto dot=[&](const std::array<std::int32_t,3>& direction) {
+        std::int32_t value=0;for(std::size_t i=0;i<3;++i)value=add(value,product(normal.direction[i],direction[i],22));
+        const auto scaled=signed_value(std::uint32_t(value)<<2);return reverse?negate(scaled):scaled;
+    };
+    std::int32_t shade;
+    if(material.flags&0x20)shade=field(60);
+    else {
+        auto light=dot(lighting.light_direction);if(light<0)light=shift(negate(light),2);
+        shade=add(lighting.ambient,product(lighting.diffuse,light));
+    }
+    const auto factor=field(56);
+    if(factor) {
+        auto view=dot(lighting.view_direction);
+        if(view>0) {
+            for(std::uint32_t i=0;i<material.raw[64];++i)view=product(view,view);
+            shade=add(shade,product(lighting.specular,product(view,factor)));
+        }
+    }
+    shade=signed_value(std::uint32_t(shade)<<5);
+    return std::max(0x10000,std::min(0x3c0000,shade));
+}
+
 }
