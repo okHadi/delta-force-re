@@ -50,6 +50,8 @@ public:
             texture_ = SDL_CreateTexture(renderer_, SDL_PIXELFORMAT_ARGB8888,
                                          SDL_TEXTUREACCESS_STREAMING, width, height);
             if (!texture_) fail();
+            // The original frame high byte stores luminance; display its RGB values directly.
+            if (SDL_SetTextureBlendMode(texture_, SDL_BLENDMODE_NONE)) fail();
             if (SDL_RenderSetLogicalSize(renderer_, width, height)) fail();
             SDL_StartTextInput();
         } catch (...) { close(); throw; }

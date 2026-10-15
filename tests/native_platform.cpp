@@ -86,7 +86,7 @@ int main() {
         catch (const std::invalid_argument&) { rejected = true; }
         check(rejected, "Invalid window size accepted");
         auto window = dfre::create_game_window("DFRE platform test", 64, 48);
-        const std::vector<std::uint32_t> frame(64 * 48, 0xff123456);
+        const std::vector<std::uint32_t> frame(64 * 48, 0x12123456);
         window->present(frame);
 #ifdef _WIN32
         check_display();
