@@ -190,6 +190,96 @@ void shades32_fixture(std::uint32_t seed) {
     for (auto color : shades) for (unsigned shift = 0; shift < 32; shift += 8) bytes.push_back(static_cast<std::uint8_t>(color >> shift));
     std::cout << "{\"shades\":\"" << fingerprint(bytes) << "\"}\n";
 }
+
+void palettes32_fixture(std::uint32_t seed) {
+    dfre::TerrainRuntime terrain{synthetic(), {}, {}, {}, {}, {}, {}, {}, 0, 32};
+    terrain.color.palette.resize(768); terrain.detail_palette.resize(768); terrain.sky_palette.palette.resize(768);
+    dfre::AssetBytes gamma(256);
+    for (unsigned i = 0; i < 256; ++i) {
+        gamma[i] = static_cast<std::uint8_t>(seed % 2 ? i : i * i / 255);
+        for (unsigned channel = 0; channel < 3; ++channel) {
+            constexpr unsigned multipliers[] = {37, 67, 101}, detail_multipliers[] = {17, 29, 43};
+            terrain.color.palette[i * 3 + channel] = static_cast<std::uint8_t>(i * multipliers[channel]);
+            terrain.detail_palette[i * 3 + channel] = static_cast<std::uint8_t>(i * detail_multipliers[channel]);
+            terrain.sky_palette.palette[i * 3 + channel] = static_cast<std::uint8_t>(i * 11 + channel * 31);
+        }
+    }
+    dfre::TerrainColorControl control;
+    if (seed / 3 == 1) { control.brightness = 64; control.saturation = 0; control.channels = {255, 64, 192}; }
+    if (seed / 3 == 2) { control.brightness = 255; control.saturation = 255; control.channels = {255, 128, 1}; }
+    const auto result = dfre::build_terrain_palettes32(terrain, gamma, control);
+    auto words_hash = [](const std::vector<std::uint32_t>& words) {
+        dfre::AssetBytes bytes;
+        bytes.reserve(words.size() * 4);
+        for (auto word : words) for (unsigned shift = 0; shift < 32; shift += 8) bytes.push_back(static_cast<std::uint8_t>(word >> shift));
+        return fingerprint(bytes);
+    };
+    std::vector<std::uint32_t> coarse;
+    for (const auto& level : result.coarse) coarse.insert(coarse.end(), level.begin(), level.end());
+    std::cout << "{\"coarse\":\"" << words_hash(coarse) << "\",\"detail\":\"" << words_hash(result.detail)
+              << "\",\"sky\":\"" << words_hash(result.sky) << "\",\"light\":" << result.light << "}\n";
+}
+
+void color_mips32_fixture(std::uint32_t seed) {
+    dfre::AssetBytes color(1024 * 1024), palette(768), gamma(256);
+    for (unsigned y = 0; y < 1024; ++y) for (unsigned x = 0; x < 1024; ++x) color[y * 1024 + x] = static_cast<std::uint8_t>(x * 5 + y * 11);
+    for (unsigned i = 0; i < 256; ++i) {
+        gamma[i] = static_cast<std::uint8_t>(seed % 2 ? i : i * i / 255);
+        for (unsigned channel = 0; channel < 3; ++channel) { constexpr unsigned factors[]{37, 67, 101}; palette[i * 3 + channel] = static_cast<std::uint8_t>(i * factors[channel]); }
+    }
+    const auto mips = dfre::build_terrain_color_mips32(color, palette, gamma);
+    std::cout << "[";
+    for (unsigned i = 0; i < mips.size(); ++i) { if (i) std::cout << ','; std::cout << '"' << fingerprint(mips[i]) << '"'; }
+    std::cout << "]\n";
+}
+
+void horizon32_fixture(std::uint32_t seed) {
+    dfre::VoxelCamera camera;
+    camera.pitch = seed * 0x04000000u;
+    camera.field_of_view = seed % 2 ? 22 : 90;
+    camera.focal_distance = seed % 2 ? 1646 : 320;
+    const auto result = dfre::build_terrain_horizon32(camera);
+    std::cout << "{\"row\":" << result.row << ",\"gradient\":[";
+    for (unsigned i = 0; i < result.gradient.size(); ++i) { if (i) std::cout << ','; std::cout << unsigned(result.gradient[i]); }
+    std::cout << "]}\n";
+}
+
+void detail32_fixture(std::uint32_t seed) {
+    const auto base = synthetic();
+    auto words = base.detail_words();
+    for (unsigned tile = 0; tile < 256; ++tile) for (unsigned at = 0; at < 256; ++at) {
+        words[tile * 256 + at] |= ((tile + at) & 255) | (((tile * 3 + at * 7) & 255) << 8);
+    }
+    const dfre::TerrainGeometry geometry(base.height_bytes(), base.character_bytes(), std::move(words));
+    dfre::AssetBytes color(1024 * 1024), palette(768), gamma(256);
+    for (unsigned y = 0; y < 1024; ++y) for (unsigned x = 0; x < 1024; ++x) color[y * 1024 + x] = static_cast<std::uint8_t>(x * 5 + y * 11);
+    for (unsigned i = 0; i < 256; ++i) {
+        gamma[i] = static_cast<std::uint8_t>(seed % 2 ? i : i * i / 255);
+        for (unsigned channel = 0; channel < 3; ++channel) { constexpr unsigned factors[]{17, 29, 43}; palette[i * 3 + channel] = static_cast<std::uint8_t>(i * factors[channel]); }
+    }
+    const auto mips = dfre::build_terrain_detail_mips32(geometry, palette, gamma);
+    auto state = seed;
+    auto next = [&]() { state = state * 1664525u + 1013904223u; return state; };
+    dfre::TerrainPalettes32 colors;
+    colors.coarse[0].resize(512); colors.detail.resize(256);
+    for (auto& value : colors.coarse[0]) value = next();
+    for (auto& value : colors.detail) value = next();
+    colors.light = next();
+    const auto x = next(), y = next();
+    const auto tile = dfre::build_terrain_detail_tile32(geometry, color, mips, colors, x, y, seed % 4);
+    std::cout << "{\"mips\":[";
+    for (unsigned lod = 0; lod < 5; ++lod) {
+        dfre::AssetBytes bytes;
+        for (auto value : mips[lod]) for (unsigned shift = 0; shift < 32; shift += 8) bytes.push_back(static_cast<std::uint8_t>(value >> shift));
+        if (lod) std::cout << ',';
+        std::cout << '"' << fingerprint(bytes) << '"';
+    }
+    std::cout << "],\"height\":[";
+    for (unsigned i = 0; i < 256; ++i) { if (i) std::cout << ','; std::cout << tile.height[i]; }
+    std::cout << "],\"color\":[";
+    for (unsigned i = 0; i < 256; ++i) { if (i) std::cout << ','; std::cout << tile.color[i]; }
+    std::cout << "]}\n";
+}
 } // namespace
 
 int main(int argc, char** argv) {
@@ -198,7 +288,7 @@ int main(int argc, char** argv) {
             samples(synthetic());
         } else if (argc == 2 && std::string_view(argv[1]) == "--bounds-fixture") {
             bounds_fixture();
-        } else if (argc == 3 && (std::string_view(argv[1]) == "--raster-fixture" || std::string_view(argv[1]) == "--camera-fixture" || std::string_view(argv[1]) == "--projection-fixture" || std::string_view(argv[1]) == "--detail-fixture" || std::string_view(argv[1]) == "--palette-fixture" || std::string_view(argv[1]) == "--shades32-fixture")) {
+        } else if (argc == 3 && (std::string_view(argv[1]) == "--raster-fixture" || std::string_view(argv[1]) == "--camera-fixture" || std::string_view(argv[1]) == "--projection-fixture" || std::string_view(argv[1]) == "--detail-fixture" || std::string_view(argv[1]) == "--palette-fixture" || std::string_view(argv[1]) == "--shades32-fixture" || std::string_view(argv[1]) == "--palettes32-fixture" || std::string_view(argv[1]) == "--detail32-fixture" || std::string_view(argv[1]) == "--horizon32-fixture" || std::string_view(argv[1]) == "--color-mips32-fixture")) {
             std::uint32_t seed = 0;
             const std::string_view input(argv[2]);
             const auto parsed = std::from_chars(input.data(), input.data() + input.size(), seed);
@@ -208,7 +298,11 @@ int main(int argc, char** argv) {
             else if (std::string_view(argv[1]) == "--projection-fixture") projection_fixture(seed);
             else if (std::string_view(argv[1]) == "--detail-fixture") detail_fixture(seed);
             else if (std::string_view(argv[1]) == "--palette-fixture") palette_fixture(seed);
-            else shades32_fixture(seed);
+            else if (std::string_view(argv[1]) == "--shades32-fixture") shades32_fixture(seed);
+            else if (std::string_view(argv[1]) == "--palettes32-fixture") palettes32_fixture(seed);
+            else if (std::string_view(argv[1]) == "--color-mips32-fixture") color_mips32_fixture(seed);
+            else if (std::string_view(argv[1]) == "--horizon32-fixture") horizon32_fixture(seed);
+            else detail32_fixture(seed);
         } else if (argc == 3 && std::string_view(argv[1]) == "--palette-assets") {
             const dfre::AssetStore assets(argv[2]);
             const auto gamma = dfre::load_terrain_gamma(std::filesystem::path(argv[2]) / "INTRO.KDV");

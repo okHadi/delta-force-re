@@ -82,6 +82,29 @@ struct TerrainColorControl {
 std::vector<std::uint32_t> build_terrain_shades32(const AssetBytes& gamma_palette,
     const std::array<std::uint8_t, 3>& light_color, const TerrainColorControl& control = {});
 
+struct TerrainPalettes32 {
+    std::array<std::vector<std::uint32_t>, 10> coarse; // 256 two-pixel pairs per level.
+    std::vector<std::uint32_t> detail;
+    std::vector<std::uint32_t> sky; // 256 gradient rows by 64 cloud values by two pixels.
+    std::uint32_t light = 0;
+};
+
+TerrainPalettes32 build_terrain_palettes32(const TerrainRuntime& terrain, const AssetBytes& gamma,
+    const TerrainColorControl& control = {});
+std::vector<AssetBytes> build_terrain_color_mips32(const AssetBytes& color, const AssetBytes& palette,
+    const AssetBytes& gamma);
+std::array<std::vector<std::uint32_t>, 5> build_terrain_detail_mips32(const TerrainGeometry& geometry,
+    const AssetBytes& detail_palette, const AssetBytes& gamma);
+
+struct TerrainDetailTile32 {
+    std::array<std::uint16_t, 256> height{};
+    std::array<std::uint32_t, 256> color{};
+};
+
+TerrainDetailTile32 build_terrain_detail_tile32(const TerrainGeometry& geometry, const AssetBytes& color,
+    const std::array<std::vector<std::uint32_t>, 5>& detail_mips, const TerrainPalettes32& palettes,
+    std::uint32_t x, std::uint32_t y, unsigned lod);
+
 TerrainDetailTile build_terrain_detail_tile(const TerrainGeometry& geometry, const AssetBytes& color,
     const TerrainBlendTables& tables, std::uint32_t x, std::uint32_t y);
 
@@ -115,6 +138,7 @@ struct VoxelCamera {
     std::int32_t right = 639;
     std::int32_t bottom = 479;
     std::int32_t focal_distance = 320;
+    std::int32_t field_of_view = 90;
 };
 
 struct VoxelColumns {
@@ -123,6 +147,13 @@ struct VoxelColumns {
 };
 
 VoxelColumns initialize_voxel_columns(const VoxelCamera& camera);
+
+struct TerrainHorizon32 {
+    std::int32_t row = -1;
+    AssetBytes gradient;
+};
+TerrainHorizon32 build_terrain_horizon32(const VoxelCamera& camera, std::int32_t horizon_scale = 65536);
+
 
 struct VoxelLod {
     bool detail = false;

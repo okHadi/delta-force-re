@@ -286,21 +286,20 @@ std::vector<std::uint32_t> load_terrain_blend_selectors(const std::filesystem::p
     return decode_terrain_blend_selectors(bytes);
 }
 
-TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
-    const std::array<std::uint8_t, 3>& light_color, std::vector<std::uint32_t> selectors) {
-    if (gamma_palette.size() != 768 || selectors.size() != 256 ||
-        std::any_of(selectors.begin(), selectors.end(), [](std::uint32_t value) { return value > 11; })) {
-        throw AssetError("Invalid terrain palette or blend selectors");
-    }
+namespace {
+class PaletteMatcher8 {
+    AssetBytes palette;
     std::array<std::uint16_t, 4096> starts{};
     std::array<std::uint8_t, 4096> counts{};
-    AssetBytes candidates(0x20000, 0);
-    std::size_t candidate_count = 0;
-    auto distance = [&](int r, int g, int b, unsigned index) {
-        const int dr = r - gamma_palette[index * 3], dg = g - gamma_palette[index * 3 + 1],
-            db = b - gamma_palette[index * 3 + 2];
+    AssetBytes candidates = AssetBytes(0x20000, 0);
+    int distance(int r, int g, int b, unsigned index) const {
+        const int dr = r - palette[index * 3], dg = g - palette[index * 3 + 1], db = b - palette[index * 3 + 2];
         return dr * dr * 900 + dg * dg * 2025 + db * db * 625;
-    };
+    }
+public:
+    explicit PaletteMatcher8(const AssetBytes& input) : palette(input) {
+        if (palette.size() != 768) throw AssetError("Expected a complete palette for color matching");
+        std::size_t candidate_count = 0;
     for (unsigned r = 0; r < 16; ++r) for (unsigned g = 0; g < 16; ++g) for (unsigned b = 0; b < 16; ++b) {
         const auto bin = r * 256 + g * 16 + b;
         std::array<int, 256> distances{};
@@ -315,7 +314,9 @@ TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
             ++counts[bin];
         }
     }
-    auto nearest = [&](unsigned r, unsigned g, unsigned b) {
+    }
+    std::uint8_t nearest(unsigned r, unsigned g, unsigned b) const {
+        if (r > 255 || g > 255 || b > 255) throw AssetError("Palette color components must be bytes");
         const auto bin = (r >> 4) * 256 + (g >> 4) * 16 + (b >> 4);
         int best_distance = 0x0fffffff;
         std::uint8_t best = 0;
@@ -325,7 +326,18 @@ TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
             if (current < best_distance) { best = index; best_distance = current; }
         }
         return best;
-    };
+    }
+};
+} // namespace
+
+TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
+    const std::array<std::uint8_t, 3>& light_color, std::vector<std::uint32_t> selectors) {
+    if (gamma_palette.size() != 768 || selectors.size() != 256 ||
+        std::any_of(selectors.begin(), selectors.end(), [](std::uint32_t value) { return value > 11; })) {
+        throw AssetError("Invalid terrain palette or blend selectors");
+    }
+    const PaletteMatcher8 matcher(gamma_palette);
+    auto nearest = [&](unsigned r, unsigned g, unsigned b) { return matcher.nearest(r, g, b); };
     TerrainBlendTables result{AssetBytes(65536), AssetBytes(16384), std::move(selectors)};
     for (unsigned a = 0; a < 256; ++a) for (unsigned b = 0; b < 256; ++b) {
         auto mixed = nearest((unsigned(gamma_palette[a * 3]) + gamma_palette[b * 3]) >> 1,
@@ -353,33 +365,53 @@ TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
     return result;
 }
 
-std::vector<std::uint32_t> build_terrain_shades32(const AssetBytes& gamma_palette,
-    const std::array<std::uint8_t, 3>& light_color, const TerrainColorControl& control) {
-    if (gamma_palette.size() != 768 || control.brightness < 0 || control.brightness > 255 ||
-        control.saturation < 0 || control.saturation > 255 || std::any_of(control.channels.begin(), control.channels.end(),
-        [](int value) { return value < 0 || value > 255; })) throw AssetError("Invalid terrain 32-bit color controls");
+namespace {
+std::uint32_t pack_terrain_rgb(const std::array<std::uint8_t, 3>& rgb) {
+    return ((std::uint32_t(rgb[0]) + std::uint32_t(rgb[1]) * 2 + rgb[2]) >> 2) << 24 |
+        (std::uint32_t(rgb[0]) << 16) | (std::uint32_t(rgb[1]) << 8) | rgb[2];
+}
+
+struct ColorTransform32 {
+    TerrainColorControl control;
     std::array<std::uint8_t, 256> inverse{};
     std::array<std::array<std::uint8_t, 256>, 3> channels{};
-    for (unsigned i = 0; i < 256; ++i) {
-        inverse[i] = static_cast<std::uint8_t>(std::pow(double(i) / 255.0, 0.8) * 255.0 + 0.5);
-        const int curve = static_cast<int>(std::sqrt(255.0 * i) - i + 0.5);
-        const int factor = control.brightness >= 128 ? (control.brightness - 128) * 2 : std::min(255, (128 - control.brightness) * 2);
-        const int base = std::max(0, int(i) + (control.brightness >= 128 ? 1 : -1) * ((curve * factor) >> 8));
-        for (unsigned channel = 0; channel < 3; ++channel) {
-            channels[channel][i] = static_cast<std::uint8_t>(std::min(255, ((base * control.channels[channel]) >> 8) * 2));
+
+    explicit ColorTransform32(const TerrainColorControl& input) : control(input) {
+        if (control.brightness < 0 || control.brightness > 255 || control.saturation < 0 || control.saturation > 255 ||
+            std::any_of(control.channels.begin(), control.channels.end(), [](int value) { return value < 0 || value > 255; })) {
+            throw AssetError("Invalid terrain 32-bit color controls");
+        }
+        for (unsigned i = 0; i < 256; ++i) {
+            inverse[i] = static_cast<std::uint8_t>(std::pow(double(i) / 255.0, 0.8) * 255.0 + 0.5);
+            const int curve = static_cast<int>(std::sqrt(255.0 * i) - i + 0.5);
+            const int factor = control.brightness >= 128 ? (control.brightness - 128) * 2 : std::min(255, (128 - control.brightness) * 2);
+            const int base = std::max(0, int(i) + (control.brightness >= 128 ? 1 : -1) * ((curve * factor) >> 8));
+            for (unsigned channel = 0; channel < 3; ++channel) channels[channel][i] = static_cast<std::uint8_t>(std::min(255, ((base * control.channels[channel]) >> 8) * 2));
         }
     }
-    auto floor128 = [](int value) { return value >= 0 ? value / 128 : -((-value + 127) / 128); };
-    auto pack = [&](const std::array<std::uint8_t, 3>& rgb) {
+
+    std::uint32_t pack(const std::array<std::uint8_t, 3>& rgb) const {
         const int luminance = (int(rgb[0]) + int(rgb[1]) * 2 + rgb[2]) >> 2;
-        std::array<unsigned, 3> corrected{};
+        std::array<std::uint8_t, 3> corrected{};
         for (unsigned channel = 0; channel < 3; ++channel) {
-            const int value = std::clamp(luminance + floor128((int(rgb[channel]) - luminance) * control.saturation), 0, 255);
+            const int product = (int(rgb[channel]) - luminance) * control.saturation;
+            const int delta = product >= 0 ? product / 128 : -((-product + 127) / 128);
+            const int value = std::clamp(luminance + delta, 0, 255);
             corrected[channel] = channels[channel][static_cast<unsigned>(value)];
         }
-        const auto light = (corrected[0] + corrected[1] * 2 + corrected[2]) >> 2;
-        return (light << 24) | (corrected[0] << 16) | (corrected[1] << 8) | corrected[2];
-    };
+        return pack_terrain_rgb(corrected);
+    }
+
+    std::uint32_t pack_gamma(const std::array<std::uint8_t, 3>& rgb) const {
+        return pack({inverse[rgb[0]], inverse[rgb[1]], inverse[rgb[2]]});
+    }
+};
+} // namespace
+
+std::vector<std::uint32_t> build_terrain_shades32(const AssetBytes& gamma_palette,
+    const std::array<std::uint8_t, 3>& light_color, const TerrainColorControl& control) {
+    if (gamma_palette.size() != 768) throw AssetError("Expected a 256-color gamma palette");
+    const ColorTransform32 transform(control);
     std::vector<std::uint32_t> result(64 * 256);
     for (unsigned color = 0; color < 256; ++color) for (unsigned mode = 0; mode < 2; ++mode) {
         std::array<int, 3> value{}, step{};
@@ -392,10 +424,202 @@ std::vector<std::uint32_t> build_terrain_shades32(const AssetBytes& gamma_palett
             const auto row = mode ? shade + 32 : 31 - shade;
             std::array<std::uint8_t, 3> rgb{};
             for (unsigned channel = 0; channel < 3; ++channel) {
-                rgb[channel] = inverse[static_cast<unsigned>(value[channel]) >> 16];
+                rgb[channel] = transform.inverse[static_cast<unsigned>(value[channel]) >> 16];
                 value[channel] += step[channel];
             }
-            result[row * 256 + color] = pack(rgb);
+            result[row * 256 + color] = transform.pack(rgb);
+        }
+    }
+    return result;
+}
+
+TerrainPalettes32 build_terrain_palettes32(const TerrainRuntime& terrain, const AssetBytes& gamma,
+    const TerrainColorControl& control) {
+    if (gamma.size() != 256 || terrain.color.palette.size() != 768 || terrain.detail_palette.size() != 768 ||
+        terrain.sky_palette.palette.size() != 768) throw AssetError("Terrain 32-bit palettes require complete RGB and gamma data");
+    const ColorTransform32 transform(control);
+    const auto& sky = terrain.sky_palette.palette;
+    std::array<int, 3> fog{}, light{};
+    for (unsigned channel = 0; channel < 3; ++channel) {
+        fog[channel] = gamma[sky[channel]];
+        light[channel] = gamma[sky[48 + channel]];
+    }
+    auto floor256 = [](int value) { return value >= 0 ? value / 256 : -((-value + 255) / 256); };
+    TerrainPalettes32 result;
+    result.light = pack_terrain_rgb({sky[48], sky[49], sky[50]});
+    for (unsigned lod = 0; lod < 10; ++lod) {
+        auto& palette = result.coarse[lod];
+        palette.reserve(512);
+        const int factor = std::max(0, int(lod) * 20 - 15);
+        for (unsigned i = 0; i < 256; ++i) {
+            std::array<std::uint8_t, 3> rgb{};
+            for (unsigned channel = 0; channel < 3; ++channel) {
+                const int from = gamma[terrain.color.palette[i * 3 + channel]];
+                rgb[channel] = static_cast<std::uint8_t>(from + floor256((fog[channel] - from) * factor));
+            }
+            const auto value = transform.pack_gamma(rgb);
+            palette.push_back(value); palette.push_back(value);
+        }
+    }
+    result.detail.reserve(256);
+    for (unsigned i = 0; i < 256; ++i) result.detail.push_back(transform.pack(
+        {terrain.detail_palette[i * 3], terrain.detail_palette[i * 3 + 1], terrain.detail_palette[i * 3 + 2]}));
+    result.sky.reserve(256 * 64 * 2);
+    std::array<int, 3> previous{int(gamma[sky[0]]) * 65536, int(gamma[sky[1]]) * 65536, int(gamma[sky[2]]) * 65536};
+    for (unsigned segment = 0; segment < 16; ++segment) {
+        std::array<int, 3> target{}, step{};
+        for (unsigned channel = 0; channel < 3; ++channel) {
+            target[channel] = int(gamma[sky[segment * 3 + channel]]) * 65536;
+            step[channel] = (target[channel] - previous[channel]) / 16;
+        }
+        for (unsigned row = 0; row < 16; ++row) {
+            std::array<int, 3> value{}, cloud_step{};
+            for (unsigned channel = 0; channel < 3; ++channel) {
+                value[channel] = previous[channel] + int(row) * step[channel];
+                const int delta = light[channel] * 65536 - value[channel];
+                cloud_step[channel] = delta >= 0 ? delta / 64 : -((-delta + 63) / 64);
+            }
+            for (unsigned cloud = 0; cloud < 64; ++cloud) {
+                std::array<std::uint8_t, 3> rgb{};
+                for (unsigned channel = 0; channel < 3; ++channel) {
+                    rgb[channel] = static_cast<std::uint8_t>(static_cast<unsigned>(value[channel]) >> 16);
+                    value[channel] += cloud_step[channel];
+                }
+                const auto color = transform.pack_gamma(rgb);
+                result.sky.push_back(color); result.sky.push_back(color);
+            }
+        }
+        previous = target;
+    }
+    return result;
+}
+
+std::vector<AssetBytes> build_terrain_color_mips32(const AssetBytes& color, const AssetBytes& raw_palette,
+    const AssetBytes& gamma) {
+    if (color.size() != map_pixels || raw_palette.size() != 768 || gamma.size() != 256) {
+        throw AssetError("Terrain color mips require a 1024-square map and complete RGB and gamma tables");
+    }
+    AssetBytes palette(768);
+    std::transform(raw_palette.begin(), raw_palette.end(), palette.begin(), [&](std::uint8_t value) { return gamma[value]; });
+    const PaletteMatcher8 matcher(palette);
+    std::vector<AssetBytes> result{color};
+    for (unsigned width = 1024; width > 2; width /= 2) {
+        const auto& source = result.back();
+        AssetBytes target(width * width / 4);
+        for (unsigned y = 0; y < width; y += 2) for (unsigned x = 0; x < width; x += 2) {
+            const auto at = y * width + x;
+            const std::array<unsigned, 4> colors{source[at], source[at + 1], source[at + width], source[at + width + 1]};
+            std::array<unsigned, 3> sum{};
+            for (auto index : colors) for (unsigned channel = 0; channel < 3; ++channel) sum[channel] += palette[index * 3 + channel];
+            target[(y / 2) * (width / 2) + x / 2] = matcher.nearest(sum[0] / 4, sum[1] / 4, sum[2] / 4);
+        }
+        result.push_back(std::move(target));
+    }
+    return result;
+}
+
+std::array<std::vector<std::uint32_t>, 5> build_terrain_detail_mips32(const TerrainGeometry& geometry,
+    const AssetBytes& detail_palette, const AssetBytes& gamma) {
+    if (detail_palette.size() != 768 || gamma.size() != 256) throw AssetError("Detail mips require complete RGB and gamma tables");
+    AssetBytes palette(768);
+    std::transform(detail_palette.begin(), detail_palette.end(), palette.begin(), [&](std::uint8_t value) { return gamma[value]; });
+    const PaletteMatcher8 matcher(palette);
+    std::array<std::vector<std::uint32_t>, 5> result;
+    result[0] = geometry.detail_words();
+    unsigned width = 16;
+    for (unsigned lod = 1; lod < 5; ++lod) {
+        auto& target = result[lod];
+        target.reserve(256 * (width / 2) * (width / 2));
+        const auto& source = result[lod - 1];
+        for (unsigned tile = 0; tile < 256; ++tile) for (unsigned y = 0; y < width; y += 2) for (unsigned x = 0; x < width; x += 2) {
+            const auto at = tile * width * width + y * width + x;
+            const std::array<std::uint32_t, 4> cells{source[at], source[at + 1], source[at + width], source[at + width + 1]};
+            unsigned shade = 0, elevation = 0, count = 0;
+            std::array<unsigned, 3> sum{};
+            for (auto word : cells) {
+                shade += (word >> 8) & 255;
+                elevation = std::max(elevation, word >> 16);
+                if (word & 255) {
+                    ++count;
+                    for (unsigned channel = 0; channel < 3; ++channel) sum[channel] += palette[(word & 255) * 3 + channel];
+                }
+            }
+            const auto color = count < 2 ? 0 : matcher.nearest(sum[0] / count, sum[1] / count, sum[2] / count);
+            target.push_back(std::uint32_t(color) | ((shade / 4) << 8) | (elevation << 16));
+        }
+        width /= 2;
+    }
+    return result;
+}
+
+TerrainDetailTile32 build_terrain_detail_tile32(const TerrainGeometry& geometry, const AssetBytes& color,
+    const std::array<std::vector<std::uint32_t>, 5>& detail_mips, const TerrainPalettes32& palettes,
+    std::uint32_t x, std::uint32_t y, unsigned lod) {
+    if (lod > 3 || color.size() != map_pixels || palettes.coarse[0].size() != 512 || palettes.detail.size() != 256) {
+        throw AssetError("Invalid terrain 32-bit detail tile inputs");
+    }
+    const unsigned width = 16 >> lod, cells = 1u << lod, bits = 4 - lod;
+    if (detail_mips[lod].size() != 256 * width * width) throw AssetError("Invalid terrain detail mip size");
+    const auto origin_x = (x >> 22) & (1023u & ~(cells - 1));
+    const auto origin_y = (y >> 22) & (1023u & ~(cells - 1));
+    auto shift = [](int value, unsigned count) {
+        const int scale = 1 << count;
+        return value >= 0 ? value / scale : -((-value + scale - 1) / scale);
+    };
+    auto interpolate = [](std::uint32_t a, std::uint32_t b, unsigned at, unsigned count) {
+        std::uint32_t result = 0;
+        for (unsigned channel = 0; channel < 32; channel += 8) {
+            const int from = int((a >> channel) & 255) * 257;
+            const int to = int((b >> channel) & 255) * 257;
+            const int value = from + int(at) * ((to >> count) - (from >> count));
+            result |= std::uint32_t((value >> 8) & 255) << channel;
+        }
+        return result;
+    };
+    const auto& heights = geometry.height_bytes();
+    TerrainDetailTile32 result;
+    for (unsigned cy = 0; cy < cells; ++cy) for (unsigned cx = 0; cx < cells; ++cx) {
+        const unsigned ix = (origin_x + cx) & 1023, iy = (origin_y + cy) & 1023;
+        const std::array<std::size_t, 4> positions{iy * 1024 + ix, iy * 1024 + ((ix + 1) & 1023),
+            ((iy + 1) & 1023) * 1024 + ix, ((iy + 1) & 1023) * 1024 + ((ix + 1) & 1023)};
+        std::array<std::uint32_t, 4> colors{};
+        for (unsigned i = 0; i < 4; ++i) colors[i] = palettes.coarse[0][unsigned(color[positions[i]]) * 2];
+        const auto detail_base = unsigned(geometry.character_bytes()[positions[0]]) * width * width;
+        const int left0 = int(heights[positions[0]]) * 0x100000, right0 = int(heights[positions[1]]) * 0x100000;
+        const int left_delta = int(heights[positions[2]]) * 0x100000 - left0;
+        const int right_delta = int(heights[positions[3]]) * 0x100000 - right0;
+        for (unsigned row = 0; row < width; ++row) {
+            const int left = left0 + shift(left_delta, bits + 1) + int(row) * shift(left_delta, bits);
+            const int right = right0 + shift(right_delta, bits + 1) + int(row) * shift(right_delta, bits);
+            const auto color_left = interpolate(colors[0], colors[2], row, bits);
+            const auto color_right = interpolate(colors[1], colors[3], row, bits);
+            for (unsigned column = 0; column < width; ++column) {
+                const auto at = (cy * width + row) * 16 + cx * width + column;
+                const auto detail = detail_mips[lod][detail_base + row * width + column];
+                int elevation = left + shift(right - left, bits + 1) + int(column) * shift(right - left, bits);
+                if ((detail & 0xff0000) > 0x7fffff) elevation += int(((detail & 0xff0000) - 0x800000) >> 1);
+                result.height[at] = static_cast<std::uint16_t>(unsigned(elevation) >> 16);
+                auto value = interpolate(color_left, color_right, column, bits);
+                if (lod == 3) {
+                    const auto corner = row * 2 + column;
+                    value = corner == 0 ? colors[0] : ((colors[0] & 0xfefefefe) >> 1) + ((colors[corner] & 0xfefefefe) >> 1);
+                }
+                const auto shade = (detail >> 8) & 255, paint = detail & 255;
+                if (shade == 0) { if (paint) value = palettes.detail[paint]; }
+                else {
+                    const auto target = shade < 128 ? 0u : palettes.light;
+                    const unsigned magnitude = shade < 128 ? 128 - shade : shade - 128;
+                    const unsigned factor_bits = magnitude * 512;
+                    const int factor = factor_bits < 32768 ? int(factor_bits) : int(factor_bits) - 65536;
+                    std::uint32_t shaded = 0;
+                    for (unsigned channel = 0; channel < 32; channel += 8) {
+                        const int from = int((value >> channel) & 255), to = int((target >> channel) & 255);
+                        shaded |= std::uint32_t(std::clamp(from + floor_shift16(std::int64_t(to - from) * factor), 0, 255)) << channel;
+                    }
+                    value = paint ? ((shaded & 0xfefefefe) >> 1) + ((palettes.detail[paint] & 0xfefefefe) >> 1) : shaded;
+                }
+                result.color[at] = value;
+            }
         }
     }
     return result;
@@ -488,6 +712,40 @@ VoxelProjection build_voxel_projection(std::int32_t focal_distance, float detail
             distance = static_cast<double>(static_cast<long double>(distance) + level.sample_step);
         }
         level.depth_end = static_cast<std::uint32_t>(result.depths.size());
+    }
+    return result;
+}
+
+TerrainHorizon32 build_terrain_horizon32(const VoxelCamera& camera, std::int32_t horizon_scale) {
+    if (camera.width == 0 || camera.width > 1024 || camera.height == 0 || camera.height > 768 || camera.left < 0 ||
+        camera.top < 0 || camera.right < camera.left || camera.bottom < camera.top ||
+        camera.right >= static_cast<int>(camera.width) || camera.bottom >= static_cast<int>(camera.height) ||
+        camera.focal_distance <= 0 || camera.focal_distance > 32767 || camera.field_of_view <= 0 || camera.field_of_view > 179 ||
+        horizon_scale <= 0 || horizon_scale > 0x1000000) throw AssetError("Invalid terrain horizon inputs");
+    TerrainHorizon32 result{-1, AssetBytes(camera.height, 0)};
+    const double fraction = static_cast<double>(static_cast<long double>(camera.pitch) / 4294967295.0L);
+    const double radians = static_cast<double>(static_cast<long double>(fraction) * 2.0L * 3.1415926539L);
+    double degrees = static_cast<double>(static_cast<long double>(fraction) * 360.0L);
+    if (degrees > 180) degrees = 360.0 - degrees, degrees = -degrees;
+    if (degrees < -45) return result;
+    std::int32_t offset = static_cast<std::int32_t>(camera.height);
+    if (degrees < 89) {
+        const long double fixed_tangent = std::tan(static_cast<long double>(radians)) * 65536.0L;
+        const auto tangent = fixed_tangent < -2147483648.0L || fixed_tangent >= 2147483648.0L ?
+            std::numeric_limits<std::int32_t>::min() : static_cast<std::int32_t>(fixed_tangent);
+        offset = floor_shift16(std::int64_t(camera.focal_distance) * tangent);
+    }
+    const auto center_y = camera.top + ((camera.bottom - camera.top + 1) >> 1);
+    const auto row = offset + 5 + center_y;
+    if (row < 0) return result;
+    result.row = row;
+    const auto pixel_angle = (std::int64_t(camera.field_of_view) * 65536) / (camera.right - camera.left + 1);
+    const auto ratio = pixel_angle * 65536 / 0x2400;
+    const auto increment = floor_shift16(ratio * 2 * horizon_scale);
+    std::int64_t accumulated = 0;
+    for (auto y = row; y >= camera.top; --y, accumulated += increment) {
+        if (y <= camera.bottom) result.gradient[static_cast<std::size_t>(y)] =
+            static_cast<std::uint8_t>(std::min<std::int64_t>(255, accumulated / 65536));
     }
     return result;
 }

@@ -213,6 +213,37 @@ int main() {
         rejects([&] { dfre::make_terrain_palette8({}, sky_rgb, gamma); });
         rejects([&] { dfre::make_terrain_palette8(palette_rgb, {}, gamma); });
         rejects([&] { dfre::make_terrain_palette8(palette_rgb, sky_rgb, {}); });
+        dfre::TerrainRuntime color_runtime{flat, {}, {}, {}, {}, {}, {}, {}, 0, 32};
+        color_runtime.color.palette.resize(768); color_runtime.detail_palette.resize(768);
+        color_runtime.sky_palette.palette.resize(768);
+        dfre::AssetBytes table_gamma(256);
+        for (unsigned i = 0; i < 256; ++i) {
+            table_gamma[i] = static_cast<std::uint8_t>(i * i / 255);
+            for (unsigned channel = 0; channel < 3; ++channel) {
+                constexpr unsigned multipliers[] = {37, 67, 101}, detail_multipliers[] = {17, 29, 43};
+                color_runtime.color.palette[i * 3 + channel] = static_cast<std::uint8_t>(i * multipliers[channel]);
+                color_runtime.detail_palette[i * 3 + channel] = static_cast<std::uint8_t>(i * detail_multipliers[channel]);
+                color_runtime.sky_palette.palette[i * 3 + channel] = static_cast<std::uint8_t>(i * 11 + channel * 31);
+            }
+        }
+        const auto color_tables = dfre::build_terrain_palettes32(color_runtime, table_gamma);
+        auto words_hash = [](const std::vector<std::uint32_t>& words) {
+            std::uint64_t hash = 0xcbf29ce484222325ull;
+            for (auto word : words) for (unsigned shift = 0; shift < 32; shift += 8) {
+                hash = (hash ^ ((word >> shift) & 255)) * 0x100000001b3ull;
+            }
+            return hash;
+        };
+        std::vector<std::uint32_t> coarse_words;
+        for (const auto& level : color_tables.coarse) {
+            require(level.size() == 512, "Original coarse palette dimensions failed");
+            for (unsigned i = 0; i < 256; ++i) require(level[i * 2] == level[i * 2 + 1], "Original coarse palette pair failed");
+            coarse_words.insert(coarse_words.end(), level.begin(), level.end());
+        }
+        require(words_hash(coarse_words) == 0x6d14f15b40c1a315ull && words_hash(color_tables.detail) == 0xe34e5efbe8564de5ull &&
+                words_hash(color_tables.sky) == 0x65bc340d1e951c71ull && color_tables.light == 3484471278u,
+                "Original terrain color table numeric hashes failed");
+        rejects([&] { dfre::build_terrain_palettes32(color_runtime, {}); });
         const dfre::AssetBytes values{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16};
         require(dfre::terrain_height_mip(values, 4) == dfre::AssetBytes({6, 8, 14, 16}), "Height mip must use maximum");
         require(dfre::terrain_sky_water_mip(values, 4) == dfre::AssetBytes({3, 5, 11, 13}), "Sky/water mip rounding failed");
@@ -241,6 +272,44 @@ int main() {
                 "Original detail render height scale failed");
         require(tile.color[0] == 17 && tile.color[3] == 5 && tile.color[4] == 99,
                 "Original detail paint and shade lookup failed");
+        dfre::AssetBytes identity_gamma(256), gray_palette(768);
+        for (unsigned i = 0; i < 256; ++i) {
+            identity_gamma[i] = static_cast<std::uint8_t>(i);
+            gray_palette[i * 3] = gray_palette[i * 3 + 1] = gray_palette[i * 3 + 2] = static_cast<std::uint8_t>(i);
+        }
+        auto detail32 = std::vector<std::uint32_t>(65536, 128u << 16);
+        detail32[0] |= 5; detail32[1] |= 5;
+        detail32[16] |= 255u << 8;
+        detail32[17] = 255u << 16;
+        const dfre::TerrainGeometry geometry32(dfre::AssetBytes(1024 * 1024, 40), dfre::AssetBytes(1024 * 1024), detail32);
+        const auto mips32 = dfre::build_terrain_detail_mips32(geometry32, gray_palette, identity_gamma);
+        require(mips32[0] == detail32 && mips32[1][0] == (5u | (63u << 8) | (255u << 16)),
+                "Detail mip paint count, shade average or height maximum failed");
+        require(mips32[4].size() == 256 && (mips32[2][0] & 255) == 0,
+                "Sparse detail paint must clear at the next mip level");
+        dfre::TerrainPalettes32 flat_colors;
+        flat_colors.coarse[0].assign(512, 0x80706050); flat_colors.detail.assign(256, 0x12345678);
+        flat_colors.light = 0x00ffffff;
+        for (unsigned lod = 0; lod < 4; ++lod) {
+            const auto output = dfre::build_terrain_detail_tile32(geometry32, dfre::AssetBytes(1024 * 1024), mips32,
+                flat_colors, 0xffffffff, 0xffffffff, lod);
+            require(output.height[255] == 640 && output.color[255] == 0x80706050,
+                    "Flat 32-bit detail tile or wrapped tile origin failed");
+        }
+        const auto painted32 = dfre::build_terrain_detail_tile32(geometry32, dfre::AssetBytes(1024 * 1024), mips32,
+            flat_colors, 0, 0, 0);
+        require(painted32.color[0] == 0x12345678 && painted32.height[17] == 703,
+                "Unshaded paint replacement or positive visual detail scale failed");
+        rejects([&] { dfre::build_terrain_detail_mips32(geometry32, {}, identity_gamma); });
+        rejects([&] { dfre::build_terrain_detail_tile32(geometry32, {}, mips32, flat_colors, 0, 0, 0); });
+        rejects([&] { dfre::build_terrain_detail_tile32(geometry32, dfre::AssetBytes(1024 * 1024), mips32, flat_colors, 0, 0, 4); });
+        rejects([&] { auto bad = mips32; bad[2].pop_back(); dfre::build_terrain_detail_tile32(geometry32,
+            dfre::AssetBytes(1024 * 1024), bad, flat_colors, 0, 0, 2); });
+        const auto color_mips = dfre::build_terrain_color_mips32(dfre::AssetBytes(1024 * 1024, 42), gray_palette, identity_gamma);
+        require(color_mips.size() == 10 && color_mips.back() == dfre::AssetBytes(4, 42),
+                "Original color mip dimensions or palette match failed");
+        rejects([&] { dfre::build_terrain_color_mips32({}, gray_palette, identity_gamma); });
+        rejects([&] { dfre::build_terrain_color_mips32(dfre::AssetBytes(1024 * 1024), {}, identity_gamma); });
         const auto bounds = dfre::build_terrain_height_bounds(render_geometry);
         require(bounds.size() == 10 && bounds[0].size() == 1024 * 1024 && bounds.back().size() == 4,
                 "Original height-bound mip dimensions failed");
@@ -275,6 +344,18 @@ int main() {
         rejects([&] { auto bad = pass; bad.lod = 10; dfre::render_voxel_pass_8(bad, {}, {}, {}, columns, pixels, depths); });
         rejects([&] { dfre::render_voxel_pass_8(pass, {}, {}, {1, 2}, columns, pixels, depths); });
         rejects([&] { dfre::render_voxel_pass_8(pass, {1, 1, 1, 1}, {1, 1, 1, 1}, {1}, columns, pixels, depths); });
+        const auto horizon = dfre::build_terrain_horizon32(dfre::VoxelCamera{});
+        require(horizon.row == 245 && horizon.gradient[245] == 0 && horizon.gradient[244] == 2 &&
+                horizon.gradient[0] == 255 && horizon.gradient[246] == 0,
+                "Original 32-bit sky horizon or gradient increment failed");
+        auto downward_camera = dfre::VoxelCamera{}; downward_camera.pitch = 0xe0000000;
+        require(dfre::build_terrain_horizon32(downward_camera).row == -1,
+                "Downward pitch must hide the sky horizon");
+        auto upward_camera = dfre::VoxelCamera{}; upward_camera.pitch = 0x40000000;
+        require(dfre::build_terrain_horizon32(upward_camera).row == 725,
+                "Steep upward pitch must use the original height limit");
+        rejects([&] { auto bad = dfre::VoxelCamera{}; bad.field_of_view = 0; dfre::build_terrain_horizon32(bad); });
+        rejects([&] { dfre::build_terrain_horizon32(dfre::VoxelCamera{}, -1); });
         const auto rays = dfre::initialize_voxel_columns(dfre::VoxelCamera{});
         require(rays.columns.size() == 320 && rays.columns[0].pixel_offset == 479 * 640 &&
                 rays.columns[0].depth_index == 0 && rays.columns[0].step[0] == 262080 &&

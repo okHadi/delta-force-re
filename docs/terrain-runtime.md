@@ -30,6 +30,13 @@ It preserves the original candidate bins, weighted color distance, index-zero ru
 `build_terrain_shades32` implements the original 64 × 256 color rows with brightness, saturation, and RGB controls.
 Its word layout is luminance, red, green, blue. The high byte stores `(R + 2G + B) / 4`.
 Inverse gamma and brightness curves are generated from verified power and square-root formulas.
+`build_terrain_palettes32` implements the coarse, detail, and sky color tables from `0x47D080` / `0x47C6A0`.
+It supplies 10 coarse palettes, 256 detail colors, and 256 sky rows with 64 cloud values and paired pixels.
+`build_terrain_detail_mips32` uses gamma color matching, average shade, and maximum elevation at five detail levels.
+`build_terrain_detail_tile32` implements all four 16 × 16 cache levels from `0x489FF0`, `0x48A9C0`, `0x48B420`, and `0x48BD20`.
+It preserves centered heights, byte color interpolation, paint rules, and signed shade factors.
+`build_terrain_color_mips32` supplies 10 coarse color levels using gamma RGB averages and the original palette matcher.
+`build_terrain_horizon32` supplies the horizon row and 256-step sky gradient from `0x48C990`.
 `load_terrain_blend_selectors` reads the local `detail-blend.u32le` sidecar: exactly 256 little-endian words with values 0 through 11.
 Detail render heights use centered interpolation and differ from collision detail samples.
 `render_voxel_pass_8` implements original function `0x459635` in its normal two-pixel mode.
@@ -40,7 +47,7 @@ Original executable SHA-256: `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab
 Original x86 checks match 2192 generated and 3720 mission sample points, 30 raster passes, 11200 camera columns, 64 projection tables, 64 detail tiles, and 1398100 height-bound bytes.
 All 62 missions load through the native terrain API. Local proof is in `.local/reports/terrain-*-differential.json` and `native-terrain-runtime-corpus.json`.
 
-Full frame work requires the selected draw kernels, higher detail levels, sky and water passes, and palette allocation from loaded assets.
+Full frame work requires the selected draw kernels and the sky and water pixel passes.
 
 Run the original x86 checks with Python packages `unicorn`, `pefile`, and `Pillow`:
 
@@ -54,6 +61,10 @@ python tools/check_terrain_bounds_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_palette_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_palette_assets_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_shades32_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_palettes32_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_detail32_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_colormips32_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_sky32_original.py GAME_FOLDER TERRAIN_PROBE
 ```
 
 Use the built `terrain_probe` path for `TERRAIN_PROBE`. Reports use `.local/reports`; `--report PATH` selects another report file.
