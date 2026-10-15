@@ -1,0 +1,130 @@
+#pragma once
+
+#include "dfre/assets.hpp"
+
+#include <array>
+#include <optional>
+
+namespace dfre {
+
+class TerrainGeometry {
+public:
+    // Inputs use the original runtime row order; each detail word packs color, shade, elevation.
+    TerrainGeometry(AssetBytes height, AssetBytes character, std::vector<std::uint32_t> detail);
+    std::int32_t base_height(std::int32_t x, std::int32_t y) const;
+    std::int32_t surface_height(std::int32_t x, std::int32_t y) const;
+    std::int32_t nearest_height(std::int32_t x, std::int32_t y) const;
+    std::array<std::int32_t, 2> slope(std::int32_t x, std::int32_t y) const;
+    const AssetBytes& height_bytes() const noexcept { return height_; }
+    const AssetBytes& character_bytes() const noexcept { return character_; }
+    const std::vector<std::uint32_t>& detail_words() const noexcept { return detail_; }
+
+private:
+    AssetBytes height_;
+    AssetBytes character_;
+    std::vector<std::uint32_t> detail_;
+};
+
+struct TerrainRuntime {
+    TerrainGeometry geometry;
+    TerrainConfig config;
+    PcxImage color;
+    AssetBytes detail_palette;
+    PcxImage sky_palette;
+    std::optional<PcxImage> sky;
+    std::optional<PcxImage> water;
+    std::optional<PcxImage> water_palette;
+    std::int32_t water_height = 0; // Original fixed-point runtime value; zero disables water.
+    unsigned pixel_bits = 8;
+};
+
+TerrainRuntime load_terrain_runtime(const AssetStore& assets, std::string_view mission, unsigned pixel_bits = 8);
+AssetBytes terrain_height_mip(const AssetBytes& source, std::uint32_t width);
+AssetBytes terrain_sky_water_mip(const AssetBytes& source, std::uint32_t width);
+std::vector<AssetBytes> build_terrain_height_bounds(const TerrainGeometry& geometry);
+
+struct TerrainBlendTables {
+    AssetBytes blend; // 256 by 256 palette lookup.
+    AssetBytes shade; // 64 by 256 palette lookup.
+    std::vector<std::uint32_t> selectors; // Original authored 16 by 16 blend pattern; values 0 through 11.
+};
+
+struct TerrainDetailTile {
+    std::array<std::uint16_t, 256> height{};
+    std::array<std::uint8_t, 256> color{};
+};
+
+std::vector<std::uint32_t> decode_terrain_blend_selectors(const AssetBytes& bytes);
+std::vector<std::uint32_t> load_terrain_blend_selectors(const std::filesystem::path& path);
+TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
+    const std::array<std::uint8_t, 3>& light_color, std::vector<std::uint32_t> selectors);
+
+TerrainDetailTile build_terrain_detail_tile(const TerrainGeometry& geometry, const AssetBytes& color,
+    const TerrainBlendTables& tables, std::uint32_t x, std::uint32_t y);
+
+struct VoxelColumn {
+    std::int32_t depth_index = -1;
+    std::uint32_t finished = 0;
+    std::int32_t pixel_offset = 0;
+    std::array<std::uint32_t, 3> position{};
+    std::array<std::uint32_t, 3> step{};
+    std::array<std::uint32_t, 3> acceleration{};
+};
+
+struct VoxelPass8 {
+    unsigned lod = 0;
+    std::uint32_t stop_depth = 0;
+    std::uint32_t row_stride = 0;
+    std::int32_t top_offset = 0;
+    std::array<std::uint32_t, 3> acceleration_step{};
+    std::int32_t step_scale = 65536;
+};
+
+struct VoxelCamera {
+    std::array<std::int32_t, 3> position{}; // Original 16.16 coordinates.
+    std::uint32_t yaw = 0;
+    std::uint32_t pitch = 0;
+    std::uint32_t width = 640;
+    std::uint32_t height = 480;
+    std::uint32_t row_stride = 640;
+    std::int32_t left = 0;
+    std::int32_t top = 0;
+    std::int32_t right = 639;
+    std::int32_t bottom = 479;
+    std::int32_t focal_distance = 320;
+};
+
+struct VoxelColumns {
+    std::vector<VoxelColumn> columns;
+    std::array<std::uint32_t, 3> acceleration_step{};
+};
+
+VoxelColumns initialize_voxel_columns(const VoxelCamera& camera);
+
+struct VoxelLod {
+    bool detail = false;
+    double distance = 0;
+    double sample_step = 0;
+    std::int32_t world_bound = 0;
+    std::uint32_t lod = 0;
+    std::int32_t ray_step = 0;
+    std::int32_t sample_limit = 0;
+    std::uint32_t depth_end = 0;
+    std::int32_t next_step_scale = 0;
+};
+
+struct VoxelProjection {
+    std::vector<VoxelLod> levels;
+    std::vector<std::uint32_t> depths;
+};
+
+VoxelProjection build_voxel_projection(std::int32_t focal_distance, float detail_density = 2.2f,
+                                       float coarse_density = 2.2f, float depth_factor = 1.0f);
+
+// Original 0x459635 byte-color kernel, normal two-pixel-column mode.
+// Coordinates use the original wrapping 10.22 representation. The depth table has one guard entry.
+void render_voxel_pass_8(const VoxelPass8& pass, const AssetBytes& height, const AssetBytes& color,
+                         const std::vector<std::uint32_t>& depth_table, std::vector<VoxelColumn>& columns,
+                         AssetBytes& pixels, std::vector<std::uint16_t>& depths);
+
+} // namespace dfre
