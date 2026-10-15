@@ -140,6 +140,25 @@ std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std:
     return writes;
 }
 
+ModelLighting localize_model_lighting(const ModelMatrix& matrix,const ModelLighting& camera,std::int32_t scale) {
+    const auto a=product(matrix[0],product(matrix[5],matrix[10],22),22);
+    const auto b=product(matrix[1],product(matrix[6],matrix[8],22),22);
+    const auto c=product(matrix[2],product(matrix[4],matrix[9],22),22);
+    const auto d=product(matrix[0],product(matrix[6],matrix[9],22),22);
+    const auto e=product(matrix[1],product(matrix[4],matrix[10],22),22);
+    const auto f=product(matrix[2],product(matrix[5],matrix[8],22),22);
+    const auto determinant=sub(sub(sub(add(add(a,b),c),d),e),f);
+    const auto reciprocal=divide(0x100000000000LL,determinant);
+    ModelMatrix inverse{};
+    for(std::size_t row=0;row<3;++row)for(std::size_t column=0;column<3;++column)inverse[row*4+column]=product(reciprocal,matrix[column*4+row],22);
+    auto direction=[&](const std::array<std::int32_t,3>& input) {
+        std::array<std::int32_t,3> output{};
+        for(std::size_t row=0;row<3;++row)for(std::size_t k=0;k<3;++k)output[row]=add(output[row],product(inverse[row*4+k],input[k],22));
+        return output;
+    };
+    return {direction(camera.light_direction),direction(camera.view_direction),product(scale,camera.ambient),product(scale,camera.diffuse),product(scale,camera.specular)};
+}
+
 std::int32_t shade_model_normal(const ModelNormal& normal,const ModelMaterial& material,
     const ModelLighting& lighting,bool reverse) {
     auto field=[&](std::size_t offset) {
@@ -211,4 +230,23 @@ ModelClipGeometry clip_model_geometry(const std::vector<std::array<std::int32_t,
     }
     return output;
 }
+std::size_t draw_tiny_triangle32(const std::array<RasterVertex,3>& triangle,const RasterClip& clip,
+    std::uint32_t flat_colour,std::uint32_t flags,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    if(std::uint64_t(width)*height!=colour.size() || colour.size()!=depth.size())throw std::invalid_argument("tiny raster target size differs from bounds");
+    if(clip.left<0 || clip.top<0 || clip.right<0 || clip.bottom<0 || std::uint32_t(clip.right)>=width || std::uint32_t(clip.bottom)>=height)throw std::invalid_argument("tiny raster clip exceeds target");
+    const auto classification=classify_raster_triangle(triangle,clip);
+    if(!classification.extent || (flags&0x600))return 0;
+    if(classification.extent>2)throw std::invalid_argument("tiny triangle extent exceeds two pixels");
+    if(classification.extent==1 && classification.clip_flags)return 0;
+    const auto count=classification.extent==1?1u:3u;std::size_t writes=0;
+    for(std::size_t i=0;i<count;++i) {
+        const auto x=pixel(triangle[i].x),y=pixel(triangle[i].y);
+        if(x<clip.left || x>clip.right || y<clip.top || y>clip.bottom)continue;
+        const auto offset=std::size_t(y)*width+std::uint32_t(x);const auto value=std::uint16_t(std::uint32_t(triangle[i].depth)>>16);
+        if(value<depth[offset]){colour[offset]=flat_colour;depth[offset]=value;++writes;}
+    }
+    return writes;
+}
+
 }

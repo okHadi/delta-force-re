@@ -42,6 +42,9 @@ struct ModelLighting {
     std::array<std::int32_t,3> light_direction{},view_direction{}; // Mesh-local 22-bit fixed directions.
     std::int32_t ambient{},diffuse{},specular{}; // 16.16 strengths.
 };
+// Original 0x46b140 context conversion for one camera-space mesh matrix.
+ModelLighting localize_model_lighting(const ModelMatrix& camera_matrix,const ModelLighting& camera_lighting,
+    std::int32_t scale=65536);
 // Original normal lighting 0x46aff0, including material constant and specular fields.
 std::int32_t shade_model_normal(const ModelNormal& normal,const ModelMaterial& material,
     const ModelLighting& lighting,bool reverse=false);
@@ -52,4 +55,9 @@ struct ClippedModelFace {ModelFace face;bool rejected{};};
 struct ModelClipGeometry {std::vector<std::array<std::int32_t,3>> positions;std::vector<ClippedModelFace> faces;};
 ModelClipGeometry clip_model_geometry(const std::vector<std::array<std::int32_t,3>>& positions,
     const std::vector<ModelFace>& faces,const std::vector<ModelClipPlane>& planes);
+// Original one- and two-pixel triangle paths use cached flat colour and per-vertex depth.
+std::size_t draw_tiny_triangle32(const std::array<RasterVertex,3>& triangle,const RasterClip& clip,
+    std::uint32_t flat_colour,std::uint32_t flags,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth);
+
 }

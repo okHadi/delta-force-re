@@ -70,7 +70,7 @@ def check(executable, probe, count,archive_path=None):
         if list(map(int,line.split()))!=expected:
             raise ValueError(f'triangle gradient/span mismatch at case {number}')
         total+=size
-    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
+    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),tiny32=check_tiny32(pe,probe,count),local_lighting=check_local_lighting(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
 
 
 def check_texture32(pe,probe,count,mode):
@@ -210,6 +210,76 @@ def check_clipping(pe,probe,count):
             raise ValueError(f'plane clipping mismatch at case {number}')
         total_vertices+=vertices;total_faces+=faces
     return dict(cases=len(cases),planes=plane_count,vertices=total_vertices,faces=total_faces,rejected=rejected,mismatches=0,functions=['0x46a250','0x46a110'],code_region='0x46a000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),scope='generated camera-space triangles; all eight initial outside masks; one to five planes; wrapped UV interpolation; exact vertex and split-face order; native rejected bool normalized to original -1 marker')
+
+
+def check_tiny32(pe,probe,count):
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP,UC_X86_REG_EIP,UC_X86_REG_EAX
+    machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    for address,size in ((0x461000,0x2000),(0x8ee000,4096),(0xbfc000,4096),(0x2000000,0x10000),(0x3000000,0x4000),(0x6000000,4096)):
+        machine.mem_map(address,size)
+    machine.mem_write(0x461000,pe.get_data(0x61000,0x2000));machine.mem_write(0x8ee1e0,struct.pack('<I',0x2001000));machine.mem_write(0x2001034,struct.pack('<4i',0,0,63,7));machine.mem_write(0x2001050,struct.pack('<I',32))
+    machine.mem_write(0x2001068,b''.join(struct.pack('<I',0x3001000+i*256) for i in range(8)));machine.mem_write(0x2001c68,b''.join(struct.pack('<I',0x3002000+i*128) for i in range(8)));machine.mem_write(0xbfc108,struct.pack('<I',0x3000000))
+    rng=random.Random(274);cases=[]
+    for test in range(count):
+        x=rng.randrange(-1,65);y=rng.randrange(-1,9)
+        points=[((x+rng.randrange(2))*65536+rng.randrange(65536),(y+rng.randrange(2))*65536+rng.randrange(65536),rng.randrange(-0x80000000,0x80000000)) for _ in range(3)]
+        cases.append((test,rng.randrange(0x800),rng.randrange(0x100000000),points))
+    text=''.join(' '.join(map(str,(test,flags,flat,*[v for point in points for v in point])))+'\n' for test,flags,flat,points in cases)
+    native=subprocess.check_output([probe,'tiny32'],input=text.encode()).decode().splitlines();extents=[0,0,0]
+    if len(native)!=len(cases):
+        raise ValueError('native tiny triangle case count differs from input')
+    def call(address,*args):
+        machine.mem_write(0x2000800,struct.pack('<'+'I'*(len(args)+1),0x6000000,*args));machine.reg_write(UC_X86_REG_ESP,0x2000800);machine.emu_start(address,0x6000000,count=100000)
+        if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+            raise ValueError('original tiny triangle function exceeded instruction limit')
+    for number,((test,flags,flat,points),line) in enumerate(zip(cases,native)):
+        machine.mem_write(0x3000000,struct.pack('<I',flat));machine.mem_write(0x3001000,b''.join(struct.pack('<I',(i*1234567^0xabcdef90)&0xffffffff) for i in range(512)));machine.mem_write(0x3002000,b''.join(struct.pack('<H',(i*317+test*17)&65535) for i in range(512)))
+        machine.mem_write(0x2002000,b''.join(struct.pack('<8i',x,y,z,0,0,0,x//65536,y//65536) for x,y,z in points));call(0x462280,0x2002000)
+        extent=machine.reg_read(UC_X86_REG_EAX)
+        if extent>2:
+            raise ValueError('generated tiny triangle exceeds two-pixel extent')
+        extents[extent]+=1
+        if extent:
+            call(0x4613c0 if extent==1 else 0x4614c0,flags,0x2002000,0x2003000)
+        colours=struct.unpack('<512I',machine.mem_read(0x3001000,2048));depths=struct.unpack('<512H',machine.mem_read(0x3002000,1024))
+        expected=[value for pair in zip(colours,depths) for value in pair]
+        if list(map(int,line.split()))!=expected:
+            raise ValueError(f'tiny triangle target mismatch at case {number}')
+    return dict(cases=count,extents=extents,target_pixels=count*512,mismatches=0,functions=['0x4613c0','0x4614c0'],scope='cached flat colour; per-vertex unsigned depth; inclusive clip; one/two-pixel extents; flags0x600 skip; all colour/depth target pairs')
+
+
+def check_local_lighting(pe,probe,count):
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP,UC_X86_REG_EIP
+    machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    for address,size in ((0x45c000,0x2000),(0x46b000,4096),(0xad3000,4096),(0x2000000,0x10000),(0x6000000,4096)):
+        machine.mem_map(address,size)
+    first=pe.get_data(0x5c000,0x2000);second=pe.get_data(0x6b000,4096);machine.mem_write(0x45c000,first);machine.mem_write(0x46b000,second)
+    def signed(value):
+        return ((value+0x80000000)&0xffffffff)-0x80000000
+    def product(a,b):
+        return signed((a*b)>>22)
+    rng=random.Random(194);cases=[]
+    while len(cases)<count:
+        matrix=[rng.randrange(-0x400000,0x400001) if i%4!=3 else rng.randrange(-0x80000000,0x80000000) for i in range(12)]
+        determinant=signed(product(matrix[0],product(matrix[5],matrix[10]))+product(matrix[1],product(matrix[6],matrix[8]))+product(matrix[2],product(matrix[4],matrix[9]))-product(matrix[0],product(matrix[6],matrix[9]))-product(matrix[1],product(matrix[4],matrix[10]))-product(matrix[2],product(matrix[5],matrix[8])))
+        if abs(determinant)<65536:
+            continue
+        context=[rng.randrange(-0x400000,0x400001) for _ in range(6)]+[rng.randrange(-0x80000000,0x80000000) for _ in range(3)]
+        cases.append((*matrix,*context,rng.randrange(-0x80000000,0x80000000)))
+    text=''.join(' '.join(map(str,row))+'\n' for row in cases);native=subprocess.check_output([probe,'local-lighting'],input=text.encode()).decode().splitlines()
+    if len(native)!=len(cases):
+        raise ValueError('native local lighting case count differs from input')
+    for number,(case,line) in enumerate(zip(cases,native)):
+        machine.mem_write(0x2001000,struct.pack('<12i16x',*case[:12]));machine.mem_write(0xad3d40,struct.pack('<3i',*case[12:15]));machine.mem_write(0xad3d50,struct.pack('<3i',*case[15:18]));machine.mem_write(0xad3d60,struct.pack('<3i',*case[18:21]));machine.mem_write(0x2000800,struct.pack('<IIi',0x6000000,0x2001000,case[21]));machine.reg_write(UC_X86_REG_ESP,0x2000800)
+        machine.emu_start(0x46b140,0x6000000,count=100000)
+        if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+            raise ValueError('original local lighting conversion exceeded instruction limit')
+        expected=[*struct.unpack('<3i',machine.mem_read(0xad3d80,12)),*struct.unpack('<3i',machine.mem_read(0xad3d90,12)),*struct.unpack('<3i',machine.mem_read(0xad3da0,12))]
+        if list(map(int,line.split()))!=expected:
+            raise ValueError(f'local lighting mismatch at case {number}')
+    return dict(cases=count,mismatches=0,functions=['0x46b140','0x45d090','0x45cfe0','0x45cf30'],code_sha256=hashlib.sha256(first+second).hexdigest(),scope='non-singular generated camera matrices; original nested fixed-point determinant and transpose reciprocal; light/view directions; wrapped signed strength scale; translation excluded from directions')
 
 
 def main():

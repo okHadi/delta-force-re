@@ -2,7 +2,34 @@
 #include <iostream>
 #include <string>
 int main(int argc,char** argv) {
-    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip"))return 2;
+    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting"))return 2;
+    if(argc==2 && std::string(argv[1])=="local-lighting") {
+        dfre::ModelMatrix matrix;dfre::ModelLighting lighting;std::int32_t scale;
+        while(std::cin>>matrix[0]) {
+            for(std::size_t i=1;i<12;++i)if(!(std::cin>>matrix[i]))return 2;
+            for(auto& value:lighting.light_direction)if(!(std::cin>>value))return 2;
+            for(auto& value:lighting.view_direction)if(!(std::cin>>value))return 2;
+            if(!(std::cin>>lighting.ambient>>lighting.diffuse>>lighting.specular>>scale))return 2;
+            const auto local=dfre::localize_model_lighting(matrix,lighting,scale);
+            for(auto value:local.light_direction)std::cout<<value<<' ';
+            for(auto value:local.view_direction)std::cout<<value<<' ';
+            std::cout<<local.ambient<<' '<<local.diffuse<<' '<<local.specular<<'\n';
+        }
+        return std::cin.eof()?0:2;
+    }
+    if(argc==2 && std::string(argv[1])=="tiny32") {
+        std::uint32_t test,flags,flat;
+        while(std::cin>>test>>flags>>flat) {
+            std::array<dfre::RasterVertex,3> triangle;
+            for(auto& vertex:triangle)if(!(std::cin>>vertex.x>>vertex.y>>vertex.depth))return 2;
+            std::vector<std::uint32_t> colours(512);std::vector<std::uint16_t> depths(512);
+            for(std::size_t i=0;i<512;++i){colours[i]=std::uint32_t(i)*1234567u^0xabcdef90u;depths[i]=std::uint16_t(i*317+test*17);}
+            dfre::draw_tiny_triangle32(triangle,{0,0,63,7},flat,flags,64,8,colours,depths);
+            for(std::size_t i=0;i<512;++i)std::cout<<colours[i]<<' '<<depths[i]<<' ';
+            std::cout<<'\n';
+        }
+        return std::cin.eof()?0:2;
+    }
     if(argc==2 && std::string(argv[1])=="clip") {
         std::uint32_t count;
         while(std::cin>>count) {

@@ -54,5 +54,13 @@ int main() {
     check(clipped.faces[0].rejected && clipped.positions.size()==3,"outside face not marked rejected");
     face.vertices[2]=3;
     try{dfre::clip_model_geometry(camera,{face},{});check(false,"out-of-range clip vertex accepted");}catch(const std::invalid_argument&){}
+    triangle={dfre::RasterVertex{0,0,0,0,0,0},dfre::RasterVertex{0,0,0x10000,0,0,0},dfre::RasterVertex{0,0,0,0,0,0}};colours.assign(4,0);depths.assign(4,1);
+    check(dfre::draw_tiny_triangle32(triangle,{0,0,3,0},0x12345678,0,4,1,colours,depths)==1 && colours[0]==0x12345678 && depths[0]==0,"one-pixel flat colour path changed");
+    triangle[1].x=65536;depths.assign(4,1);colours.assign(4,0);
+    check(dfre::draw_tiny_triangle32(triangle,{0,0,3,0},7,0,4,1,colours,depths)==1 && colours[1]==0,"two-pixel strict depth test changed");
+    dfre::ModelMatrix camera_identity{};camera_identity[0]=camera_identity[5]=camera_identity[10]=4194304;camera_identity[3]=123456;
+    const auto local_light=dfre::localize_model_lighting(camera_identity,lighting,32768);
+    check(local_light.light_direction==lighting.light_direction && local_light.ambient==lighting.ambient/2 && local_light.diffuse==lighting.diffuse/2,"local light conversion changed");
+    try{dfre::localize_model_lighting({},lighting);check(false,"singular light matrix accepted");}catch(const std::invalid_argument&){}
     std::cout<<"raster classification tests passed\n";
 }
