@@ -47,7 +47,16 @@ Original executable SHA-256: `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab
 Original x86 checks match 2192 generated and 3720 mission sample points, 30 raster passes, 11200 camera columns, 64 projection tables, 64 detail tiles, and 1398100 height-bound bytes.
 All 62 missions load through the native terrain API. Local proof is in `.local/reports/terrain-*-differential.json` and `native-terrain-runtime-corpus.json`.
 
-Full frame work requires the selected draw kernels and the sky and water pixel passes.
+`prepare_terrain_scene32` owns the source terrain, palettes, detail levels, and coarse maps.
+`render_terrain_frame32` draws the original flat-sky branch and the first 11 ground LODs into RGB words and 16-bit depths.
+The scalar ground loop uses the selected `0x458BFE` / `0x458F14` sample, row rollback, and depth rules.
+Ground tests compare 30 coarse passes and 30 detail passes with original instructions. Detail draw tests use uniform cache samples; cache builders have separate full-data checks.
+All 62 stock missions produce 640 × 480 terrain frames. Cloud, water, and world-object pixels use separate passes.
+`remap_palette8` maps source RGB through gamma and matches target gamma RGB with original `0x480A30` rules; palette entry zero stays zero.
+
+Export one local terrain frame with `terrain_probe --frame32 GAME_FOLDER BMS_MEMBER .local/reports/NEW.ppm`.
+The probe uses x/y zero, ground height plus two game units, zero yaw/pitch, focal distance 320, and FOV 90.
+Output files use a new path under `.local`. `--frame32 GAME_FOLDER --all` reports hashes for all missions.
 
 Run the original x86 checks with Python packages `unicorn`, `pefile`, and `Pillow`:
 
@@ -65,6 +74,8 @@ python tools/check_terrain_palettes32_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_detail32_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_colormips32_original.py GAME_FOLDER TERRAIN_PROBE
 python tools/check_terrain_sky32_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_raster32_original.py GAME_FOLDER TERRAIN_PROBE
+python tools/check_terrain_raster32_original.py GAME_FOLDER TERRAIN_PROBE --detail
 ```
 
 Use the built `terrain_probe` path for `TERRAIN_PROBE`. Reports use `.local/reports`; `--report PATH` selects another report file.

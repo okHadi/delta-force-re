@@ -9,6 +9,7 @@
 #include <fstream>
 #include <limits>
 #include <utility>
+#include <unordered_map>
 
 namespace dfre {
 namespace {
@@ -329,6 +330,15 @@ public:
     }
 };
 } // namespace
+
+AssetBytes remap_palette8(const AssetBytes& source_palette, const AssetBytes& target_gamma_palette, const AssetBytes& gamma) {
+    if (source_palette.size() != 768 || gamma.size() != 256) throw AssetError("Palette remap requires complete RGB and gamma tables");
+    const PaletteMatcher8 matcher(target_gamma_palette);
+    AssetBytes result(256, 0);
+    for (unsigned i = 1; i < 256; ++i) result[i] = matcher.nearest(gamma[source_palette[i * 3]],
+        gamma[source_palette[i * 3 + 1]], gamma[source_palette[i * 3 + 2]]);
+    return result;
+}
 
 TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
     const std::array<std::uint8_t, 3>& light_color, std::vector<std::uint32_t> selectors) {
@@ -712,6 +722,123 @@ VoxelProjection build_voxel_projection(std::int32_t focal_distance, float detail
             distance = static_cast<double>(static_cast<long double>(distance) + level.sample_step);
         }
         level.depth_end = static_cast<std::uint32_t>(result.depths.size());
+    }
+    return result;
+}
+
+TerrainScene32 prepare_terrain_scene32(TerrainRuntime terrain, const AssetBytes& gamma, const TerrainColorControl& control) {
+    if (terrain.pixel_bits != 32) throw AssetError("Terrain frame preparation requires 32-bit runtime assets");
+    auto palettes = build_terrain_palettes32(terrain, gamma, control);
+    auto detail = build_terrain_detail_mips32(terrain.geometry, terrain.detail_palette, gamma);
+    auto color = build_terrain_color_mips32(terrain.color.pixels, terrain.color.palette, gamma);
+    std::vector<AssetBytes> height{terrain.geometry.height_bytes()};
+    for (unsigned width = 1024; width > 2; width /= 2) height.push_back(terrain_height_mip(height.back(), width));
+    return {std::move(terrain), std::move(palettes), std::move(detail), std::move(height), std::move(color)};
+}
+
+void render_voxel_pass32(const TerrainScene32& scene, bool detail, const VoxelPass8& pass,
+    const std::vector<std::uint32_t>& depth_table, std::vector<VoxelColumn>& columns,
+    std::vector<std::uint32_t>& pixels, std::vector<std::uint16_t>& depths) {
+    if (pass.lod > (detail ? 3u : 9u) || pass.row_stride < 2 || pass.row_stride > 65535 || pass.top_offset < 0 ||
+        depth_table.size() <= std::size_t(pass.stop_depth) + 1 || pixels.size() != depths.size() ||
+        pixels.size() > 65535u * 768u || columns.size() > 512 || pass.stop_depth > 32766 || pass.step_scale < 0) {
+        throw AssetError("Invalid terrain 32-bit pass bounds");
+    }
+    const unsigned width = 1024 >> pass.lod;
+    if (!detail && (scene.height_mips.size() <= pass.lod || scene.color_mips.size() <= pass.lod ||
+        scene.height_mips[pass.lod].size() != width * width || scene.color_mips[pass.lod].size() != width * width ||
+        scene.palettes.coarse[pass.lod].size() != 512)) throw AssetError("Incomplete terrain coarse maps or palette");
+    std::unordered_map<std::uint32_t, TerrainDetailTile32> cache;
+    auto sample = [&](const VoxelColumn& column) {
+        std::array<std::uint32_t, 3> result{};
+        if (!detail) {
+            const auto at = ((column.position[1] >> (22 + pass.lod)) & (width - 1)) * width +
+                ((column.position[0] >> (22 + pass.lod)) & (width - 1));
+            result[0] = std::uint32_t(scene.height_mips[pass.lod][at]) << 20;
+            const auto index = unsigned(scene.color_mips[pass.lod][at]) * 2;
+            result[1] = scene.palettes.coarse[pass.lod][index]; result[2] = scene.palettes.coarse[pass.lod][index + 1];
+        } else {
+            const auto cell_x = column.position[0] >> (22 + pass.lod), cell_y = column.position[1] >> (22 + pass.lod);
+            const auto key = cell_y * 1024 + cell_x;
+            auto found = cache.find(key);
+            if (found == cache.end()) found = cache.emplace(key, build_terrain_detail_tile32(scene.terrain.geometry,
+                scene.terrain.color.pixels, scene.detail_mips, scene.palettes, column.position[0], column.position[1], pass.lod)).first;
+            const auto index = ((column.position[1] >> (18 + pass.lod)) & 15) * 16 +
+                ((column.position[0] >> (18 + pass.lod)) & 15);
+            result[0] = std::uint32_t(found->second.height[index]) << 16;
+            result[1] = result[2] = found->second.color[index];
+        }
+        return result;
+    };
+    for (auto& column : columns) {
+        if (column.finished) continue;
+        if (column.depth_index < -1 || column.depth_index > static_cast<std::int32_t>(pass.stop_depth) + 1)
+            throw AssetError("Terrain column depth is outside the pass");
+        if (static_cast<std::int32_t>(column.position[2]) > 0x10000000 && static_cast<std::int32_t>(column.step[2]) >= 0) {
+            column.finished = 1; continue;
+        }
+        bool advance = true;
+        std::size_t operations = 0;
+        for (;;) {
+            if (++operations > (pixels.size() + depth_table.size()) * 4 + 64) throw AssetError("Terrain column exceeds pass limits");
+            if (advance) {
+                ++column.depth_index;
+                for (unsigned axis = 0; axis < 3; ++axis) {
+                    column.position[axis] += column.step[axis]; column.acceleration[axis] += pass.acceleration_step[axis];
+                }
+            }
+            const auto surface = sample(column);
+            if (static_cast<std::int32_t>(column.position[2]) < static_cast<std::int32_t>(surface[0])) {
+                if (column.pixel_offset < pass.top_offset || column.pixel_offset < 0 ||
+                    std::size_t(column.pixel_offset) + 1 >= pixels.size() ||
+                    static_cast<std::uint32_t>(column.pixel_offset) % pass.row_stride == pass.row_stride - 1 || column.depth_index < 0 ||
+                    std::size_t(column.depth_index) >= depth_table.size()) throw AssetError("Terrain pixel or depth is outside the frame");
+                const auto at = static_cast<std::size_t>(column.pixel_offset);
+                pixels[at] = surface[1]; pixels[at + 1] = surface[2];
+                depths[at] = static_cast<std::uint16_t>(depth_table[column.depth_index]);
+                depths[at + 1] = static_cast<std::uint16_t>(depth_table[column.depth_index] >> 16);
+                for (unsigned axis = 0; axis < 3; ++axis) {
+                    column.position[axis] -= column.acceleration[axis];
+                    column.step[axis] -= pass.acceleration_step[axis];
+                    column.position[axis] -= column.step[axis];
+                    column.acceleration[axis] -= pass.acceleration_step[axis];
+                }
+                column.pixel_offset -= static_cast<std::int32_t>(pass.row_stride);
+                --column.depth_index;
+                if (column.pixel_offset < pass.top_offset) { column.finished = 1; break; }
+                advance = false;
+            } else {
+                if (column.depth_index > static_cast<std::int32_t>(pass.stop_depth)) break;
+                advance = true;
+            }
+        }
+        for (auto& value : column.step) value = static_cast<std::uint32_t>(floor_shift16(std::int64_t(static_cast<std::int32_t>(value)) * pass.step_scale));
+    }
+}
+
+TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCamera& camera) {
+    auto rays = initialize_voxel_columns(camera);
+    const auto projection = build_voxel_projection(camera.focal_distance, camera.field_of_view < 90 ? 3.2f : 2.2f,
+        camera.field_of_view < 90 ? 3.2f : 2.2f);
+    TerrainFrame32 result{std::vector<std::uint32_t>(std::size_t(camera.row_stride) * camera.height),
+        std::vector<std::uint16_t>(std::size_t(camera.row_stride) * camera.height, 0xffff), std::move(rays.columns)};
+    const auto horizon = build_terrain_horizon32(camera);
+    const auto& sky = scene.terrain.sky_palette.palette;
+    if (sky.size() != 768) throw AssetError("Terrain sky palette is incomplete");
+    const auto flat_sky = std::uint32_t((unsigned(sky[0]) + 2 * sky[1] + sky[2]) / 4) << 24 |
+        std::uint32_t(sky[0]) << 16 | std::uint32_t(sky[1]) << 8 | sky[2];
+    for (int y = camera.top; y <= std::min(camera.bottom, horizon.row); ++y) {
+        for (int x = camera.left; x < camera.right; ++x) result.pixels[std::size_t(y) * camera.row_stride + x] = flat_sky;
+    }
+    for (unsigned i = 0; i < 11; ++i) {
+        const auto& level = projection.levels[i];
+        VoxelPass8 pass;
+        pass.lod = level.lod; pass.stop_depth = level.depth_end; pass.row_stride = camera.row_stride;
+        pass.top_offset = camera.top * static_cast<std::int32_t>(camera.row_stride);
+        pass.acceleration_step = rays.acceleration_step; pass.step_scale = level.next_step_scale;
+        render_voxel_pass32(scene, level.detail, pass, projection.depths, result.columns, result.pixels, result.depths);
+        for (auto& value : rays.acceleration_step) value = static_cast<std::uint32_t>(floor_shift16(std::int64_t(static_cast<std::int32_t>(value)) * pass.step_scale));
+        if (std::all_of(result.columns.begin(), result.columns.end(), [](const auto& column) { return column.finished != 0; })) break;
     }
     return result;
 }

@@ -72,6 +72,9 @@ std::vector<std::uint32_t> load_terrain_blend_selectors(const std::filesystem::p
 TerrainBlendTables build_terrain_blend_tables(const AssetBytes& gamma_palette,
     const std::array<std::uint8_t, 3>& light_color, std::vector<std::uint32_t> selectors);
 
+// Target RGB entries are already gamma mapped; source RGB entries use gamma during matching.
+AssetBytes remap_palette8(const AssetBytes& source_palette, const AssetBytes& target_gamma_palette, const AssetBytes& gamma);
+
 struct TerrainColorControl {
     int brightness = 128;
     int saturation = 128;
@@ -174,6 +177,27 @@ struct VoxelProjection {
 
 VoxelProjection build_voxel_projection(std::int32_t focal_distance, float detail_density = 2.2f,
                                        float coarse_density = 2.2f, float depth_factor = 1.0f);
+
+struct TerrainScene32 {
+    TerrainRuntime terrain;
+    TerrainPalettes32 palettes;
+    std::array<std::vector<std::uint32_t>, 5> detail_mips;
+    std::vector<AssetBytes> height_mips;
+    std::vector<AssetBytes> color_mips;
+};
+TerrainScene32 prepare_terrain_scene32(TerrainRuntime terrain, const AssetBytes& gamma,
+    const TerrainColorControl& control = {});
+
+struct TerrainFrame32 {
+    std::vector<std::uint32_t> pixels;
+    std::vector<std::uint16_t> depths;
+    std::vector<VoxelColumn> columns;
+};
+void render_voxel_pass32(const TerrainScene32& scene, bool detail, const VoxelPass8& pass,
+    const std::vector<std::uint32_t>& depth_table, std::vector<VoxelColumn>& columns,
+    std::vector<std::uint32_t>& pixels, std::vector<std::uint16_t>& depths);
+// Draws original flat sky and terrain. Water and world objects use later passes.
+TerrainFrame32 render_terrain_frame32(const TerrainScene32& scene, const VoxelCamera& camera);
 
 // Original 0x459635 byte-color kernel, normal two-pixel-column mode.
 // Coordinates use the original wrapping 10.22 representation. The depth table has one guard entry.

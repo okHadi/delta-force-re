@@ -5,6 +5,7 @@
 #include <limits>
 #include <sstream>
 #include <charconv>
+#include <fstream>
 
 namespace {
 std::string fingerprint(const dfre::AssetBytes& bytes) {
@@ -78,6 +79,61 @@ void raster_fixture(std::uint32_t seed) {
     std::cout << "{\"pixels\":\"";
     for (auto value : pixels) std::cout << hex[value >> 4] << hex[value & 15];
     std::cout << "\",\"depths\":[";
+    for (std::size_t i = 0; i < depths.size(); ++i) { if (i) std::cout << ','; std::cout << depths[i]; }
+    std::cout << "],\"columns\":[";
+    for (std::size_t i = 0; i < columns.size(); ++i) {
+        if (i) std::cout << ',';
+        const auto& column = columns[i];
+        std::cout << '[' << column.depth_index << ',' << column.finished << ',' << column.pixel_offset;
+        for (const auto& array : {column.position, column.step, column.acceleration}) for (auto value : array) std::cout << ',' << value;
+        std::cout << ']';
+    }
+    std::cout << "]}\n";
+}
+
+void raster32_fixture(std::uint32_t seed, bool detail = false) {
+    auto state = seed;
+    auto next = [&]() { state = state * 1664525u + 1013904223u; return state; };
+    dfre::VoxelPass8 pass;
+    pass.lod = seed % (detail ? 4 : 6); pass.stop_depth = 48 + next() % 24; pass.row_stride = 24;
+    pass.top_offset = static_cast<std::int32_t>(next() % 4) * 24;
+    pass.step_scale = 65536 + static_cast<std::int32_t>(next() & 32767);
+    pass.acceleration_step = {next() % 65536 - 32768, next() % 65536 - 32768, 0u - (65536 + next() % 65536)};
+    const auto width = 1024u >> pass.lod;
+    dfre::AssetBytes heights(width * width), colors(heights.size());
+    for (auto& value : heights) value = static_cast<std::uint8_t>(next() >> 24);
+    for (auto& value : colors) value = static_cast<std::uint8_t>(next() >> 24);
+    std::vector<std::uint32_t> table(128);
+    for (auto& value : table) value = next();
+    std::vector<dfre::VoxelColumn> columns(12);
+    for (std::size_t at = 0; at < columns.size(); ++at) {
+        auto& column = columns[at];
+        column.depth_index = 31;
+        column.finished = at % 5 == 0 ? 1 : 0;
+        column.pixel_offset = 15 * 24 + static_cast<std::int32_t>(at * 2);
+        column.position = {next(), next(), (next() & 255) << 20};
+        column.step = {next() % 0x40000 - 0x20000, next() % 0x40000 - 0x20000, next() % 0x800000 - 0x400000};
+        column.acceleration = {next() % 65536 - 32768, next() % 65536 - 32768, 0u - (0x100000 + next() % 65536)};
+    }
+    columns[1].position[2] = 0x11000000; columns[1].step[2] = 0;
+    dfre::TerrainRuntime runtime{synthetic(), {}, {}, {}, {}, {}, {}, {}, 0, 32};
+    dfre::TerrainScene32 scene{std::move(runtime), {}, {}, std::vector<dfre::AssetBytes>(10), std::vector<dfre::AssetBytes>(10)};
+    scene.height_mips[pass.lod] = heights; scene.color_mips[pass.lod] = colors;
+    scene.palettes.coarse[pass.lod].resize(512);
+    for (auto& value : scene.palettes.coarse[pass.lod]) value = next();
+    std::vector<std::uint32_t> pixels(24 * 16, 0xaaaaaaaa);
+    std::vector<std::uint16_t> depths(pixels.size(), 0xa55a);
+    if (detail) {
+        scene.terrain.geometry = dfre::TerrainGeometry(dfre::AssetBytes(1024 * 1024, 40), dfre::AssetBytes(1024 * 1024),
+            std::vector<std::uint32_t>(65536, 128u << 16));
+        scene.terrain.color.pixels.assign(1024 * 1024, 0);
+        for (unsigned lod = 0; lod < 5; ++lod) scene.detail_mips[lod].assign(256 * (16 >> lod) * (16 >> lod), 128u << 16);
+        scene.palettes.coarse[0].assign(512, 0x12345678); scene.palettes.detail.assign(256, 0);
+    }
+    dfre::render_voxel_pass32(scene, detail, pass, table, columns, pixels, depths);
+    std::cout << "{\"pixels\":[";
+    for (std::size_t i = 0; i < pixels.size(); ++i) { if (i) std::cout << ','; std::cout << pixels[i]; }
+    std::cout << "],\"depths\":[";
     for (std::size_t i = 0; i < depths.size(); ++i) { if (i) std::cout << ','; std::cout << depths[i]; }
     std::cout << "],\"columns\":[";
     for (std::size_t i = 0; i < columns.size(); ++i) {
@@ -172,7 +228,9 @@ void palette_fixture(std::uint32_t seed) {
         palette[i * 3 + 2] = static_cast<std::uint8_t>(seed == 1 ? i : seed == 2 ? 0 : i * 101);
     }
     const auto tables = dfre::build_terrain_blend_tables(palette, {230, 210, 190}, std::vector<std::uint32_t>(256, 0));
-    std::cout << "{\"blend\":\"" << fingerprint(tables.blend) << "\",\"shade\":\"" << fingerprint(tables.shade) << "\"}\n";
+    dfre::AssetBytes gamma(256); for (unsigned i = 0; i < 256; ++i) gamma[i] = static_cast<std::uint8_t>(i);
+    const auto remap = dfre::remap_palette8(palette, palette, gamma);
+    std::cout << "{\"blend\":\"" << fingerprint(tables.blend) << "\",\"shade\":\"" << fingerprint(tables.shade) << "\",\"remap\":\"" << fingerprint(remap) << "\"}\n";
 }
 
 void shades32_fixture(std::uint32_t seed) {
@@ -288,7 +346,7 @@ int main(int argc, char** argv) {
             samples(synthetic());
         } else if (argc == 2 && std::string_view(argv[1]) == "--bounds-fixture") {
             bounds_fixture();
-        } else if (argc == 3 && (std::string_view(argv[1]) == "--raster-fixture" || std::string_view(argv[1]) == "--camera-fixture" || std::string_view(argv[1]) == "--projection-fixture" || std::string_view(argv[1]) == "--detail-fixture" || std::string_view(argv[1]) == "--palette-fixture" || std::string_view(argv[1]) == "--shades32-fixture" || std::string_view(argv[1]) == "--palettes32-fixture" || std::string_view(argv[1]) == "--detail32-fixture" || std::string_view(argv[1]) == "--horizon32-fixture" || std::string_view(argv[1]) == "--color-mips32-fixture")) {
+        } else if (argc == 3 && (std::string_view(argv[1]) == "--raster-fixture" || std::string_view(argv[1]) == "--camera-fixture" || std::string_view(argv[1]) == "--projection-fixture" || std::string_view(argv[1]) == "--detail-fixture" || std::string_view(argv[1]) == "--palette-fixture" || std::string_view(argv[1]) == "--shades32-fixture" || std::string_view(argv[1]) == "--palettes32-fixture" || std::string_view(argv[1]) == "--detail32-fixture" || std::string_view(argv[1]) == "--horizon32-fixture" || std::string_view(argv[1]) == "--color-mips32-fixture" || std::string_view(argv[1]) == "--raster32-fixture" || std::string_view(argv[1]) == "--raster32-detail-fixture")) {
             std::uint32_t seed = 0;
             const std::string_view input(argv[2]);
             const auto parsed = std::from_chars(input.data(), input.data() + input.size(), seed);
@@ -300,9 +358,52 @@ int main(int argc, char** argv) {
             else if (std::string_view(argv[1]) == "--palette-fixture") palette_fixture(seed);
             else if (std::string_view(argv[1]) == "--shades32-fixture") shades32_fixture(seed);
             else if (std::string_view(argv[1]) == "--palettes32-fixture") palettes32_fixture(seed);
+            else if (std::string_view(argv[1]) == "--raster32-detail-fixture") raster32_fixture(seed, true);
+            else if (std::string_view(argv[1]) == "--raster32-fixture") raster32_fixture(seed);
             else if (std::string_view(argv[1]) == "--color-mips32-fixture") color_mips32_fixture(seed);
             else if (std::string_view(argv[1]) == "--horizon32-fixture") horizon32_fixture(seed);
             else detail32_fixture(seed);
+        } else if ((argc == 4 || argc == 5) && std::string_view(argv[1]) == "--frame32") {
+            const dfre::AssetStore assets(argv[2]);
+            const auto gamma = dfre::load_terrain_gamma(std::filesystem::path(argv[2]) / "INTRO.KDV");
+            const auto names = std::string_view(argv[3]) == "--all" ? assets.missions() : std::vector<std::string>{argv[3]};
+            std::cout << "{\"frames\":[";
+            bool first = true;
+            for (const auto& name : names) {
+                auto runtime = dfre::load_terrain_runtime(assets, name, 32);
+                const auto scene = dfre::prepare_terrain_scene32(std::move(runtime), gamma);
+                dfre::VoxelCamera camera;
+                camera.position[2] = scene.terrain.geometry.surface_height(0, 0) + 2 * 65536;
+                const auto frame = dfre::render_terrain_frame32(scene, camera);
+                if (argc == 5) {
+                    if (names.size() != 1) throw dfre::AssetError("Frame export requires one mission");
+                    const auto output = std::filesystem::absolute(argv[4]);
+                    const auto relative = std::filesystem::relative(std::filesystem::canonical(output.parent_path()),
+                        std::filesystem::canonical(".local"));
+                    if ((!relative.empty() && *relative.begin() == "..") || std::filesystem::exists(output))
+                        throw dfre::AssetError("Frame export requires a new file under .local");
+                    std::ofstream image(output, std::ios::binary);
+                    if (!image) throw dfre::AssetError("Cannot create terrain image");
+                    image << "P6\n" << camera.width << ' ' << camera.height << "\n255\n";
+                    for (auto value : frame.pixels) {
+                        const char rgb[]{static_cast<char>(value >> 16), static_cast<char>(value >> 8), static_cast<char>(value)};
+                        image.write(rgb, 3);
+                    }
+                    if (!image) throw dfre::AssetError("Cannot write terrain image");
+                }
+                dfre::AssetBytes pixels, depths;
+                std::size_t ground = 0;
+                for (auto value : frame.pixels) for (unsigned shift = 0; shift < 32; shift += 8) pixels.push_back(static_cast<std::uint8_t>(value >> shift));
+                for (auto value : frame.depths) {
+                    depths.push_back(static_cast<std::uint8_t>(value)); depths.push_back(static_cast<std::uint8_t>(value >> 8));
+                    if (value != 0xffff) ++ground;
+                }
+                if (!first) std::cout << ',';
+                first = false;
+                std::cout << "{\"mission\":\"" << name << "\",\"pixels\":\"" << fingerprint(pixels)
+                    << "\",\"depths\":\"" << fingerprint(depths) << "\",\"ground_pixels\":" << ground << '}';
+            }
+            std::cout << "]}\n";
         } else if (argc == 3 && std::string_view(argv[1]) == "--palette-assets") {
             const dfre::AssetStore assets(argv[2]);
             const auto gamma = dfre::load_terrain_gamma(std::filesystem::path(argv[2]) / "INTRO.KDV");

@@ -344,6 +344,21 @@ int main() {
         rejects([&] { auto bad = pass; bad.lod = 10; dfre::render_voxel_pass_8(bad, {}, {}, {}, columns, pixels, depths); });
         rejects([&] { dfre::render_voxel_pass_8(pass, {}, {}, {1, 2}, columns, pixels, depths); });
         rejects([&] { dfre::render_voxel_pass_8(pass, {1, 1, 1, 1}, {1, 1, 1, 1}, {1}, columns, pixels, depths); });
+        const auto remap = dfre::remap_palette8(gray_palette, gray_palette, identity_gamma);
+        require(remap[0] == 0 && remap.size() == 256, "Model palette remap must preserve the zero index");
+        rejects([&] { dfre::remap_palette8({}, gray_palette, identity_gamma); });
+        color_runtime.color.pixels.assign(1024 * 1024, 42);
+        const auto scene32 = dfre::prepare_terrain_scene32(color_runtime, identity_gamma);
+        dfre::VoxelCamera frame_camera;
+        frame_camera.width = frame_camera.row_stride = 64; frame_camera.height = 48;
+        frame_camera.right = 63; frame_camera.bottom = 47; frame_camera.focal_distance = 32;
+        frame_camera.position[2] = 12 * 65536;
+        const auto frame32 = dfre::render_terrain_frame32(scene32, frame_camera);
+        require(frame32.pixels.size() == 64 * 48 && frame32.depths.size() == frame32.pixels.size() &&
+            frame32.columns.size() == 32, "Terrain frame dimensions failed");
+        require(frame32.depths[47 * 64] != 0xffff && frame32.depths[0] == 0xffff,
+            "Terrain frame must draw ground below the sky");
+        rejects([&] { auto bad = frame_camera; bad.right = 64; dfre::render_terrain_frame32(scene32, bad); });
         const auto horizon = dfre::build_terrain_horizon32(dfre::VoxelCamera{});
         require(horizon.row == 245 && horizon.gradient[245] == 0 && horizon.gradient[244] == 2 &&
                 horizon.gradient[0] == 255 && horizon.gradient[246] == 0,

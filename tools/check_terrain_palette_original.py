@@ -47,11 +47,20 @@ for seed in range(3):
         for byte in u.mem_read(address, length):
             fingerprint = ((fingerprint ^ byte) * 0x100000001b3) & 0xffffffffffffffff
         expected[name] = f'{fingerprint:016x}'
+    remap = bytearray(256)
+    from unicorn.x86_const import UC_X86_REG_EAX
+    for index in range(1, 256):
+        run(0x480a30, *palette[index * 3:index * 3 + 3])
+        remap[index] = u.reg_read(UC_X86_REG_EAX) & 255
+    value = 0xcbf29ce484222325
+    for byte in remap:
+        value = ((value ^ byte) * 0x100000001b3) & 0xffffffffffffffff
+    expected['remap'] = f'{value:016x}'
     actual = json.loads(subprocess.check_output([str(args.probe.resolve()), '--palette-fixture', str(seed)]))
     assert actual == expected, (seed, actual, expected)
     results.append(dict(seed=seed, hashes=expected, candidate_entries=struct.unpack('<I', u.mem_read(0xc22ac8, 4))[0]))
-report = dict(source_sha256=source_hash, procedures=['0x480600', '0x47ffc0', '0x4803e0', '0x4800e0'],
-              unicorn_version=unicorn.__version__, cases=3, byte_samples=3 * (65536 + 16384), mismatches=0, results=results)
+report = dict(source_sha256=source_hash, procedures=['0x480600', '0x47ffc0', '0x4803e0', '0x4800e0', '0x480a30'],
+              unicorn_version=unicorn.__version__, cases=3, byte_samples=3 * (65536 + 16384 + 256), mismatches=0, results=results)
 args.report.parent.mkdir(parents=True, exist_ok=True)
 args.report.write_text(json.dumps(report, indent=2) + '\n')
 print(json.dumps(report))
