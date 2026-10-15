@@ -38,7 +38,7 @@ Model decode_model(const std::vector<std::uint8_t>& bytes) {
         model.textures.push_back(std::move(t));pos+=36+std::size_t(size)+1024;
     }
     for(std::uint32_t l=0;l<lc;++l) {
-        r.range(pos,hs);ModelLod lod;lod.raw_header=r.copy(pos,hs);
+        r.range(pos,hs);ModelLod lod;lod.flags=r.u32(pos+16);lod.raw_header=r.copy(pos,hs);
         const auto vc=r.u32(pos+128),nc=r.u32(pos+136),fc=r.u32(pos+144),mc=r.u32(pos+152),hc=r.u32(pos+160),ac=r.u32(pos+168),cc=model.version==5?r.u32(pos+176):0;
         const std::uint64_t total=std::uint64_t(vc)*8+std::uint64_t(nc)*8+std::uint64_t(fc)*72+std::uint64_t(mc)*ms+std::uint64_t(hc)*12+std::uint64_t(cc)*72+std::uint64_t(ac)*76;
         require(total==r.u32(pos+20),"model LOD block size mismatch");
@@ -69,7 +69,8 @@ Model decode_model(const std::vector<std::uint8_t>& bytes) {
         for(std::uint32_t i=0;i<hc;++i,pos+=12)lod.hardpoints.push_back({r.i32(pos),r.i32(pos+4),r.i32(pos+8)});
         for(std::uint32_t i=0;i<cc;++i,pos+=72) {std::array<std::uint8_t,72> v;std::copy_n(bytes.begin()+pos,72,v.begin());lod.collision_volumes.push_back(v);}
         for(std::uint32_t i=0;i<ac;++i,pos+=76) {
-            ModelMaterial m;m.name=r.name(pos);m.flags=r.u32(pos+16);m.frame_count=bytes[pos+31];m.timer=bytes[pos+30];m.texture_key=bytes[pos+((m.flags&0x8000)&&!(m.flags&1)?55:52)];std::copy_n(bytes.begin()+pos,76,m.raw.begin());std::copy_n(bytes.begin()+pos+40,3,m.flat_rgb.begin());
+            ModelMaterial m;m.name=r.name(pos);m.flags=r.u32(pos+16);m.frame_count=bytes[pos+30];m.animation_parameter=bytes[pos+31];
+            require(!(m.flags&0x4000) || m.frame_count<=ac-i,"model material animation outside table");m.texture_key=bytes[pos+((m.flags&0x8000)&&!(m.flags&1)?55:52)];std::copy_n(bytes.begin()+pos,76,m.raw.begin());std::copy_n(bytes.begin()+pos+40,3,m.flat_rgb.begin());
             if((m.flags&0x8001) && m.texture_key!=255)for(std::size_t j=0;j<model.textures.size();++j)if((model.textures[j].sequence&255)==m.texture_key)m.texture_candidates.push_back(j);
             lod.materials.push_back(std::move(m));
         }
@@ -78,4 +79,27 @@ Model decode_model(const std::vector<std::uint8_t>& bytes) {
     require(pos==bytes.size(),"model has trailing data");
     return model;
 }
+ModelLod localize_model_lod(const ModelLod& source) {
+    ModelLod lod=source;
+    if(!(lod.flags&1))return lod;
+    for(const auto& mesh:lod.meshes) {
+        require(mesh.has_v5_transform,"origin step requires v5 meshes");
+        require(mesh.parent_index<lod.meshes.size(),"mesh parent outside table");
+    }
+    for(auto& vertex:lod.vertices) {
+        require(vertex.mesh<32768 && vertex.mesh<lod.meshes.size(),"vertex mesh outside table");
+        for(std::size_t k=0;k<3;++k) {
+            const std::int64_t origin=lod.meshes[vertex.mesh].origin[k];
+            const auto shifted=origin>=0?origin/256:-((-origin+255)/256);
+            const auto wrapped=std::uint16_t(std::int64_t(vertex.position[k])-shifted);
+            vertex.position[k]=wrapped<=32767?std::int16_t(wrapped):std::int16_t(std::int32_t(wrapped)-65536);
+        }
+    }
+    for(auto& mesh:lod.meshes)for(std::size_t k=0;k<3;++k) {
+        const auto value=std::uint32_t(mesh.origin[k])-std::uint32_t(lod.meshes[mesh.parent_index].origin[k]);
+        mesh.delta_origin[k]=value<=2147483647?std::int32_t(value):std::int32_t(std::int64_t(value)-4294967296LL);
+    }
+    return lod;
+}
+
 }

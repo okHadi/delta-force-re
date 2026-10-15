@@ -31,12 +31,13 @@ struct ModelMesh {
 struct ModelMaterial {
     std::string name;
     std::uint32_t flags{};
-    std::uint8_t texture_key{}, frame_count{}, timer{};
+    std::uint8_t texture_key{}, frame_count{}, animation_parameter{};
     std::array<std::uint8_t, 3> flat_rgb{};
     std::vector<std::size_t> texture_candidates;
     std::array<std::uint8_t, 76> raw{};
 };
 struct ModelLod {
+    std::uint32_t flags{};
     std::vector<ModelVertex> vertices;
     std::vector<ModelNormal> normals;
     std::vector<ModelFace> faces;
@@ -54,4 +55,6 @@ struct Model {
 };
 // Throws std::invalid_argument for unsupported or invalid model data.
 Model decode_model(const std::vector<std::uint8_t>& bytes);
+// Apply the original v5 loader origin step to one decoded LOD. Returns a copy.
+ModelLod localize_model_lod(const ModelLod& lod);
 }

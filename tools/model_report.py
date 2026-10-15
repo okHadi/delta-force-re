@@ -98,8 +98,10 @@ def decode(data, geometry=False):
             p=ao+i*76
             flags=u32(p+16);key=data[p+(55 if flags&0x8000 and not flags&1 else 52)]
             candidates=[j for j,t in enumerate(result['textures']) if t['sequence']&255==key] if flags&0x8001 and key!=255 else []
-            materials.append(dict(offset=p,name=name(p),flags=flags,texture_key=key,texture_candidates=candidates,frame_count=data[p+31],timer=data[p+30],flat_rgb=list(data[p+40:p+43])))
-        item=dict(offset=start,data_offset=start+header_size,data_size=total,vertices_count=vc,normals_count=nc,faces_count=fc,meshes=meshes,hardpoints=[list(struct.unpack_from('<iii',data,ho+i*12)) for i in range(hc)],collision_count=cc,collision_offset=co,materials=materials,bounds_raw=[[min(v[k] for v in vertices),max(v[k] for v in vertices)] for k in range(3)] if vertices else None)
+            if flags&0x4000 and data[p+30]>ac-i:
+                raise ModelError(f'LOD {lod}: material animation outside table')
+            materials.append(dict(offset=p,name=name(p),flags=flags,texture_key=key,texture_candidates=candidates,frame_count=data[p+30],animation_parameter=data[p+31],flat_rgb=list(data[p+40:p+43])))
+        item=dict(flags=u32(start+16),offset=start,data_offset=start+header_size,data_size=total,vertices_count=vc,normals_count=nc,faces_count=fc,meshes=meshes,hardpoints=[list(struct.unpack_from('<iii',data,ho+i*12)) for i in range(hc)],collision_count=cc,collision_offset=co,materials=materials,bounds_raw=[[min(v[k] for v in vertices),max(v[k] for v in vertices)] for k in range(3)] if vertices else None)
         if geometry:
             item.update(vertices=vertices,normals=normals,faces=faces)
         result['lods'].append(item)
@@ -125,12 +127,72 @@ def report_archive(path):
     return dict(archive=str(path),counts=dict(collections.Counter(m['status'] for m in models)),models=models)
 
 
+def check_origins(archive_path, executable, probe):
+    # Run only the bounded original origin block. This does not launch the game.
+    import subprocess
+    import tempfile
+    import pefile
+    from unicorn import Uc, UC_ARCH_X86, UC_MODE_32
+    from unicorn.x86_const import UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EIP
+    exe=Path(executable).read_bytes()
+    source_hash='abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff'
+    if hashlib.sha256(exe).hexdigest()!=source_hash:
+        raise ModelError('expected the documented original executable SHA-256')
+    pe=pefile.PE(data=exe)
+    begin,end=0x486128,0x486203
+    code=pe.get_data(begin-pe.OPTIONAL_HEADER.ImageBase,end-begin)
+    machine=Uc(UC_ARCH_X86,UC_MODE_32)
+    machine.mem_map(0x486000,4096);machine.mem_write(begin,code)
+    machine.mem_map(0x2000000,4096);machine.mem_map(0x3000000,0x200000)
+    archive=Archive(archive_path);models=lods=vertices=meshes=0
+    with archive.path.open('rb') as source, tempfile.TemporaryDirectory(prefix='df-model-',dir=Path('.local')) as temporary:
+        for entry in archive.entries:
+            if entry.deleted or not entry.name.lower().endswith('.3di'):
+                continue
+            source.seek(entry.offset);data=source.read(entry.size)
+            try:
+                model=decode(data)
+            except ModelError:
+                continue
+            if model['version']!=5 or not any(lod['flags']&1 for lod in model['lods']):
+                continue
+            path=Path(temporary)/entry.name;path.write_bytes(data)
+            native=json.loads(subprocess.check_output([str(Path(probe).resolve()),'--origins-json',str(path)]))
+            models+=1
+            for index,lod in enumerate(model['lods']):
+                if not lod['flags']&1:
+                    continue
+                header=bytearray(data[lod['offset']:lod['data_offset']])
+                vc=lod['vertices_count'];mc=len(lod['meshes'])
+                vertex_data=data[lod['data_offset']:lod['data_offset']+vc*8]
+                mesh_data=b''.join(data[m['offset']:m['offset']+112] for m in lod['meshes'])
+                if len(vertex_data)>0xff000 or len(mesh_data)>0x100000:
+                    raise ModelError('origin test exceeds its mapped memory')
+                struct.pack_into('<I',header,0x84,0x3001000)
+                struct.pack_into('<I',header,0x9c,0x3100000)
+                machine.mem_write(0x3000000,bytes(header));machine.mem_write(0x3001000,vertex_data);machine.mem_write(0x3100000,mesh_data)
+                machine.reg_write(UC_X86_REG_EBX,0x3000000);machine.reg_write(UC_X86_REG_ESI,0);machine.reg_write(UC_X86_REG_ESP,0x2000800);machine.reg_write(UC_X86_REG_EFLAGS,2)
+                machine.emu_start(begin,end,timeout=1000000,count=1000000)
+                if machine.reg_read(UC_X86_REG_EIP)!=end:
+                    raise ModelError('original origin block exceeded instruction limit')
+                actual_v=bytes(machine.mem_read(0x3001000,len(vertex_data)))
+                actual_m=bytes(machine.mem_read(0x3100000,len(mesh_data)))
+                expected=dict(vertices=[list(struct.unpack_from('<hhh',actual_v,i*8)) for i in range(vc)],delta_origin=[list(struct.unpack_from('<iii',actual_m,i*112+40)) for i in range(mc)])
+                if native[index]!=expected:
+                    raise ModelError(f'origin mismatch: {entry.name} LOD {index}')
+                lods+=1;vertices+=vc;meshes+=mc
+    return dict(source_sha256=source_hash,block_start=hex(begin),block_end_exclusive=hex(end),block_sha256=hashlib.sha256(code).hexdigest(),models=models,lods=lods,vertices=vertices,meshes=meshes,mismatches=0,scope='v5 LODs with flags bit 0; original loader global skip flag is zero')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input');parser.add_argument('--archive',action='store_true');parser.add_argument('--geometry',action='store_true')
+    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--probe')
     args=parser.parse_args()
+    if args.check_origins and (not args.archive or not args.probe):
+        parser.error('--check-origins requires --archive and --probe')
     try:
-        result=report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry)
+        result=check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
         print(json.dumps(result,indent=2))
     except (OSError,ValueError) as error:
         parser.exit(1,f'model: {error}\n')

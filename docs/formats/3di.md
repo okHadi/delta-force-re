@@ -23,7 +23,7 @@ All numbers are little-endian. Offsets are bytes.
 | v5 mesh transform | parent `u32` +36; delta origin `i32[3]` +40; origin +52, in 24.8 format |
 | Hardpoint, 12 bytes | XYZ `i32` in 24.8 format |
 | v5 collision volume | 72 stored bytes |
-| Material, 76 bytes | name +0; flags `u32` +16; timer +30; frame count +31; flat RGB +40; texture key +52; secondary key +55 |
+| Material, 76 bytes | name +0; flags `u32` +16; frame count +30; raw animation parameter +31; flat RGB +40; texture key +52; secondary key +55 |
 
 Faces refer to the current mesh. The decoder adds each mesh's vertex and normal start to make global indexes. U and V use 16.16 format. Texture candidate indexes match the low sequence byte. Flags `0x8000` without `0x1` select the secondary key. Key 255 has no candidate.
 
@@ -47,6 +47,20 @@ Source: `Df.pff`, SHA-256 `75e0231cbf53d838b0ac9e6b7670083aae61040e0560525cd5f0d
 
 ## Remaining fields
 
-Character motion, mesh parent rules, root transforms, collision rules, texture blend modes, and material animation timing need executable and runtime checks. Raw mesh, collision, material, and LOD header bytes remain available to code. These static checks establish file decoding, not game rendering or animation.
+Character motion, root transforms, collision rules, texture blend modes, and material animation timing need executable and runtime checks. Raw mesh, collision, material, and LOD header bytes remain available to code. These static checks establish file decoding, not game rendering or animation.
 
 Format references: [NovaResearch](https://github.com/Novahq-net/NovaResearch/blob/6413caa5def19c0885e38f77d28454348ab54e69/Shared/3DI%20File%20Format.md), [Nova3di](https://github.com/Novahq-net/Nova3di/blob/cb4f76c963a6db6ee3a68f31d3af611124b0ac19/src/format/t3di.cpp). Neither checked repository has a license file. This decoder is an independent implementation checked against the user's assets.
+
+Executable check: `Df.exe` SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`, function `0x486b80`, instructions `0x486d3a–0x486d5a`, tests material flag `0x4000` and requires material index plus byte `+0x1e` to fit the material table. REA Evidence `ev_f5267c299e00d76adb7c38a5b9cad3df991e5813e4754fccdef07220ac7ba1f1`. All 603 flagged materials pass this check. The role of byte `+0x1f` needs further checks.
+
+## Original origin step
+
+`localize_model_lod()` returns a copy with the original v5 loader origin step. LOD flag bit 0 enables the step. The original global skip flag is zero in this mode. Each vertex subtracts its referenced mesh origin shifted right by 8, with signed arithmetic and 16-bit wrap. Each mesh delta origin becomes its origin minus its parent origin, with 32-bit wrap. Parent indexes have bounds checks.
+
+REA function `0x485e30`, Evidence `ev_e7a945ff61755259945edfa1111a0498ec0f661f5c660c35df383734a02c0d33`, contains the step at `0x486128–0x486202`. The rebuilt step matches that original instruction block for all 192 flagged v5 LODs in 50 models: 53,212 vertices and 2,880 meshes; zero mismatches. Block SHA-256: `e39ea68ac7f92f13c2f5ae2182cf95aefb9f0fc98c5b7b5c29d8d5a1728dd3dc`.
+
+Repeat with the local Python environment containing `pefile` and `unicorn`:
+
+```sh
+python tools/model_report.py /path/to/Df.pff --archive --check-origins /path/to/Df.exe --probe /path/to/models_probe
+```

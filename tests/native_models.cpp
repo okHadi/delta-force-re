@@ -31,6 +31,9 @@ int main() {
         bad=b;const std::size_t face=128+(version==5?184:176)+32;bad[face+28]=3;rejects(bad);
         bad=b;bad[face+34]=1;rejects(bad);
         bad=b;put(bad,face+68,1);rejects(bad);
+        bad=b;put(bad,bad.size()-76+16,0x4000);bad[bad.size()-76+30]=2;rejects(bad);
+        bad[bad.size()-76+30]=1;bad[bad.size()-76+31]=127;const auto animated=dfre::decode_model(bad);
+        check(animated.lods[0].materials[0].frame_count==1 && animated.lods[0].materials[0].animation_parameter==127,"material frame fields changed");
     }
     auto b=triangle(5);b[3]=8;rejects(b);b=triangle(5);b[0]=0;rejects(b);
     b=triangle(5);put(b,124,0xffffffff);rejects(b);b=triangle(5);put(b,20,0xffffffff);rejects(b);
@@ -41,5 +44,17 @@ int main() {
     auto m=dfre::decode_model(b);check(m.textures[0].pixels[0]==42 && m.textures[0].palette_rgb_pad[0]==123,"texture data changed");
     check(m.lods[0].materials[0].texture_candidates==std::vector<std::size_t>{0},"texture sequence binding changed");
     b[128+16]=255;b[128+17]=255;b[128+18]=255;b[128+19]=255;rejects(b);
+    auto raw=dfre::decode_model(triangle(5)).lods[0];raw.flags=1;
+    raw.meshes[0].origin={-257,2147483647,(-2147483647-1)};
+    auto local=dfre::localize_model_lod(raw);
+    check(local.vertices[0].position==std::array<std::int16_t,3>{1,1,0},"signed origin shift or word wrap changed");
+    check(local.meshes[0].delta_origin==std::array<std::int32_t,3>{0,0,0},"self parent delta changed");
+    check(raw.vertices[0].position[0]==-1,"origin step changed its input");
+    raw.meshes[0].parent_index=1;
+    try{dfre::localize_model_lod(raw);check(false,"accepted invalid parent");}catch(const std::invalid_argument&){}
+    raw.meshes[0].parent_index=0;raw.vertices[0].mesh=1;
+    try{dfre::localize_model_lod(raw);check(false,"accepted invalid vertex mesh");}catch(const std::invalid_argument&){}
+    raw.flags=0;local=dfre::localize_model_lod(raw);
+    check(local.vertices[0].position==raw.vertices[0].position,"unflagged LOD changed");
     std::cout<<"model bounds and geometry tests passed\n";
 }
