@@ -109,3 +109,9 @@ REA/Ghidra supplied the main dossiers. Callback bodies and window procedure in `
 `menu_probe all GAME_FOLDER` draws all 23 static menu layouts. The checked files contain 488 button definitions and 609 RTXT records. `check_font.py GAME_EXE MENU_PROBE` compares all 1,280 glyph entries from five unique font images with the original x86 scanner; all match, including baselines and counts.
 
 The captured original Main Menu and rebuilt menu match at every pixel outside the original cursor bounds `(629,245)–(640,266)`. The 56 remaining differing pixels are in those bounds. Evidence: `startup-main-pixels-check.json`, `startup-font-differential.json`, `startup-menu-all.json` in `.local/reports/`. Other menu screens require their game-specific callbacks and separate frame checks.
+
+## Mission assets
+
+`MissionAssetCache` loads BMS objects and their item definitions. It caches model graphics, husks, prepared character data, and decoded animation definitions. Keep one binding per BMS object in the original group order. Apply the v5 model origin conversion and CHR preparation once per cached asset.
+
+Run `resources_probe GAME_FOLDER [MISSION.BMS]` to check resource loading. The supplied 62 missions load 25,492 object bindings, including 15,091 model bindings, 205 unique models, one character file, and nine animation definition files. Resource loading prepares data for the world renderer; gameplay callbacks use that data in later steps.

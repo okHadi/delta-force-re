@@ -193,8 +193,12 @@ void test_mission(const std::filesystem::path& folder) {
     require(loaded.config.text == config && loaded.terrain.member == "TEST.TRN", "Mission config failed");
     rejects([&] { store.load_mission("../TEST.BMS"); }, "Unsafe mission lookup accepted");
     rejects([&] { store.load_mission("MISSING.BMS"); }, "Missing mission accepted");
-    write(folder / "Dfbase.pff", pff({{"TEST.BMS", bms()}, {"test_c.pcx", pcx()}}));
-    rejects([&] { dfre::AssetStore(folder).load_mission("TEST.BMS"); }, "Cross-archive duplicate accepted");
+    write(folder / "Dfbase.pff", pff({{"TEST.BMS", bms()}, {"test_c.pcx", pcx(2,2,2,{0xc2,42,0xc2,42})}}));
+    const auto overlap = dfre::AssetStore(folder).load_mission("TEST.BMS");
+    require(overlap.color.source.archive == "Dfbase.pff" && overlap.color.image.pixels == AssetBytes(4,42), "Primary archive precedence changed");
+    auto duplicate_missions = terrain_members; duplicate_missions.push_back({"test.bms",bms()});
+    write(folder / "Df.pff",pff(duplicate_missions));
+    require(dfre::AssetStore(folder).missions() == std::vector<std::string>{"TEST.BMS"}, "Duplicate mission listing");
     auto missing = terrain_members; missing.pop_back();
     write(folder / "Df.pff", pff(missing));
     write(folder / "Dfbase.pff", pff({{"TEST.BMS", bms()}}));

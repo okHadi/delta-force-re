@@ -273,8 +273,8 @@ std::string mission_terrain_name(const AssetBytes& data) {
 }
 
 AssetStore::AssetStore(const std::filesystem::path& game_folder) {
-    archives_.emplace_back(game_folder / "Df.pff");
     archives_.emplace_back(game_folder / "Dfbase.pff");
+    archives_.emplace_back(game_folder / "Df.pff");
 }
 
 std::vector<std::string> AssetStore::missions() const {
@@ -283,7 +283,8 @@ std::vector<std::string> AssetStore::missions() const {
         for (const auto& entry : archive.entries()) {
             if (!entry.deleted && entry.name.size() > 4 &&
                 same_name(std::string_view(entry.name).substr(entry.name.size() - 4), ".bms")) {
-                result.push_back(entry.name);
+                if (std::none_of(result.begin(), result.end(), [&](const auto& name) { return same_name(name, entry.name); }))
+                    result.push_back(entry.name);
             }
         }
     }
@@ -293,19 +294,17 @@ std::vector<std::string> AssetStore::missions() const {
 
 AssetData AssetStore::read(std::string_view name) const {
     if (!safe_name(name)) throw AssetError("Unsafe asset lookup name");
-    const PffArchive* source = nullptr;
-    const PffEntry* found = nullptr;
     for (const auto& archive : archives_) {
+        const PffEntry* found = nullptr;
         for (const auto& entry : archive.entries()) {
             if (!entry.deleted && same_name(entry.name, name)) {
-                if (found) throw AssetError("Duplicate live asset: " + std::string(name));
-                source = &archive;
+                if (found) throw AssetError("Duplicate live PFF member: " + std::string(name));
                 found = &entry;
             }
         }
+        if (found) return {{archive.path().filename().string(), found->name, found->offset, found->size}, archive.read(found->name)};
     }
-    if (!found) throw AssetError("Missing asset: " + std::string(name));
-    return {{source->path().filename().string(), found->name, found->offset, found->size}, source->read(found->name)};
+    throw AssetError("Missing asset: " + std::string(name));
 }
 
 TerrainImage AssetStore::load_image(std::string_view name) const {

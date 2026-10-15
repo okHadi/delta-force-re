@@ -22,3 +22,7 @@ Run `python3 tools/pff.py list ARCHIVE` for JSON metadata. Run `python3 tools/pf
 [NovaHQ reference](https://github.com/Novahq-net/NovaResearch/blob/main/Shared/PFF%20File%20Format.md): use its PFF3 variant 1 record layout. The first header field in these local files is 20.
 
 REA/Ghidra identifies the archive loader at `Df.exe:0x49e2a0`. It reads a 20-byte header, allocates `record_count × 32` bytes, and seeks to the table offset. Evidence: `ev_ddf1f5eaa29e0613ef677de48b2523849051849b028377b9cfceba8f8724b9b9`.
+
+## Asset lookup
+
+Search `Dfbase.pff` first, then `Df.pff`. Keep one mission name when both archives contain it. Startup `401490` passes those names in that order to `48FC10`; `48FC10` makes the first archive primary through `499000`. Asset lookup `499040` returns the first match. Model loader `4865CC` selects the archive through `48FD00`.
