@@ -100,4 +100,17 @@ std::vector<CharacterBonePose> advance_character_pose(const std::vector<Characte
     const std::vector<CharacterBonePose>& delta);
 
 
+using ModelMatrix=std::array<std::int32_t,12>; // Row-major 3x4; rotation uses 22 fractional bits.
+// Original unsigned full-turn angle; returns sine and cosine in 22-bit fixed units.
+std::array<std::int32_t,2> fixed_sine_cosine(std::uint32_t angle);
+ModelMatrix model_identity_matrix();
+ModelMatrix model_multiply_matrix(const ModelMatrix& left,const ModelMatrix& right);
+std::array<std::int32_t,3> model_transform_point(const ModelMatrix& matrix,
+    const std::array<std::int32_t,3>& point);
+ModelMatrix model_local_matrix(const std::array<std::int32_t,3>& translation,
+    const std::array<std::uint32_t,3>& angles);
+std::vector<ModelMatrix> character_bone_matrices(const CharacterModel& prepared,
+    const std::vector<CharacterBonePose>& pose,std::uint32_t heading_adjustment=0,
+    const ModelMatrix* world=nullptr);
+
 }

@@ -1,5 +1,6 @@
 #include "dfre/models.hpp"
 #include <algorithm>
+#include <cmath>
 #include <limits>
 #include <stdexcept>
 
@@ -217,6 +218,96 @@ CharacterModel prepare_character_runtime(const CharacterModel& source) {
         bone.raw=r.copy(bone.offset,bone.raw.size());
     }
     result.runtime_prepared=true;return result;
+}
+
+namespace {
+std::int32_t signed_word(std::uint32_t value) {
+    return value<=2147483647?std::int32_t(value):std::int32_t(std::int64_t(value)-4294967296LL);
+}
+std::int32_t fixed_product(std::int32_t a,std::int32_t b,unsigned shift) {
+    const auto product=std::int64_t(a)*b;
+    const auto divisor=std::int64_t(1)<<shift;
+    return signed_word(std::uint32_t(product>=0?product/divisor:-((-product+divisor-1)/divisor)));
+}
+std::array<std::int32_t,2> model_sincos(std::uint32_t angle) {
+    static const auto table=[] {
+        std::array<std::int32_t,2561> values{};
+        for(std::size_t i=0;i<values.size();++i)values[i]=std::int32_t(std::sin(double(i)*0.00306796162109375)*4194304.0);
+        return values;
+    }();
+    const auto index=angle>>21,fraction=angle&0x1fffff;
+    auto sample=[&](std::size_t i) {
+        const auto change=fixed_product(std::int32_t(fraction),table[i+1]-table[i],21);
+        return signed_word(std::uint32_t(table[i])+std::uint32_t(change));
+    };
+    return {sample(index),sample(index+512)};
+}
+ModelMatrix axis_matrix(unsigned axis,std::int32_t cosine,std::int32_t sine) {
+    auto result=model_identity_matrix();
+    if(axis==0){result[5]=cosine;result[6]=signed_word(0-std::uint32_t(sine));result[9]=sine;result[10]=cosine;}
+    else if(axis==1){result[0]=cosine;result[2]=signed_word(0-std::uint32_t(sine));result[8]=sine;result[10]=cosine;}
+    else {result[0]=cosine;result[1]=signed_word(0-std::uint32_t(sine));result[4]=sine;result[5]=cosine;}
+    return result;
+}
+}
+std::array<std::int32_t,2> fixed_sine_cosine(std::uint32_t angle) {return model_sincos(angle);}
+ModelMatrix model_identity_matrix() {
+    ModelMatrix result{};result[0]=result[5]=result[10]=0x400000;return result;
+}
+ModelMatrix model_multiply_matrix(const ModelMatrix& left,const ModelMatrix& right) {
+    ModelMatrix result{};
+    for(std::size_t row=0;row<3;++row)for(std::size_t col=0;col<4;++col) {
+        std::uint32_t sum=col==3?std::uint32_t(left[row*4+3]):0;
+        for(std::size_t k=0;k<3;++k)sum+=std::uint32_t(fixed_product(left[row*4+k],right[k*4+col],22));
+        result[row*4+col]=signed_word(sum);
+    }
+    return result;
+}
+std::array<std::int32_t,3> model_transform_point(const ModelMatrix& matrix,const std::array<std::int32_t,3>& point) {
+    std::array<std::int32_t,3> result{};
+    for(std::size_t row=0;row<3;++row) {
+        auto sum=std::uint32_t(matrix[row*4+3]);
+        for(std::size_t k=0;k<3;++k)sum+=std::uint32_t(fixed_product(matrix[row*4+k],point[k],22));
+        result[row]=signed_word(sum);
+    }
+    return result;
+}
+ModelMatrix model_local_matrix(const std::array<std::int32_t,3>& translation,const std::array<std::uint32_t,3>& angles) {
+    auto rotation=model_identity_matrix();
+    for(unsigned index:{2,1,0})if(angles[index]) {
+        const auto sc=model_sincos(angles[index]);
+        rotation=model_multiply_matrix(axis_matrix(2-index,sc[1],sc[0]),rotation);
+    }
+    auto result=model_identity_matrix();for(std::size_t k=0;k<3;++k)result[k*4+3]=translation[k];
+    return model_multiply_matrix(result,rotation);
+}
+std::vector<ModelMatrix> character_bone_matrices(const CharacterModel& prepared,const std::vector<CharacterBonePose>& pose,
+    std::uint32_t heading_adjustment,const ModelMatrix* world) {
+    require(prepared.runtime_prepared,"character matrices require prepared fields");
+    require(pose.size()==prepared.bone_map.size(),"character matrix pose count differs from map");
+    Reader r(prepared.raw);std::vector<ModelMatrix> result;
+    for(std::size_t i=0;i<pose.size();++i) {
+        const auto index=prepared.bone_map[i];require(index<prepared.bones.size(),"character bone map outside table");
+        const auto& bone=prepared.bones[index];const auto parent=r.i32(std::size_t(bone.offset)+56);
+        std::array<std::int32_t,3> translation{};
+        if(parent!=-1 && pose.size()!=1) {
+            require(parent>=0 && std::size_t(parent)<i,"character matrix parent must precede child");
+            const std::array<std::int32_t,3> local{
+                signed_word(0-std::uint32_t(r.i32(std::size_t(bone.offset)+36))),
+                signed_word(0-std::uint32_t(r.i32(std::size_t(bone.offset)+28))),
+                r.i32(std::size_t(bone.offset)+32)};
+            translation=model_transform_point(result[parent],local);
+        }
+        std::array<std::uint32_t,3> angles{(0-std::uint32_t(pose[i].angles[0]))<<7,std::uint32_t(pose[i].angles[1])<<7,(0-std::uint32_t(pose[i].angles[2]))<<7};
+        if(i==1 || i==2) {
+            const auto amount=heading_adjustment<0x80000000?heading_adjustment:~heading_adjustment;
+            const auto adjustment=(amount>>2)+(i==2?(amount>>1):0);
+            if(heading_adjustment<0x80000000)angles[1]+=adjustment;else angles[1]-=adjustment;
+        }
+        result.push_back(model_local_matrix(translation,angles));
+    }
+    if(world)for(auto& matrix:result)matrix=model_multiply_matrix(*world,matrix);
+    return result;
 }
 
 }

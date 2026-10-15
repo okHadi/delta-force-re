@@ -101,5 +101,24 @@ int main() {
     try{dfre::prepare_character_runtime(prepared);check(false,"accepted repeated character preparation");}catch(const std::invalid_argument&){}
     put(source_chr.raw,1516,1313);
     try{dfre::prepare_character_runtime(source_chr);check(false,"accepted unaligned character key");}catch(const std::invalid_argument&){}
+    const auto identity=dfre::model_identity_matrix();
+    check(dfre::model_transform_point(identity,{-1,123,456})==std::array<std::int32_t,3>{-1,123,456},"identity point changed");
+    auto translation=dfre::model_local_matrix({12,-34,56},{0,0,0});
+    check(dfre::model_transform_point(translation,{1,2,3})==std::array<std::int32_t,3>{13,-32,59},"matrix translation changed");
+    check(dfre::model_multiply_matrix(identity,translation)==translation,"identity multiplication changed");
+    auto quarter=dfre::model_local_matrix({0,0,0},{0x40000000u,0,0});
+    check(quarter[0]==0 && quarter[1]==-4194303 && quarter[4]==4194303 && quarter[5]==0,"original rotation table changed");
+    check(dfre::fixed_sine_cosine(0)==std::array<std::int32_t,2>{0,4194303},"original sine table phase changed");
+    auto tiny=identity;tiny[0]=-1;
+    check(dfre::model_transform_point(tiny,{1,0,0})[0]==-1,"fixed multiplication rounding changed");
+    dfre::CharacterModel skeleton;skeleton.runtime_prepared=true;skeleton.raw.resize(184);skeleton.bone_map={0,1};
+    dfre::CharacterBone root;root.offset=0;dfre::CharacterBone child;child.offset=92;skeleton.bones={root,child};
+    put(skeleton.raw,56,0xffffffff);put(skeleton.raw,92+56,0);put(skeleton.raw,92+28,256);put(skeleton.raw,92+32,512);put(skeleton.raw,92+36,768);
+    std::vector<dfre::CharacterBonePose> zero_pose(2);auto skeleton_matrices=dfre::character_bone_matrices(skeleton,zero_pose);
+    check(skeleton_matrices[1][3]==-768 && skeleton_matrices[1][7]==-256 && skeleton_matrices[1][11]==512,"bone hierarchy axes changed");
+    put(skeleton.raw,92+56,1);
+    try{dfre::character_bone_matrices(skeleton,zero_pose);check(false,"accepted forward bone parent");}catch(const std::invalid_argument&){}
+    skeleton.runtime_prepared=false;
+    try{dfre::character_bone_matrices(skeleton,zero_pose);check(false,"accepted unprepared character matrices");}catch(const std::invalid_argument&){}
     std::cout<<"model bounds and geometry tests passed\n";
 }

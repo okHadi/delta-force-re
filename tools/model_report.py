@@ -346,11 +346,66 @@ def check_character_prepare(path, executable, probe):
     return dict(source_sha256=source_hash,character_sha256=hashlib.sha256(data).hexdigest(),function=hex(start),function_bytes=len(code),function_sha256=hashlib.sha256(code).hexdigest(),bones=len(bones),track_a_keys=keys,compared_bytes=len(data),mismatches=0,scope='original 92-byte-bone preparation; process addresses normalized to stored offsets')
 
 
+def check_character_matrices(path, executable, probe):
+    import subprocess
+    import pefile
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EIP, UC_X86_REG_FPCW
+    pose_check=check_character(path,executable,probe)
+    check_character_prepare(path,executable,probe)
+    probe=str(Path(probe).resolve());exe=Path(executable).read_bytes()
+    raw=subprocess.check_output([probe,'--character-prepared',str(path)])
+    stored=json.loads(subprocess.check_output([probe,'--character-matrices-json',str(path)]))
+    cases=json.loads(subprocess.check_output([probe,'--character-matrix-cases-json',str(path)]))
+    poses=json.loads(subprocess.check_output([probe,'--character-poses-json',str(path)]))
+    by_key={(row['slot'],row['frame']):row['pose'] for row in poses}
+    pe=pefile.PE(data=exe);machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    for address,size in ((0x45c000,0x2000),(0x46b000,4096),(0x477000,4096),(0x49b000,4096),(0x4cd000,4096),(0x4fb000,4096),(0xbd0000,0x4000),(0x2000000,4096),(0x3000000,(len(raw)+4095)&~4095),(0x4000000,0x3000),(0x5000000,4096),(0x6000000,4096)):
+        machine.mem_map(address,size)
+    for address,size in ((0x45c000,0x2000),(0x46bc00,0x205),(0x477510,0x48),(0x4776c0,0xa4),(0x49bae6,29),(0x4cd518,16),(0x4fb2f8,4)):
+        machine.mem_write(address,pe.get_data(address-pe.OPTIONAL_HEADER.ImageBase,size))
+    machine.mem_write(0x2000800,struct.pack('<I',0x6000000));machine.reg_write(UC_X86_REG_ESP,0x2000800);machine.reg_write(UC_X86_REG_FPCW,0x037f)
+    machine.emu_start(0x477510,0x6000000,count=1000000,timeout=1000000)
+    if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+        raise ModelError('original sine initialization exceeded instruction limit')
+    machine.mem_write(0x3000000,raw)
+    count,bones,mapping=(struct.unpack_from('<I',raw,offset)[0] for offset in (16,4,12))
+    if count>32:
+        raise ModelError('matrix check bone count exceeds its output buffer')
+    for i in range(count):
+        index=struct.unpack_from('<I',raw,mapping+i*4)[0]
+        machine.mem_write(0x4001000+i*4,struct.pack('<I',0x3000000+bones+index*92))
+    state=bytearray(256)
+    for offset,value in ((0x14,count),(0x7c,0x4001000),(0x80,0x4002000)):
+        struct.pack_into('<I',state,offset,value)
+    machine.mem_write(0x4000000,bytes(state));total=0
+    for item in stored+cases:
+        pose=item.get('pose',by_key[(item['slot'],item['frame'])])
+        machine.mem_write(0x4002000,b''.join(struct.pack('<6i',*bone) for bone in pose))
+        machine.mem_write(0x5000000,b'\xa5'*(count*64))
+        world=item.get('world',[]);world_pointer=0x5000800 if world else 0
+        if world:
+            machine.mem_write(world_pointer,struct.pack('<12i',*world))
+        machine.mem_write(0x2000800,struct.pack('<5I',0x6000000,world_pointer,0x5000000,0x4000000,item.get('heading',0)))
+        machine.reg_write(UC_X86_REG_ESP,0x2000800);machine.reg_write(UC_X86_REG_EFLAGS,2)
+        machine.emu_start(0x46bc00,0x6000000,count=1000000,timeout=1000000)
+        if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+            raise ModelError('original bone matrices exceeded instruction limit')
+        output=bytes(machine.mem_read(0x5000000,count*64))
+        expected=[list(struct.unpack_from('<12i',output,i*64)) for i in range(count)]
+        if item['matrices']!=expected:
+            raise ModelError(f"bone matrix mismatch: slot {item['slot']} frame {item['frame']}")
+        total+=count
+    return dict(source_sha256=pose_check['source_sha256'],character_sha256=pose_check['character_sha256'],stored_frames=len(stored),extra_cases=len(cases),matrices=total,components=total*12,mismatches=0,function='0x46bc00',function_bytes=0x205,function_sha256=hashlib.sha256(pe.get_data(0x46bc00-pe.OPTIONAL_HEADER.ImageBase,0x205)).hexdigest(),sine_table_sha256=hashlib.sha256(bytes(machine.mem_read(0xbd0068,2561*4))).hexdigest(),scope='all stored poses; extra fractional angles, six heading values and world transforms; prepared fields; matrix padding excluded')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input');parser.add_argument('--archive',action='store_true');parser.add_argument('--geometry',action='store_true')
-    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--check-character',metavar='EXE');parser.add_argument('--check-deltas',metavar='EXE');parser.add_argument('--check-prepare',metavar='EXE');parser.add_argument('--probe')
+    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--check-character',metavar='EXE');parser.add_argument('--check-deltas',metavar='EXE');parser.add_argument('--check-prepare',metavar='EXE');parser.add_argument('--check-matrices',metavar='EXE');parser.add_argument('--probe')
     args=parser.parse_args()
+    if args.check_matrices and (args.archive or not args.probe or args.check_origins or args.check_character or args.check_deltas or args.check_prepare):
+        parser.error('--check-matrices needs --probe and one CHR input')
     if args.check_prepare and (args.archive or not args.probe or args.check_origins or args.check_character or args.check_deltas):
         parser.error('--check-prepare needs --probe and one CHR input')
     if args.check_deltas and (args.archive or not args.probe or args.check_origins or args.check_character):
@@ -360,7 +415,7 @@ def main():
     if args.check_origins and (not args.archive or not args.probe):
         parser.error('--check-origins requires --archive and --probe')
     try:
-        result=check_character_prepare(args.input,args.check_prepare,args.probe) if args.check_prepare else check_character_deltas(args.input,args.check_deltas,args.probe) if args.check_deltas else check_character(args.input,args.check_character,args.probe) if args.check_character else check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
+        result=check_character_matrices(args.input,args.check_matrices,args.probe) if args.check_matrices else check_character_prepare(args.input,args.check_prepare,args.probe) if args.check_prepare else check_character_deltas(args.input,args.check_deltas,args.probe) if args.check_deltas else check_character(args.input,args.check_character,args.probe) if args.check_character else check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
         print(json.dumps(result,indent=2))
     except (OSError,ValueError) as error:
         parser.exit(1,f'model: {error}\n')
