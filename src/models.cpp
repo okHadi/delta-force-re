@@ -26,6 +26,7 @@ Model decode_model(const std::vector<std::uint8_t>& bytes) {
     Reader r(bytes);r.range(0,128);
     require(bytes[0]=='3' && bytes[1]=='D' && bytes[2]=='I',"unsupported model magic");
     Model model;model.version=bytes[3];model.name=r.name(4);
+    for(std::size_t i=0;i<4;++i){model.lod_thresholds[i]=r.i32(24+i*4);model.render_types[i]=r.u32(40+i*4);}
     require(model.version>=2 && model.version<=5,"unsupported model version");
     const std::size_t hs=model.version==5?184:176, ms=model.version==2?88:(model.version==5?112:104);
     auto lc=r.u32(20),tc=r.u32(124);

@@ -247,6 +247,30 @@ std::optional<ModelRasterTriangle> prepare_model_face(const ModelFace& face,
     return result;
 }
 
+ModelLighting make_model_scene_lighting(const ModelMatrix& camera_matrix,
+    const std::array<std::int32_t,3>& direction,std::int32_t ambient,std::int32_t diffuse,std::int32_t specular) {
+    auto matrix=camera_matrix;std::array<std::int32_t,3> shifted{};
+    for(std::size_t k=0;k<3;++k){matrix[k*4+3]=0;shifted[k]=signed_value(std::uint32_t(direction[k])<<6);}
+    const auto light=model_transform_point(matrix,shifted);
+    auto half=light;half[0]=sub(half[0],0x400000);
+    std::uint32_t squared=0;
+    for(auto value:half)squared+=std::uint32_t(product(value,value,22));
+    auto square_root=[](std::uint32_t value) {
+        if(signed_value(value)<=1)return value;
+        std::uint32_t remainder=0,root=0,source=value;
+        for(unsigned i=0;i<16;++i){
+            auto next=root*2;remainder=(remainder<<2)|(source>>30);const auto trial=root*4+1;source<<=2;
+            if(trial<=remainder){++next;remainder-=trial;}root=next;
+        }
+        if(root-1<=value-root*root)++root;
+        return root;
+    };
+    const auto length=signed_value(square_root(squared)<<11);
+    if(length<=4096)half={};
+    else {const auto scale=divide(0x100000000000LL,length);for(auto& value:half)value=product(scale,value,22);}
+    return {light,half,ambient,diffuse,specular};
+}
+
 ModelLighting localize_model_lighting(const ModelMatrix& matrix,const ModelLighting& camera,std::int32_t scale) {
     const auto a=product(matrix[0],product(matrix[5],matrix[10],22),22);
     const auto b=product(matrix[1],product(matrix[6],matrix[8],22),22);

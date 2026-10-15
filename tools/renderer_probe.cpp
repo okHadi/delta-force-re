@@ -2,7 +2,19 @@
 #include <iostream>
 #include <string>
 int main(int argc,char** argv) {
-    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="texture32-shade-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera" && std::string(argv[1])!="faces" && std::string(argv[1])!="flat32" && std::string(argv[1])!="triangle32" && std::string(argv[1])!="mesh32"))return 2;
+    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="texture32-shade-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera" && std::string(argv[1])!="faces" && std::string(argv[1])!="flat32" && std::string(argv[1])!="triangle32" && std::string(argv[1])!="mesh32" && std::string(argv[1])!="scene-lighting"))return 2;
+    if(argc==2 && std::string(argv[1])=="scene-lighting") {
+        dfre::ModelMatrix matrix;std::array<std::int32_t,3> direction;std::int32_t ambient,diffuse,specular;
+        while(std::cin>>matrix[0]) {
+            for(std::size_t k=1;k<matrix.size();++k)if(!(std::cin>>matrix[k]))return 2;
+            for(auto& value:direction)if(!(std::cin>>value))return 2;
+            if(!(std::cin>>ambient>>diffuse>>specular))return 2;
+            const auto lighting=dfre::make_model_scene_lighting(matrix,direction,ambient,diffuse,specular);
+            for(auto value:lighting.light_direction)std::cout<<value<<' ';
+            for(auto value:lighting.view_direction)std::cout<<value<<' ';
+            std::cout<<lighting.ambient<<' '<<lighting.diffuse<<' '<<lighting.specular<<'\n';
+        }return std::cin.eof()?0:2;
+    }
     if(argc==2 && std::string(argv[1])=="mesh32") {
         std::uint32_t test,flags,smooth,bx,by,flat,math;std::int32_t specular,constant;std::uint32_t power;
         while(std::cin>>test>>flags>>smooth>>bx>>by>>flat>>math>>specular>>constant>>power) {

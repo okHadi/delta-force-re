@@ -118,5 +118,12 @@ int main() {
     check(dfre::draw_model_mesh32(draw_lod,0,{dfre::model_identity_matrix()},mesh_camera,{}, {binding},8,8,colours,depths)>0 && colours[27]==0x12345678,"complete mesh path lost its geometry or material shade");
     draw_lod.faces[0].vertices[0]=3;
     try{dfre::draw_model_mesh32(draw_lod,0,{dfre::model_identity_matrix()},mesh_camera,{}, {binding},8,8,colours,depths);check(false,"mesh draw accepted a vertex outside the mesh");}catch(const std::invalid_argument&){}
+    const auto scene_light=dfre::make_model_scene_lighting(dfre::model_identity_matrix());
+    check(scene_light.light_direction==std::array<std::int32_t,3>{-2965760,0,2965760} &&
+        scene_light.view_direction==std::array<std::int32_t,3>{-3875214,0,1605146} &&
+        scene_light.ambient==0x8ccc && scene_light.diffuse==0x8000 && scene_light.specular==0x10000,
+        "original scene light direction or strengths differ");
+    const auto head_on=dfre::make_model_scene_lighting(dfre::model_identity_matrix(),{65536,0,0});
+    check(head_on.view_direction==std::array<std::int32_t,3>{},"short scene half-vector must be zero");
     std::cout<<"raster classification tests passed\n";
 }

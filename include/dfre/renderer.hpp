@@ -62,6 +62,10 @@ struct ModelLighting {
     std::array<std::int32_t,3> light_direction{},view_direction{}; // Mesh-local 22-bit fixed directions.
     std::int32_t ambient{},diffuse{},specular{}; // 16.16 strengths.
 };
+// Original 46BB20 / 46BA50; direction starts in world-space 16.16 units.
+ModelLighting make_model_scene_lighting(const ModelMatrix& camera_matrix,
+    const std::array<std::int32_t,3>& direction={-46340,0,46340},
+    std::int32_t ambient=0x8ccc,std::int32_t diffuse=0x8000,std::int32_t specular=0x10000);
 // Original 0x46b1d0 face assembly. UV coordinates remain normalized 16.16.
 std::optional<ModelRasterTriangle> prepare_model_face(const ModelFace& face,
     const std::vector<ModelProjectedVertex>& positions,const std::vector<ModelNormal>& normals,

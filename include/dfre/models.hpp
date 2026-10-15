@@ -52,6 +52,8 @@ struct ModelLod {
 struct Model {
     std::string name;
     std::uint8_t version{};
+    std::array<std::int32_t,4> lod_thresholds{}; // Raw header words at 24..36.
+    std::array<std::uint32_t,4> render_types{}; // Original callback tags at 40..52.
     std::vector<ModelTexture> textures;
     std::vector<ModelLod> lods;
 };

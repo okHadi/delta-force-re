@@ -1,5 +1,11 @@
 # DF1 models
 
+`make_model_scene_lighting` applies original `46BB20` and `46BA50`. It transforms
+the world light through the camera rotation and builds the specular half-vector.
+Default direction and strengths follow scene setup `485420`. The integer square
+root uses original `477620` rounding. The original x86 checker compares both
+directions and all three strengths in 4,096 cases, including zero half-vectors.
+
 `decode_model()` reads complete 3DI v2–v5 model files. Counts and indexes have bounds checks. Texture palettes retain RGB plus the stored padding byte. Geometry uses raw game coordinates. Mesh transforms remain separate.
 
 Run `models_probe FILE...` for native counts. Run `python3 tools/model_report.py Df.pff --archive` for a JSON report. Use `--geometry` with one extracted model to include vertices and faces. Keep reports and assets in `.local/`.
