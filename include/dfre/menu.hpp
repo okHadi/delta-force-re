@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -99,9 +100,13 @@ public:
     std::vector<MenuAction> key(int virtual_key);
     std::vector<MenuAction> draw_actions() const;
     const std::vector<std::uint32_t>& render();
+    const std::vector<std::uint32_t>& render(const std::function<void(const MenuAction&)>& owner_draw);
     void draw_image(std::string_view name, int x, int y, int frame = 0,
-                    int frame_count = 1, bool blend = false, bool transparent = false);
+                    int frame_count = 1, bool blend = false, bool transparent = false, bool half_blend = false);
     const FontAtlas& font_atlas(std::string_view name);
+    void draw_pcx(const PcxImage& image,int x,int y,bool transparent=false);
+    void draw_text(std::string_view font,int x,int y,std::string_view text,std::uint32_t color);
+    void draw_line(int x1,int y1,int x2,int y2,std::uint32_t color);
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

@@ -4,6 +4,7 @@
 #include "dfre/platform.hpp"
 
 #include <stdexcept>
+#include <utility>
 
 namespace dfre {
 namespace {
@@ -50,6 +51,7 @@ public:
                                          SDL_TEXTUREACCESS_STREAMING, width, height);
             if (!texture_) fail();
             if (SDL_RenderSetLogicalSize(renderer_, width, height)) fail();
+            SDL_StartTextInput();
         } catch (...) { close(); throw; }
     }
 
@@ -67,6 +69,12 @@ public:
                     if (key) result.push_back({event.type == SDL_KEYDOWN ? InputKind::key_down : InputKind::key_up, key});
                 }
                 break;
+            case SDL_TEXTINPUT: {
+                InputEvent text{InputKind::text_input};
+                text.text = event.text.text;
+                result.push_back(std::move(text));
+                break;
+            }
             case SDL_MOUSEMOTION:
                 result.push_back({InputKind::pointer_move, 0, event.motion.x, event.motion.y}); break;
             case SDL_MOUSEBUTTONDOWN: case SDL_MOUSEBUTTONUP:
@@ -93,6 +101,7 @@ public:
 
 private:
     void close() noexcept {
+        SDL_StopTextInput();
         SDL_DestroyTexture(texture_);
         SDL_DestroyRenderer(renderer_);
         SDL_DestroyWindow(window_);

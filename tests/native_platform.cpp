@@ -16,6 +16,30 @@ namespace {
 void check(bool value, const char* message) {
     if (!value) throw std::runtime_error(message);
 }
+#ifdef _WIN32
+void check_display() {
+    const auto handle = FindWindowW(L"DeltaForceREWindow", L"DFRE platform test");
+    BITMAPINFO bitmap{};
+    bitmap.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bitmap.bmiHeader.biWidth = 64;
+    bitmap.bmiHeader.biHeight = -48;
+    bitmap.bmiHeader.biPlanes = 1;
+    bitmap.bmiHeader.biBitCount = 32;
+    void* raw = nullptr;
+    const auto dc = CreateCompatibleDC(nullptr);
+    const auto image = CreateDIBSection(dc, &bitmap, DIB_RGB_COLORS, &raw, nullptr, 0);
+    check(dc && image && raw, "Cannot create a display check buffer");
+    const auto previous = SelectObject(dc, image);
+    const bool printed = PrintWindow(handle, dc, PW_CLIENTONLY) != 0;
+    const auto* pixels = static_cast<const std::uint32_t*>(raw);
+    const bool correct = std::all_of(pixels, pixels + 64 * 48,
+                                     [](auto pixel) { return (pixel & 0xffffffu) == 0x123456; });
+    SelectObject(dc, previous);
+    DeleteObject(image);
+    DeleteDC(dc);
+    check(printed && correct, "Displayed pixels differ from the source frame");
+}
+#endif
 void inject() {
 #ifdef _WIN32
     auto handle = FindWindowW(L"DeltaForceREWindow", L"DFRE platform test");
@@ -23,6 +47,7 @@ void inject() {
     PostMessageW(handle, WM_KEYDOWN, VK_RETURN, 1);
     PostMessageW(handle, WM_KEYDOWN, VK_RETURN, 1L << 30);
     PostMessageW(handle, WM_KEYUP, VK_RETURN, 0);
+    PostMessageW(handle, WM_CHAR, '!', 0);
     PostMessageW(handle, WM_MOUSEMOVE, 0, MAKELPARAM(12, 23));
     PostMessageW(handle, WM_LBUTTONDOWN, 0, MAKELPARAM(12, 23));
     PostMessageW(handle, WM_LBUTTONUP, 0, MAKELPARAM(12, 23));
@@ -63,6 +88,9 @@ int main() {
         auto window = dfre::create_game_window("DFRE platform test", 64, 48);
         const std::vector<std::uint32_t> frame(64 * 48, 0xff123456);
         window->present(frame);
+#ifdef _WIN32
+        check_display();
+#endif
         rejected = false;
         try { window->present({0xff000000}); }
         catch (const std::invalid_argument&) { rejected = true; }
@@ -71,6 +99,9 @@ int main() {
         inject();
         const auto events = window->poll();
         for (const auto kind : {dfre::InputKind::key_down, dfre::InputKind::key_up,
+#ifdef _WIN32
+                               dfre::InputKind::text_input,
+#endif
                                dfre::InputKind::pointer_move, dfre::InputKind::pointer_down,
                                dfre::InputKind::pointer_up, dfre::InputKind::quit}) {
             const auto found = std::find_if(events.begin(), events.end(), [&](const auto& event) {
@@ -78,6 +109,7 @@ int main() {
                 if (kind == dfre::InputKind::key_down || kind == dfre::InputKind::key_up)
                     return event.key == 13;
                 if (kind == dfre::InputKind::quit) return true;
+                if (kind == dfre::InputKind::text_input) return event.text == "!";
                 return event.x == 12 && event.y == 23;
             });
             check(found != events.end(), "Missing input event or incorrect coordinates");

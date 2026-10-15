@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-export WINEPREFIX="$root/.local/wine-prefix"
+export WINEPREFIX="${DFRE_WINEPREFIX:-$root/.local/wine-prefix}"
 export WINEDEBUG="${WINEDEBUG:--all}"
 export MVK_CONFIG_LOG_LEVEL="${MVK_CONFIG_LOG_LEVEL:-0}"
 exec "$root/.local/tools/Wine Stable.app/Contents/Resources/wine/bin/wine" "$@"

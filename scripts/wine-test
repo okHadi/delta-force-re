@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export DFRE_WINEPREFIX="$root/.local/wine-tests"
+export WINEDLLOVERRIDES="mscoree,mshtml="
+WINEPREFIX="$DFRE_WINEPREFIX" "$root/.local/tools/Wine Stable.app/Contents/Resources/wine/bin/wineserver" -p60
+exec "$root/scripts/wine" "$@"

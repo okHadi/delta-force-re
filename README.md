@@ -20,6 +20,14 @@ ctest --test-dir build -C Release --output-on-failure
 
 For Windows builds on this Mac, use [Windows build](docs/windows-build.md).
 
+## Run
+
+```sh
+build/Release/dfre.exe "C:/Games/Delta Force"
+```
+
+The current build opens the original menus and soldier profiles. Mission gameplay is in development. Saves use `%LOCALAPPDATA%/DeltaForceRE`.
+
 ## Analysis
 
 ```sh

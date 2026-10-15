@@ -278,14 +278,14 @@ struct MenuRuntime::Impl {
     void emit(std::vector<MenuAction>& events,MenuButton& b,int action) {
         if(!b.handler.empty()) events.push_back({b.name,b.handler,action});
     }
-    void blit(std::string_view name,int x,int y,int frame_index,int frames,bool blend,bool transparent) {
+    void blit(std::string_view name,int x,int y,int frame_index,int frames,bool blend,bool transparent,bool half_blend=false) {
         const auto& picture=image(name);
         if(frames<1 || frame_index<0 || frame_index>=frames || picture.height%unsigned(frames)) throw AssetError("Invalid menu image strip");
         const int height=int(picture.height)/frames;
         for(int row=0;row<height;++row)for(int col=0;col<int(picture.width);++col) {
             if(x+col<0 || x+col>=640 || y+row<0 || y+row>=480)continue;
             const auto pixel=picture.pixels[(row+frame_index*height)*picture.width+col];if(transparent && !pixel)continue;
-            auto& target=frame[(y+row)*640+x+col]; const auto color=rgb(picture,pixel);target=blend?strip_blend(color,target):color;
+            auto& target=frame[(y+row)*640+x+col]; const auto color=rgb(picture,pixel);target=half_blend?(0xff000000u|(((color&0xfefefeu)>>1)+((target&0xfefefeu)>>1))):(blend?strip_blend(color,target):color);
         }
     }
     void draw_text(const MenuButton& b,int x,int y,std::string_view value,std::uint32_t color) {
@@ -363,11 +363,13 @@ std::vector<MenuAction> MenuRuntime::draw_actions() const {
         if(b.state && (b.attributes&32) && !b.draw_handler.empty())events.push_back({b.name,b.draw_handler,3});}
     return events;
 }
-const std::vector<std::uint32_t>& MenuRuntime::render() {
+const std::vector<std::uint32_t>& MenuRuntime::render(){return render({});}
+const std::vector<std::uint32_t>& MenuRuntime::render(const std::function<void(const MenuAction&)>& owner_draw) {
     auto& p=*impl_;const auto& m=p.menu();std::fill(p.frame.begin(),p.frame.end(),0xff000000u);
     if(!m.background.empty())p.blit(m.background,0,0,0,1,false,false);
     for(const auto& n:m.buttons) {
         auto& b=p.button(n);if(!b.state)continue;p.dimensions(b);
+        if(owner_draw && (b.attributes&32) && !b.draw_handler.empty())owner_draw({b.name,b.draw_handler,3});
         int x=b.x,y=b.y;
         if(!b.image.empty() && b.type==1) {
             const int count=(b.attributes&2048)?1:4;const int cell=count==1?0:b.state-1;
@@ -391,7 +393,24 @@ const std::vector<std::uint32_t>& MenuRuntime::render() {
     }
     return p.frame;
 }
-void MenuRuntime::draw_image(std::string_view n,int x,int y,int frame,int frames,bool blend,bool transparent){impl_->blit(n,x,y,frame,frames,blend,transparent);}
+void MenuRuntime::draw_image(std::string_view n,int x,int y,int frame,int frames,bool blend,bool transparent,bool half_blend){impl_->blit(n,x,y,frame,frames,blend,transparent,half_blend);}
 const FontAtlas& MenuRuntime::font_atlas(std::string_view name){return impl_->font(name);}
+void MenuRuntime::draw_pcx(const PcxImage& image,int x,int y,bool transparent) {
+    if(image.pixels.size()!=std::size_t(image.width)*image.height)throw AssetError("Invalid menu picture pixels");
+    for(unsigned row=0;row<image.height;++row)for(unsigned col=0;col<image.width;++col) {
+        const auto xx=std::int64_t(x)+col,yy=std::int64_t(y)+row;if(xx<0||xx>=640||yy<0||yy>=480)continue;
+        const auto pixel=image.pixels[row*image.width+col];if(transparent && !pixel)continue;
+        impl_->frame[std::size_t(yy)*640+std::size_t(xx)]=rgb(image,pixel);
+    }
+}
+void MenuRuntime::draw_text(std::string_view font,int x,int y,std::string_view text,std::uint32_t color) {
+    MenuButton b;b.font=std::string(font);impl_->draw_text(b,x,y,text,color);
+}
+void MenuRuntime::draw_line(int x1,int y1,int x2,int y2,std::uint32_t color) {
+    if(std::abs(std::int64_t(x2)-x1)>10000||std::abs(std::int64_t(y2)-y1)>10000)throw AssetError("Menu line exceeds drawing limit");
+    const int dx=std::abs(x2-x1),sx=x1<x2?1:-1,dy=-std::abs(y2-y1),sy=y1<y2?1:-1;int error=dx+dy;
+    while(true){if(x1>=0&&x1<640&&y1>=0&&y1<480)impl_->frame[y1*640+x1]=0xff000000u|(((color&0xfefefeu)>>1)+((impl_->frame[y1*640+x1]&0xfeu)>>1));
+        if(x1==x2&&y1==y2)break;const auto twice=error*2;if(twice>=dy){error+=dy;x1+=sx;}if(twice<=dx){error+=dx;y1+=sy;}}
+}
 
 } // namespace dfre

@@ -5,6 +5,7 @@
 #include "dfre/platform.hpp"
 
 #include <stdexcept>
+#include <utility>
 
 namespace dfre {
 namespace {
@@ -88,6 +89,29 @@ private:
             if (!(position & (1L << 30))) self->events_.push_back({InputKind::key_down, static_cast<int>(value)});
             return 0;
         case WM_KEYUP: self->events_.push_back({InputKind::key_up, static_cast<int>(value)}); return 0;
+        case WM_CHAR: {
+            const auto unit = static_cast<wchar_t>(value);
+            if (unit >= 0xd800 && unit <= 0xdbff) { self->surrogate_ = unit; return 0; }
+            wchar_t units[2]{unit, 0};
+            int count = 1;
+            if (unit >= 0xdc00 && unit <= 0xdfff) {
+                if (!self->surrogate_) return 0;
+                units[0] = self->surrogate_;
+                units[1] = unit;
+                count = 2;
+            }
+            self->surrogate_ = 0;
+            if (unit < 32 || unit == 127) return 0;
+            char text[8];
+            const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, units, count,
+                                                    text, sizeof(text), nullptr, nullptr);
+            if (length) {
+                InputEvent event{InputKind::text_input};
+                event.text.assign(text, static_cast<std::size_t>(length));
+                self->events_.push_back(std::move(event));
+            }
+            return 0;
+        }
         case WM_MOUSEMOVE: self->events_.push_back({InputKind::pointer_move, 0, x, y}); return 0;
         case WM_LBUTTONDOWN:
             SetCapture(handle);
@@ -95,6 +119,7 @@ private:
         case WM_LBUTTONUP:
             ReleaseCapture();
             self->events_.push_back({InputKind::pointer_up, 0, x, y}); return 0;
+        case WM_PRINTCLIENT: self->draw(reinterpret_cast<HDC>(value)); return 0;
         case WM_PAINT: {
             PAINTSTRUCT paint;
             self->draw(BeginPaint(handle, &paint));
@@ -110,6 +135,7 @@ private:
     BITMAPINFO bitmap_{};
     std::vector<std::uint32_t> frame_;
     std::vector<InputEvent> events_;
+    wchar_t surrogate_ = 0;
 };
 } // namespace
 

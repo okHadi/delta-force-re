@@ -11,9 +11,18 @@ Build Windows x64 code:
 ```sh
 cmake -S . -B .local/build/windows -DCMAKE_TOOLCHAIN_FILE=cmake/windows-zig.cmake -DCMAKE_BUILD_TYPE=Release
 cmake --build .local/build/windows -j 4
+ctest --test-dir .local/build/windows --output-on-failure
 ```
 
-Run Windows test programs through `scripts/wine`. Wine keeps its settings in `.local/wine-prefix/`.
+Run Windows programs through `scripts/wine`. CTest uses a separate `.local/wine-tests/` prefix. Interactive game runs use `.local/wine-prefix/`.
+
+## Game build
+
+```sh
+scripts/wine .local/build/windows/dfre.exe 'Z:\path\to\Delta Force'
+```
+
+Use `--save-dir PATH` to set a separate save folder. Use `--frames N` for a short display check.
 
 ## Original reference
 

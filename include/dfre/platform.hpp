@@ -7,13 +7,14 @@
 
 namespace dfre {
 
-enum class InputKind { quit, key_down, key_up, pointer_move, pointer_down, pointer_up };
+enum class InputKind { quit, key_down, key_up, text_input, pointer_move, pointer_down, pointer_up };
 
 struct InputEvent {
     InputKind kind;
     int key = 0; // Windows virtual key value.
     int x = 0;
     int y = 0;
+    std::string text; // UTF-8 text from the active game window.
 };
 
 class GameWindow {
