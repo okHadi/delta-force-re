@@ -1,10 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 project(delta_force_re LANGUAGES C CXX)
 
-add_library(dfre_core STATIC src/filename.cpp src/network.cpp src/assets.cpp src/models.cpp src/state_loop.cpp src/mission.cpp src/menu.cpp src/terrain.cpp src/profiles.cpp src/soldier_menu.cpp src/scripts.cpp src/items.cpp src/renderer.cpp src/resources.cpp src/campaign.cpp src/player.cpp src/world.cpp)
+add_library(dfre_core STATIC src/filename.cpp src/network.cpp src/assets.cpp src/models.cpp src/state_loop.cpp src/mission.cpp src/menu.cpp src/terrain.cpp src/profiles.cpp src/soldier_menu.cpp src/scripts.cpp src/items.cpp src/renderer.cpp src/resources.cpp src/campaign.cpp src/player.cpp src/world.cpp src/palette_quantizer.cpp)
+target_sources(dfre_core PRIVATE src/model_palette.cpp)
 target_include_directories(dfre_core PUBLIC include)
 target_compile_features(dfre_core PUBLIC cxx_std_17)
 set_target_properties(dfre_core PROPERTIES CXX_EXTENSIONS OFF)
+if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    enable_language(ASM_MASM)
+    target_sources(dfre_core PRIVATE src/palette_variance_x64.asm)
+endif()
 
 add_executable(filename_probe tools/filename_probe.cpp)
 target_link_libraries(filename_probe PRIVATE dfre_core)
@@ -51,6 +56,15 @@ target_link_libraries(player_probe PRIVATE dfre_core)
 add_executable(renderer_probe tools/renderer_probe.cpp)
 target_link_libraries(renderer_probe PRIVATE dfre_core)
 
+add_executable(palette_quantizer_probe tools/palette_quantizer_probe.cpp)
+target_link_libraries(palette_quantizer_probe PRIVATE dfre_core)
+
+add_executable(model_palette_probe tools/model_palette_probe.cpp)
+target_link_libraries(model_palette_probe PRIVATE dfre_core)
+
+add_executable(model_palette_banks_probe tools/model_palette_banks_probe.cpp)
+target_link_libraries(model_palette_banks_probe PRIVATE dfre_core)
+
 add_executable(script_probe tools/script_probe.cpp)
 target_link_libraries(script_probe PRIVATE dfre_core)
 
@@ -83,6 +97,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(native_palette_quantizer tests/native_palette_quantizer.cpp)
+    target_link_libraries(native_palette_quantizer PRIVATE dfre_core)
+    add_test(NAME native_palette_quantizer COMMAND native_palette_quantizer)
+    add_executable(native_model_palette tests/native_model_palette.cpp)
+    target_link_libraries(native_model_palette PRIVATE dfre_core)
+    add_test(NAME native_model_palette COMMAND native_model_palette)
     if(TARGET dfre_platform)
         add_executable(native_platform tests/native_platform.cpp)
         target_link_libraries(native_platform PRIVATE dfre_platform)
