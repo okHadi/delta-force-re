@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export GHIDRA_INSTALL_DIR="${GHIDRA_INSTALL_DIR:-$root/.local/tools/ghidra_12.1.4_PUBLIC}"
+export JAVA_HOME="${JAVA_HOME:-$root/.local/tools/jdk-21.0.12.1+1/Contents/Home}"
+export GHIDRA_HEADLESS_MAXMEM="${GHIDRA_HEADLESS_MAXMEM:-2G}"
+exec "$root/.local/tools/rea/node_modules/.bin/rea" "$@"
