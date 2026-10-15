@@ -27,6 +27,7 @@ public:
     virtual void present(const std::vector<std::uint32_t>& argb) = 0;
     virtual std::uint32_t ticks() const = 0;
     virtual void yield() const = 0;
+    virtual bool active() const { return true; }
     virtual void capture_pointer(bool) {} // Relative game input; menus use absolute coordinates.
 };
 

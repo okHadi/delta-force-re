@@ -6,10 +6,14 @@
 #include "dfre/platform.hpp"
 #include "dfre/player.hpp"
 #include "dfre/renderer.hpp"
+#include "dfre/resources.hpp"
+#include "dfre/world_runtime.hpp"
+#include "dfre/scene_models.hpp"
 #include "dfre/state_loop.hpp"
 #include "dfre/soldier_menu.hpp"
 
 #include <array>
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -56,19 +60,50 @@ public:
         auto& world = states_[GameScreen::game];
         world.enter = [this] {
             if (!mission_selection_) throw std::runtime_error("Mission selection is missing");
-            const auto mission = load_mission(assets_, mission_selection_->filename);
+            mission_assets_ = std::make_unique<MissionAssetCache>(assets_);
+            mission_resources_ = mission_assets_->load_runtime(mission_selection_->filename);
+            const auto& mission = mission_resources_->mission;
+            const auto gamma = load_terrain_gamma(options_.game_folder / "INTRO.KDV");
             world_ = std::make_unique<TerrainScene32>(prepare_terrain_scene32(
                 load_terrain_runtime(assets_, mission_selection_->filename, 32),
-                load_terrain_gamma(options_.game_folder / "INTRO.KDV")));
+                gamma));
             player_ = initial_player(mission, world_->terrain.geometry);
             if (!player_) throw std::runtime_error("Mission has no single-player start");
+            const auto& profile = soldier_.profiles().at(soldier_.selected());
+            MissionInitConfig config;
+            config.mode = mission_theme(mission);
+            config.night = mission_night(mission);
+            config.player_object_id = player_->marker_object_id;
+            config.player_name = profile.name();
+            config.player_face_id = profile.portrait();
+            config.campaign_text_file = mission_selection_->text_file;
+            std::optional<RtxtTable> names;
+            if (!config.campaign_text_file.empty() && mission_asset_present(assets_, config.campaign_text_file))
+                names.emplace(assets_.read(config.campaign_text_file).bytes);
+            mission_runtime_ = std::make_unique<MissionRuntimeState>(assemble_mission_runtime(
+                *mission_resources_, mission_assets_->items(), world_->terrain.geometry,
+                names ? &*names : nullptr, config));
+            if (!mission_runtime_->local_player || !mission_runtime_->actors)
+                throw std::runtime_error("Mission has no local player actor");
+            const auto& actor = mission_runtime_->actors->actor(mission_runtime_->local_player->actor);
+            for (std::size_t i=0;i<3;++i) {
+                player_->actor.position[i] = actor.pose[i];
+                player_->actor.angles[i] = std::uint32_t(actor.pose[i+3]);
+            }
+            player_->camera = player_->actor;
+            const std::uint32_t eye_z = std::uint32_t(player_->actor.position[2]) + 0xb333u;
+            std::memcpy(&player_->camera.position[2], &eye_z, sizeof(eye_z));
             const auto view = make_model_camera(player_->camera.position, player_->camera.angles, {0, 0, 639, 479}, 90);
             VoxelCamera camera;
             camera.position = player_->camera.position;
             camera.yaw = player_->camera.angles[0];
             camera.pitch = player_->camera.angles[1];
             camera.focal_distance = view.projection.focal_length;
-            frame_ = render_terrain_frame32(*world_, camera).pixels;
+            mission_scene_ = std::make_unique<MissionScene32>(*mission_runtime_, *mission_assets_, *world_, gamma);
+            auto scene = mission_scene_->render(*world_, camera);
+            for (const auto& gap : scene.gaps)
+                std::clog << "Scene input: " << scene_model_gap_name(gap.kind) << " " << gap.note << '\n';
+            frame_ = std::move(scene.terrain.pixels);
             screen_ = GameScreen::game;
         };
         world.update = [this] {
@@ -81,7 +116,14 @@ public:
             window_->present(frame_);
             if (options_.frame_limit && ++frames_ >= options_.frame_limit) close_ = true;
         };
-        world.leave = [this] { world_.reset(); player_.reset(); };
+        world.leave = [this] {
+            mission_scene_.reset();
+            mission_runtime_.reset();
+            mission_resources_.reset();
+            mission_assets_.reset();
+            world_.reset();
+            player_.reset();
+        };
         auto& end = states_[GameScreen::end];
         end.enter = [this] { screen_ = GameScreen::end; soldier_.profiles().save_all(); };
         end.update = [this] {
@@ -186,6 +228,10 @@ private:
     std::unique_ptr<MissionSetupMenu> setup_;
     std::optional<MissionSelection> mission_selection_;
     std::unique_ptr<TerrainScene32> world_;
+    std::unique_ptr<MissionAssetCache> mission_assets_;
+    std::unique_ptr<MissionScene32> mission_scene_;
+    std::optional<MissionRuntimeResources> mission_resources_;
+    std::unique_ptr<MissionRuntimeState> mission_runtime_;
     std::optional<InitialPlayer> player_;
     StateLoop loop_;
     std::map<GameScreen, GameState> states_;

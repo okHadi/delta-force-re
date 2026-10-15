@@ -154,6 +154,15 @@ int main() {
 #endif
         const auto lost=window->poll();
         check(std::any_of(lost.begin(),lost.end(),[](const auto& event){return event.kind==dfre::InputKind::focus_lost;}),"Missing focus loss event");
+        check(!window->active(),"Focus loss must clear active input");
+#ifndef _WIN32
+        focus.window.event=SDL_WINDOWEVENT_FOCUS_GAINED;
+        check(SDL_PushEvent(&focus)==1,"Cannot queue focus gain");
+#else
+        PostMessageW(FindWindowW(L"DeltaForceREWindow",L"DFRE platform test"),WM_SETFOCUS,0,0);
+#endif
+        window->poll();
+        check(window->active(),"Focus gain must restore active input");
         window->capture_pointer(false);
         window->yield();
         window->ticks();

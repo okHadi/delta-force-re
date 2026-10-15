@@ -141,10 +141,10 @@ public:
                 break;
             case SDL_WINDOWEVENT:
                 if(event.window.event==SDL_WINDOWEVENT_FOCUS_LOST) {
-                    SDL_SetRelativeMouseMode(SDL_FALSE);delta_x=delta_y=0;accept_motion_=false;
+                    SDL_SetRelativeMouseMode(SDL_FALSE);delta_x=delta_y=0;accept_motion_=false;active_=false;
                     result.push_back({InputKind::focus_lost});
                 } else if(event.window.event==SDL_WINDOWEVENT_FOCUS_GAINED) {
-                    accept_motion_=true;
+                    accept_motion_=true;active_=true;
                     if(capture_requested_ && SDL_SetRelativeMouseMode(SDL_TRUE)!=0)fail();
                 }
                 break;
@@ -165,6 +165,7 @@ public:
 
     std::uint32_t ticks() const override { return SDL_GetTicks(); }
     void yield() const override { SDL_Delay(0); }
+    bool active() const override { return active_; }
     void capture_pointer(bool enabled) override {
         if(SDL_SetRelativeMouseMode(enabled?SDL_TRUE:SDL_FALSE)!=0)fail();
         capture_requested_=enabled;
@@ -184,6 +185,7 @@ private:
     SDL_Window* window_ = nullptr;
     SDL_Renderer* renderer_ = nullptr;
     SDL_Texture* texture_ = nullptr;
+    bool active_=true;
     bool capture_requested_=false;
     bool accept_motion_=true;
 };

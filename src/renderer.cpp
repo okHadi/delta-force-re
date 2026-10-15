@@ -114,7 +114,7 @@ std::vector<RasterSpan> raster_triangle_spans(const std::array<RasterVertex,3>& 
 }
 
 std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
-    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,RasterTextureMode mode,std::optional<std::uint32_t> uniform_shade) {
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,RasterTextureMode mode,std::optional<std::uint32_t> uniform_shade,bool width_shift_ready) {
     if(mode!=RasterTextureMode::uniform && mode!=RasterTextureMode::varying_shade && mode!=RasterTextureMode::cutout && mode!=RasterTextureMode::varying_cutout)throw std::invalid_argument("unsupported textured raster mode");
     const auto size=std::uint64_t(width)*height;
     if(size!=colour.size() || size!=depth.size())throw std::invalid_argument("raster target size differs from bounds");
@@ -130,7 +130,7 @@ std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std:
         const auto z=std::uint32_t(span.depth)+std::uint32_t(i&~1)*std::uint32_t(span.ddepth);
         const auto value=std::uint16_t(z>>16);
         if(value<depth[offset+i]) {
-            const auto index=((u>>16)&(tw-1))+(((v>>16)&(th-1))<<texture.width_bits);
+            const auto index=width_shift_ready?((u>>16)&(tw-1))+(((v>>16)&(th-1))<<texture.width_bits):0;
             const auto texel=texture.pixels[std::size_t(index)];
             if((mode==RasterTextureMode::cutout || mode==RasterTextureMode::varying_cutout) && texel==0)continue;
             const auto shade=std::uint32_t(span.shade)+std::uint32_t(i&~1)*std::uint32_t(span.dshade);
@@ -158,13 +158,16 @@ std::size_t draw_flat_span32(const RasterSpan& span,std::uint32_t width,std::uin
     return writes;
 }
 
-std::size_t draw_model_triangle32(const ModelRasterTriangle& face,const RasterClip& clip,
+namespace {
+// Shared raster path of original 0x462df0. allow_effect_flags marks the
+// queue drains, which draw effect faces through the same plain path.
+std::size_t draw_prepared_face32(const ModelRasterTriangle& face,const RasterClip& clip,
     const RasterMaterial32& material,std::uint32_t width,std::uint32_t height,
-    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,bool allow_effect_flags) {
     const auto classification=classify_raster_triangle(face.vertices,clip);
     if(classification.extent<=0)return 0;
     if(classification.extent<=2)return draw_tiny_triangle32(face.vertices,clip,material.tiny_colour,face.flags,width,height,colour,depth);
-    if(face.flags&0x700)throw std::invalid_argument("model face requires an effect pass");
+    if(!allow_effect_flags && (face.flags&0x700))throw std::invalid_argument("model face requires an effect pass");
     const auto mode=face.flags&0x3c;
     const bool textured=mode==0x14 || mode==0x18 || mode==0x34 || mode==0x38;
     if(!textured && mode!=4 && mode!=8)throw std::invalid_argument("unsupported model face pixel mode");
@@ -183,6 +186,19 @@ std::size_t draw_model_triangle32(const ModelRasterTriangle& face,const RasterCl
         else writes+=draw_flat_span32(span,width,height,colour,depth,material.flat_index,*material.shade_colours);
     }
     return writes;
+}
+std::int32_t deferred_state_word(const DeferredPass& pass,std::size_t address) {
+    if(address<DeferredPass::state_base || address+4>DeferredPass::state_base+DeferredPass::state_size)
+        throw std::out_of_range("deferred state address outside the flat buffer");
+    const auto& state=pass.state();const auto offset=address-DeferredPass::state_base;
+    return std::int32_t(std::uint32_t(state[offset])|(std::uint32_t(state[offset+1])<<8)|
+        (std::uint32_t(state[offset+2])<<16)|(std::uint32_t(state[offset+3])<<24));
+}
+}
+std::size_t draw_model_triangle32(const ModelRasterTriangle& face,const RasterClip& clip,
+    const RasterMaterial32& material,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    return draw_prepared_face32(face,clip,material,width,height,colour,depth,false);
 }
 
 std::optional<ModelRasterTriangle> prepare_model_face(const ModelFace& face,
@@ -430,6 +446,376 @@ std::size_t draw_model_mesh32(const ModelLod& lod,std::size_t mesh_index,
         if(face.rejected)continue;
         const auto prepared=prepare_model_face(face.face,projected,lod.normals,mesh.normal_start,lod.materials,lighting,animation_counters);
         if(prepared)writes+=draw_model_triangle32(*prepared,camera.clip,materials[prepared->material],width,height,colour,depth);
+    }
+    return writes;
+}
+
+// ----- Original effect/deferred model pass bridge (0x46b1d0/0x46be50) -----
+
+const char* deferred_span_kernel_name(DeferredSpanKernel kernel) {
+    switch(kernel) {
+        case DeferredSpanKernel::no_write:return "no_write";
+        case DeferredSpanKernel::uniform_fill:return "uniform_fill";
+        case DeferredSpanKernel::flat_shade:return "flat_shade";
+        case DeferredSpanKernel::texture_uniform:return "texture_uniform";
+        case DeferredSpanKernel::texture_varying:return "texture_varying";
+        case DeferredSpanKernel::texture_cutout:return "texture_cutout";
+        case DeferredSpanKernel::texture_varying_cutout:return "texture_varying_cutout";
+        case DeferredSpanKernel::effect_alpha_blend:return "effect_alpha_blend";
+        case DeferredSpanKernel::effect_half_blend:return "effect_half_blend";
+    }
+    return "unknown";
+}
+DeferredSpanKernel DeferredSpanSelector::select(std::uint32_t face_flags) {
+    // 0x4683b0 masks the key with 0x73c and always stores it; only handled
+    // keys replace the kernel, so the kernel survives unhandled keys.
+    const auto masked=face_flags&0x73cu;
+    if(masked==key)return kernel;
+    key=masked;
+    switch(masked) {
+        case 0x000:kernel=DeferredSpanKernel::uniform_fill;break;
+        case 0x004:case 0x008:kernel=DeferredSpanKernel::flat_shade;break;
+        case 0x010:kernel=DeferredSpanKernel::no_write;break;
+        case 0x014:kernel=DeferredSpanKernel::texture_uniform;break;
+        case 0x018:kernel=DeferredSpanKernel::texture_varying;break;
+        case 0x030:kernel=DeferredSpanKernel::no_write;break;
+        case 0x034:kernel=DeferredSpanKernel::texture_cutout;break;
+        case 0x038:kernel=DeferredSpanKernel::texture_varying_cutout;break;
+        case 0x100:case 0x104:case 0x108:
+        case 0x200:case 0x204:case 0x208:kernel=DeferredSpanKernel::no_write;break;
+        case 0x210:case 0x214:case 0x218:kernel=DeferredSpanKernel::effect_alpha_blend;break;
+        case 0x410:case 0x414:case 0x418:
+        case 0x430:case 0x434:case 0x438:kernel=DeferredSpanKernel::effect_half_blend;break;
+        default:break;
+    }
+    return kernel;
+}
+std::size_t draw_uniform_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,std::uint32_t fill_colour) {
+    const auto size=std::uint64_t(width)*height;
+    if(size!=colour.size() || size!=depth.size())throw std::invalid_argument("uniform raster target size differs from bounds");
+    if(span.x<0 || span.y<0 || std::uint32_t(span.y)>=height || span.length<0 || std::uint32_t(span.x)>width || std::uint32_t(span.length)>width-std::uint32_t(span.x))throw std::invalid_argument("uniform raster span exceeds target");
+    const auto offset=std::size_t(span.y)*width+std::uint32_t(span.x);std::size_t writes=0;
+    for(std::int32_t i=0;i<span.length;++i) {
+        const auto value=std::uint16_t((std::uint32_t(span.depth)+std::uint32_t(i)*std::uint32_t(span.ddepth))>>16);
+        if(value<depth[offset+i]){colour[offset+i]=fill_colour;depth[offset+i]=value;++writes;}
+    }
+    return writes;
+}
+ModelDeferredBridge::ModelDeferredBridge()=default;
+void ModelDeferredBridge::reset(const DeferredFrame& frame){pass_.reset(frame);}
+void ModelDeferredBridge::reset(const RasterClip& clip,std::uint32_t width,std::uint32_t height) {
+    DeferredFrame frame;
+    frame.clip_left=clip.left;frame.clip_top=clip.top;frame.clip_right=clip.right;frame.clip_bottom=clip.bottom;
+    frame.depth_mode=0x20;
+    frame.colour_row.resize(std::size_t(height));
+    for(std::uint32_t row=0;row<height;++row)frame.colour_row[row]=row*width;
+    pass_.reset(frame);
+}
+void ModelDeferredBridge::clear_queues() {
+    deferred_queue_.clear();deferred_effect_queue_.clear();
+    effect_plain_queue_.clear();no_context_queue_.clear();
+    plan_.clear();
+}
+void ModelDeferredBridge::set_effect_mode(bool on){effect_mode_=on;}
+void ModelDeferredBridge::set_draw_enabled(bool on){draw_enabled_=on;}
+void ModelDeferredBridge::reset_selector(){selector_=DeferredSpanSelector{};}
+void ModelDeferredBridge::add_material(std::uint32_t address,const std::uint8_t* data,std::size_t size,
+    std::uint32_t table_a,std::uint32_t table_b,const RasterMaterial32& binding) {
+    pass_.add_material(address,data,size,table_a,table_b);
+    bindings_[address]=binding;
+    bound_colours_[address]=std::uint32_t(data[0x14])|(std::uint32_t(data[0x15])<<8)|
+        (std::uint32_t(data[0x16])<<16)|(std::uint32_t(data[0x17])<<24);
+}
+const RasterMaterial32& ModelDeferredBridge::registered_binding(std::uint32_t address) const {
+    const auto found=bindings_.find(address);
+    if(found==bindings_.end())throw std::invalid_argument("deferred material binding was not registered");
+    return found->second;
+}
+EffectRoute ModelDeferredBridge::queue_face(std::uint32_t flags,std::uint32_t material_flags,
+    std::uint32_t material_address,const std::array<RasterVertex,3>& vertices) {
+    const auto route=route_effect_face({flags,material_flags,effect_mode_,draw_enabled_});
+    if(route==EffectRoute::draw || route==EffectRoute::skip)return route;
+    registered_binding(material_address);
+    DeferredQueuedFace face;
+    face.flags=flags;face.material_flags=material_flags;face.material_address=material_address;face.vertices=vertices;
+    switch(route) {
+        case EffectRoute::deferred:deferred_queue_.push_back(face);break;
+        case EffectRoute::deferred_effect:deferred_effect_queue_.push_back(face);break;
+        case EffectRoute::effect_plain:effect_plain_queue_.push_back(face);break;
+        default:no_context_queue_.push_back(face);break;
+    }
+    return route;
+}
+std::size_t ModelDeferredBridge::add_face(std::uint32_t flags,const std::array<DeferredVertex,3>& vertices,
+    std::uint32_t material_address){return pass_.add_face(flags,vertices,material_address);}
+void ModelDeferredBridge::flush(){pass_.flush();}
+std::size_t ModelDeferredBridge::draw_spans(std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    pass_.draw_spans();
+    plan_=pass_.plan();
+    // A one-pixel kernel reads no step fields. Use zero for these unused
+    // fields; the original leaves them as stack bytes.
+    auto steps=chunk_steps_;
+    for(auto& plan_span:plan_) {
+        if(plan_span.span.length!=1)
+            steps={plan_span.span.du,plan_span.span.dv,plan_span.span.ddepth,plan_span.span.dshade};
+        else {
+            plan_span.span.du=0;plan_span.span.dv=0;
+            plan_span.span.ddepth=0;plan_span.span.dshade=0;
+        }
+    }
+    chunk_steps_=steps;
+    std::vector<std::vector<std::size_t>> by_record(pass_.record_count());
+    for(std::size_t index=0;index<plan_.size();++index)by_record[plan_[index].record].push_back(index);
+    std::size_t writes=0;
+    for(std::size_t record=0;record<by_record.size();++record) {
+        const auto base=DeferredPass::record_pool_address+record*0x54;
+        // 0x46d190 calls the selector and setup once per record with a span
+        // chain; records without segments never touch the selection.
+        if(!deferred_state_word(pass_,base+0x10))continue;
+        const auto kernel=selector_.select(std::uint32_t(deferred_state_word(pass_,base+4)));
+        const auto& material=registered_binding(std::uint32_t(deferred_state_word(pass_,base+0x14)));
+        prepare_span_kernel(kernel,material);
+        for(const auto index:by_record[record])writes+=draw_span_kernel(kernel,plan_[index],material,width,height,colour,depth);
+    }
+    return writes;
+}
+void ModelDeferredBridge::prepare_span_kernel(DeferredSpanKernel kernel,const RasterMaterial32& material) {
+    if(kernel>=DeferredSpanKernel::texture_uniform && kernel<=DeferredSpanKernel::texture_varying_cutout) {
+        if(!material.texture)throw std::invalid_argument("textured kernel has no texture");
+        if(material.texture->width_bits!=0)
+            texture_width_ready_[std::size_t(kernel)-std::size_t(DeferredSpanKernel::texture_uniform)]=true;
+    }
+}
+std::size_t ModelDeferredBridge::draw_span_kernel(DeferredSpanKernel kernel,const DeferredSpan& plan_span,
+    const RasterMaterial32& material,
+    std::uint32_t width,std::uint32_t height,std::vector<std::uint32_t>& colour,
+    std::vector<std::uint16_t>& depth) {
+    if(kernel==DeferredSpanKernel::no_write)return 0;
+    const auto& source=plan_span.span;
+    if(source.length<=0)return 0;
+    const auto plane=std::uint64_t(width)*height;
+    const auto base=std::int64_t(source.pixel);
+    const auto first=std::max<std::int64_t>(base,0);
+    const auto last=std::min<std::int64_t>(base+source.length,std::int64_t(plane));
+    if(first>=last)return 0;
+    if(kernel==DeferredSpanKernel::effect_alpha_blend || kernel==DeferredSpanKernel::effect_half_blend) {
+        auto span=source;
+        const auto skip=std::int32_t(first-base);
+        span.pixel=std::int32_t(first);
+        span.length=std::int32_t(last-first);
+        if(skip>0) {
+            span.u=std::int32_t(std::uint32_t(span.u)+std::uint32_t(skip)*std::uint32_t(span.du));
+            span.v=std::int32_t(std::uint32_t(span.v)+std::uint32_t(skip)*std::uint32_t(span.dv));
+            span.depth=std::int32_t(std::uint32_t(span.depth)+std::uint32_t(skip)*std::uint32_t(span.ddepth));
+            span.shade=std::int32_t(std::uint32_t(span.shade)+std::uint32_t(skip)*std::uint32_t(span.dshade));
+        }
+        EffectSpanContext context=plan_span.context;
+        context.colour_plane=colour.data();context.depth_plane=depth.data();
+        if(material.texture)context.texture=material.texture->pixels.data();
+        if(material.shade_colours) {
+            if(material.shade_colours->size()<33*256)throw std::invalid_argument("effect shade table is short");
+            context.blend_table=material.shade_colours->data()+32*256;
+        }
+        return draw_effect_span32(span,kernel==DeferredSpanKernel::effect_alpha_blend?
+            EffectSpanMode::alpha_blend:EffectSpanMode::half_blend,context,width,height);
+    }
+    const auto length=last-first;
+    const auto row=std::int64_t(first)/std::int64_t(width);
+    const auto x=std::int64_t(first)-row*std::int64_t(width);
+    const bool whole=first==base && length==std::int64_t(source.length);
+    const bool single_row=x>=0 && x+length<=std::int64_t(width) && row<std::int64_t(height);
+    const auto mode=kernel==DeferredSpanKernel::texture_uniform?RasterTextureMode::uniform:
+        kernel==DeferredSpanKernel::texture_varying?RasterTextureMode::varying_shade:
+        kernel==DeferredSpanKernel::texture_cutout?RasterTextureMode::cutout:
+        kernel==DeferredSpanKernel::texture_varying_cutout?RasterTextureMode::varying_cutout:
+        (kernel==DeferredSpanKernel::uniform_fill?RasterTextureMode::uniform:RasterTextureMode::uniform);
+    const auto textured=kernel==DeferredSpanKernel::texture_uniform || kernel==DeferredSpanKernel::texture_varying ||
+        kernel==DeferredSpanKernel::texture_cutout || kernel==DeferredSpanKernel::texture_varying_cutout;
+    if(textured && !material.texture)throw std::invalid_argument("deferred texture span has no texture binding");
+    if(kernel==DeferredSpanKernel::flat_shade && !material.shade_colours)
+        throw std::invalid_argument("deferred flat span has no shade table binding");
+    const auto flat_index=std::uint8_t(plan_span.context.colour);
+    auto fast=[&](const RasterSpan& span) {
+        if(kernel==DeferredSpanKernel::uniform_fill)
+            return draw_uniform_span32(span,width,height,colour,depth,plan_span.context.colour);
+        if(kernel==DeferredSpanKernel::flat_shade)
+            return draw_flat_span32(span,width,height,colour,depth,flat_index,*material.shade_colours);
+        return draw_textured_span32(span,width,height,colour,depth,*material.texture,mode,plan_span.context.field_04,
+            texture_width_ready_[std::size_t(kernel)-std::size_t(DeferredSpanKernel::texture_uniform)]);
+    };
+    if(whole && single_row) {
+        RasterSpan span;
+        span.x=std::int32_t(x);span.y=std::int32_t(row);span.length=std::int32_t(length);
+        span.u=source.u;span.v=source.v;span.depth=source.depth;span.shade=source.shade;
+        span.du=source.du;span.dv=source.dv;span.ddepth=source.ddepth;span.dshade=source.dshade;
+        return fast(span);
+    }
+    // Out-of-row spans stay exact through one-pixel calls: every original
+    // kernel steps per pixel or per pixel pair from the span start.
+    std::size_t writes=0;
+    for(std::int64_t offset=0;offset<length;++offset) {
+        const auto pixel=first+offset;
+        const auto index=pixel-base;
+        RasterSpan span;
+        span.x=std::int32_t(std::size_t(pixel)%width);span.y=std::int32_t(std::size_t(pixel)/width);span.length=1;
+        if(kernel==DeferredSpanKernel::uniform_fill || kernel==DeferredSpanKernel::flat_shade) {
+            span.depth=std::int32_t(std::uint32_t(source.depth)+std::uint32_t(std::uint32_t(index)*std::uint32_t(source.ddepth)));
+            span.shade=std::int32_t(std::uint32_t(source.shade)+std::uint32_t(std::uint32_t(index)*std::uint32_t(source.dshade)));
+        } else {
+            span.u=std::int32_t(std::uint32_t(source.u)+std::uint32_t(index)*std::uint32_t(source.du));
+            span.v=std::int32_t(std::uint32_t(source.v)+std::uint32_t(index)*std::uint32_t(source.dv));
+            span.depth=std::int32_t(std::uint32_t(source.depth)+std::uint32_t(std::uint32_t(index)&~1u)*std::uint32_t(source.ddepth));
+            span.shade=std::int32_t(std::uint32_t(source.shade)+std::uint32_t(std::uint32_t(index)&~1u)*std::uint32_t(source.dshade));
+        }
+        writes+=fast(span);
+    }
+    return writes;
+}
+std::size_t ModelDeferredBridge::draw_plain(const DeferredQueuedFace& face,const RasterClip& clip,
+    std::uint32_t width,std::uint32_t height,std::vector<std::uint32_t>& colour,
+    std::vector<std::uint16_t>& depth) {
+    return draw_direct(face.flags,face.material_address,face.vertices,clip,width,height,colour,depth);
+}
+std::size_t ModelDeferredBridge::draw_direct(std::uint32_t flags,std::uint32_t material_address,
+    const std::array<RasterVertex,3>& vertices,const RasterClip& clip,
+    std::uint32_t width,std::uint32_t height,std::vector<std::uint32_t>& colour,
+    std::vector<std::uint16_t>& depth) {
+    const auto classification=classify_raster_triangle(vertices,clip);
+    if(classification.extent<=0)return 0;
+    const auto& material=registered_binding(material_address);
+    if(classification.extent<=2)
+        return draw_tiny_triangle32(vertices,clip,material.tiny_colour,flags,width,height,colour,depth);
+    const auto kernel=selector_.select(flags);
+    prepare_span_kernel(kernel,material);
+    auto triangle=vertices;
+    if(material.texture) {
+        if(material.texture->width_bits>16 || material.texture->height_bits>16)
+            throw std::invalid_argument("effect texture dimensions are invalid");
+        for(auto& vertex:triangle) {
+            vertex.u=signed_value(std::uint32_t(vertex.u)<<material.texture->width_bits);
+            vertex.v=signed_value(std::uint32_t(vertex.v)<<material.texture->height_bits);
+        }
+    }
+    const auto spans=raster_triangle_spans(triangle,clip,2u|((flags&0x10)?1u:0u)|((flags&8)?4u:0u));
+    std::size_t writes=0;
+    for(const auto& span:spans) {
+        DeferredSpan plan;
+        plan.face_flags=flags;
+        plan.span={std::int32_t(std::uint32_t(span.y)*width+std::uint32_t(span.x)),span.length,
+            span.u,span.v,span.depth,span.shade,span.du,span.dv,span.ddepth,span.dshade};
+        plan.context.colour=bound_colours_.at(material_address);
+        plan.context.field_04=std::uint32_t(vertices[0].shade);
+        if(material.texture) {
+            plan.context.column_mask=(1u<<material.texture->width_bits)-1u;
+            plan.context.row_mask=(1u<<material.texture->height_bits)-1u;
+            plan.context.row_shift=material.texture->width_bits;
+        }
+        writes+=draw_span_kernel(kernel,plan,material,width,height,colour,depth);
+    }
+    return writes;
+}
+std::size_t ModelDeferredBridge::draw_mixed(const RasterClip& clip,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    std::size_t writes=0;
+    // 0x46be50 first loop: queue C with the plain path.
+    for(const auto& face:effect_plain_queue_)writes+=draw_plain(face,clip,width,height,colour,depth);
+    // Then queue A without flag 0x20 enters the span builder.
+    for(const auto& face:deferred_queue_) {
+        if(face.flags&0x20)continue;
+        std::array<DeferredVertex,3> vertices{};
+        for(std::size_t k=0;k<3;++k)
+            vertices[k].field={face.vertices[k].x,face.vertices[k].y,face.vertices[k].depth,
+                face.vertices[k].u,face.vertices[k].v,face.vertices[k].shade};
+        add_face(face.flags,vertices,face.material_address);
+    }
+    // 0x46cc30 and 0x46d190, then queue A with flag 0x20 plain.
+    flush();
+    writes+=draw_spans(width,height,colour,depth);
+    for(const auto& face:deferred_queue_) {
+        if(!(face.flags&0x20))continue;
+        writes+=draw_plain(face,clip,width,height,colour,depth);
+    }
+    return writes;
+}
+std::size_t ModelDeferredBridge::draw_no_context(const RasterClip& clip,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    std::size_t writes=0;
+    for(const auto& face:no_context_queue_)writes+=draw_plain(face,clip,width,height,colour,depth);
+    return writes;
+}
+std::size_t ModelDeferredBridge::draw_deferred_effect(const RasterClip& clip,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    std::size_t writes=0;
+    for(const auto& face:deferred_effect_queue_)writes+=draw_plain(face,clip,width,height,colour,depth);
+    return writes;
+}
+std::size_t ModelDeferredBridge::draw_all(const RasterClip& clip,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    std::size_t writes=draw_mixed(clip,width,height,colour,depth);
+    writes+=draw_no_context(clip,width,height,colour,depth);
+    writes+=draw_deferred_effect(clip,width,height,colour,depth);
+    return writes;
+}
+const std::vector<DeferredQueuedFace>& ModelDeferredBridge::queue(EffectRoute route) const {
+    switch(route) {
+        case EffectRoute::deferred:return deferred_queue_;
+        case EffectRoute::deferred_effect:return deferred_effect_queue_;
+        case EffectRoute::effect_plain:return effect_plain_queue_;
+        case EffectRoute::deferred_no_context:return no_context_queue_;
+        default: {
+            static const std::vector<DeferredQueuedFace> empty;
+            return empty;
+        }
+    }
+}
+std::size_t draw_model_triangle32(const ModelRasterTriangle& face,const RasterClip& clip,
+    const RasterMaterial32& material,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,
+    ModelDeferredBridge& deferred,std::uint32_t material_flags,std::uint32_t material_address) {
+    const auto route=deferred.queue_face(face.flags,material_flags,material_address,face.vertices);
+    if(route!=EffectRoute::draw)return 0;
+    (void)material;
+    return deferred.draw_direct(face.flags,material_address,face.vertices,clip,width,height,colour,depth);
+}
+std::size_t draw_model_mesh32(const ModelLod& lod,std::size_t mesh_index,
+    const std::vector<ModelMatrix>& camera_matrices,const ModelCameraFrame& camera,
+    const ModelLighting& camera_lighting,const std::vector<RasterMaterial32>& materials,
+    std::uint32_t width,std::uint32_t height,std::vector<std::uint32_t>& colour,
+    std::vector<std::uint16_t>& depth,ModelDeferredBridge& deferred,
+    const std::vector<std::uint32_t>& material_addresses,
+    const std::array<std::uint32_t,11>& animation_counters,ModelVertexMath math) {
+    if(mesh_index>=lod.meshes.size() || mesh_index>=camera_matrices.size() || materials.size()!=lod.materials.size())throw std::invalid_argument("mesh draw table size differs from geometry");
+    if(material_addresses.size()!=lod.materials.size())throw std::invalid_argument("deferred material address table size differs from materials");
+    if(std::uint64_t(width)*height!=colour.size() || colour.size()!=depth.size() || camera.clip.left<0 || camera.clip.top<0 || camera.clip.right<camera.clip.left || camera.clip.bottom<camera.clip.top || std::uint32_t(camera.clip.right)>=width || std::uint32_t(camera.clip.bottom)>=height)throw std::invalid_argument("mesh draw target or clip is invalid");
+    const auto& mesh=lod.meshes[mesh_index];
+    if(mesh.face_start>lod.faces.size() || mesh.face_count>lod.faces.size()-mesh.face_start)throw std::invalid_argument("mesh face range outside table");
+    auto positions=model_mesh_vertices(lod,mesh_index,camera_matrices,math);
+    std::vector<ModelFace> faces;faces.reserve(mesh.face_count);
+    for(std::size_t i=0;i<mesh.face_count;++i) {
+        auto face=lod.faces[mesh.face_start+i];
+        for(auto& index:face.vertices) {
+            if(index<mesh.vertex_start || std::size_t(index-mesh.vertex_start)>=positions.size())throw std::invalid_argument("mesh face vertex outside mesh");
+            index-=mesh.vertex_start;
+        }
+        faces.push_back(face);
+    }
+    const auto lighting=localize_model_lighting(camera_matrices[mesh_index],camera_lighting);
+    const auto geometry=clip_model_geometry(positions,faces,camera.planes);
+    std::vector<ModelProjectedVertex> projected;projected.reserve(geometry.positions.size());
+    for(const auto& point:geometry.positions)projected.push_back(model_project_vertex(point,camera.projection));
+    std::size_t writes=0;
+    for(const auto& face:geometry.faces) {
+        if(face.rejected)continue;
+        const auto prepared=prepare_model_face(face.face,projected,lod.normals,mesh.normal_start,lod.materials,lighting,animation_counters);
+        if(!prepared)continue;
+        const auto index=prepared->material;
+        const auto route=deferred.queue_face(std::uint32_t(prepared->flags),lod.materials[index].flags,
+            material_addresses[index],prepared->vertices);
+        if(route==EffectRoute::draw)
+            writes+=deferred.draw_direct(prepared->flags,material_addresses[index],prepared->vertices,
+                camera.clip,width,height,colour,depth);
     }
     return writes;
 }

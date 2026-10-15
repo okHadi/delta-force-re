@@ -71,6 +71,7 @@ public:
 
     std::uint32_t ticks() const override { return GetTickCount(); }
     void yield() const override { Sleep(0); }
+    bool active() const override { return active_; }
     void capture_pointer(bool enabled) override {
         capture_requested_=enabled;
         if(!enabled)release_pointer();
@@ -134,8 +135,9 @@ private:
             }
             if(message==WM_SYSKEYDOWN || message==WM_SYSKEYUP)return DefWindowProcW(handle,message,value,position);
             return 0;
-        case WM_SETFOCUS: if(self->capture_requested_)self->activate_pointer();return 0;
+        case WM_SETFOCUS: self->active_=true;if(self->capture_requested_)self->activate_pointer();return 0;
         case WM_KILLFOCUS:
+            self->active_=false;
             self->release_pointer();if(GetCapture()==handle)ReleaseCapture();self->mouse_buttons_=0;
             self->events_.push_back({InputKind::focus_lost});return 0;
         case WM_CAPTURECHANGED:
@@ -195,6 +197,7 @@ private:
     std::vector<std::uint32_t> frame_;
     std::vector<InputEvent> events_;
     wchar_t surrogate_ = 0;
+    bool active_=true;
     bool capture_requested_=false,pointer_active_=false;
     int pointer_x_=0,pointer_y_=0;
     unsigned mouse_buttons_=0;

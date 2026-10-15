@@ -20,6 +20,15 @@ set(DFRE_RUNTIME_MODULES
     motion_step
     motion_queries
     weapons
+    item_runtime
+    item_callbacks
+    world_runtime
+    model_characters
+    model_specials
+    effects
+    effect_deferred
+    scene_models
+    water
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -82,6 +91,9 @@ target_link_libraries(world_probe PRIVATE dfre_core)
 
 add_executable(player_probe tools/player_probe.cpp)
 target_link_libraries(player_probe PRIVATE dfre_core)
+
+add_executable(renderer_deferred_probe tools/renderer_deferred_probe.cpp)
+target_link_libraries(renderer_deferred_probe PRIVATE dfre_core)
 
 add_executable(renderer_probe tools/renderer_probe.cpp)
 target_link_libraries(renderer_probe PRIVATE dfre_core)

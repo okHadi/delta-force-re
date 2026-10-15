@@ -1,7 +1,13 @@
-# World placement
+# Mission state
 
-Use `place_single_player_objects()` to prepare initial BMS poses. Each result keeps its source group, source index, object ID, and type ID. Use the source indices to select its `MissionScene` appearance.
+Call `assemble_mission_runtime` with loaded resources, the item catalog, terrain geometry, optional campaign names, and `MissionInitConfig`.
 
-Skip single-player flags `0x10` and `0x80`. Convert position and angles with original `4497A3–4497ED`. Add terrain base height to Z with 32-bit wrap. Group 3 adds another 65536. Original height loops are `403C93–403DD4`; group order comes from `449C70`.
+The load order is: placement slots, item callbacks, BMS groups, names, resource handles, terrain heights, placement actors, live type counts, then local player binding. Model and actor references use stable native ids. Keep group slots stable.
 
-Run `world_probe GAME_FOLDER --all` or pass one BMS filename. Run `python tools/check_world_original.py GAME_FOLDER WORLD_PROBE --report REPORT.json` for the original-code check. All 24,333 enabled objects in 62 maps match; 1,159 excluded objects keep the single-player filter. The check uses original SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.
+Use `mission_actor_image` to read the complete initialized actor record. `scene_model_records` supplies groups 3, 0, and 1 in draw order.
+
+The game uses the selected profile name and face, the mission start marker, and its loaded local actor for the initial camera.
+
+Source: `Df.exe`, SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`. Entries: `403A60`, `444C50`, `449710`, `402EC0`, `440640`, `44A110`, `4829F0`.
+
+The original replay checks all 62 missions, including 25,492 group records, resource binding, heights, placements, and local player state.

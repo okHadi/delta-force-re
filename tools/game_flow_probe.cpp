@@ -53,6 +53,6 @@ int main(int argc,char** argv){
         unsigned saves=0;for(const auto& entry:std::filesystem::directory_iterator(folder))if(entry.path().extension()==".ply"&&entry.file_size()==2704)++saves;
         if(saves!=9)throw std::runtime_error("Game flow did not save all soldier slots");
         std::cout<<frames.size()<<" frames; soldier -> main -> campaign -> briefing -> "
-                 <<(start_mission?"mission terrain":"campaign -> main")<<"; 9 separate saves\n";
+                 <<(start_mission?"mission scene":"campaign -> main")<<"; 9 separate saves\n";
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
