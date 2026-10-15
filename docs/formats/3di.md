@@ -230,3 +230,15 @@ Material flag `0x800` hides the face. Flag `0x40` sets all three depths to the s
 Run `python tools/check_model_faces_original.py /path/to/Df.exe --probe /path/to/renderer_probe`. The replay checks 4096 cases against original face assembly and normal lighting: 1817 accepted faces, 2279 hidden or rejected faces, 666 reverse faces, 665 varying-shade faces, 725 depth-biased faces, and 479 changed material frames. All output flags, material indices, positions, depths, UV values, and shades match. Transform, projection, and local light setup use fixed inputs in this check; each has a separate original-code check.
 
 `RasterTextureMode::varying_cutout` implements original mode `0x38` (`0x4696B3`, `0x469945`). Zero texels preserve both target colour and depth. Shade and depth steps use pixel pairs. A replay of 2000 cases matches all 1,024,000 target colour/depth pairs.
+
+## Triangle draw
+
+`draw_model_triangle32()` connects assembled faces to pixel output. Supply the material texture, shared shade table, flat palette index, and cached tiny-face colour. The function scales normalized UV values by texture dimensions and selects the original tiny, flat, uniform, smooth, or cutout path. Effect materials use a separate pass.
+
+Flat spans use original `0x4672A0` / `0x467430`. Depth and shade advance for each pixel. The 2000-case replay matches all 1,024,000 target colour/depth pairs. Textured spans keep the original pixel-pair rules.
+
+Run `python tools/check_model_triangle32_original.py /path/to/Df.exe --probe /path/to/renderer_probe`. This calls original `0x462DF0` through its span setup, pixel selector, and pixel writes. It checks all six supported modes, full target buffers, UV scaling, screen clipping, and tiny-face paths with supplied palette bindings.
+
+`draw_model_mesh32()` connects camera-space mesh matrices, scalar or MMX vertices, the five ordered camera planes, projection, local lighting, face assembly, and triangle drawing. Pass one prepared material binding per LOD material. Keep effect materials in their separate pass.
+
+Run `python tools/check_model_mesh32_original.py /path/to/Df.exe --probe /path/to/renderer_probe`. The replay calls the complete original `0x46B1D0` draw with its real transform, clip, light, projection, span, and pixel functions. All 921,600 target colour/depth pairs match across 1200 cases; 920 cases split geometry at camera planes. The original self-modifying pixel kernels use a 2×2 texture setup before variable-size cases. Palette construction, model placement, animation, and effect passes have separate work.

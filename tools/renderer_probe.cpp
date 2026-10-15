@@ -2,7 +2,70 @@
 #include <iostream>
 #include <string>
 int main(int argc,char** argv) {
-    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="texture32-shade-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera" && std::string(argv[1])!="faces"))return 2;
+    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="texture32-shade-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera" && std::string(argv[1])!="faces" && std::string(argv[1])!="flat32" && std::string(argv[1])!="triangle32" && std::string(argv[1])!="mesh32"))return 2;
+    if(argc==2 && std::string(argv[1])=="mesh32") {
+        std::uint32_t test,flags,smooth,bx,by,flat,math;std::int32_t specular,constant;std::uint32_t power;
+        while(std::cin>>test>>flags>>smooth>>bx>>by>>flat>>math>>specular>>constant>>power) {
+            if(bx>8 || by>8 || power>255 || math>1)return 2;
+            dfre::ModelLod lod;lod.vertices.resize(3);lod.normals.resize(3);
+            dfre::ModelFace face{};face.vertices={0,1,2};face.normals={0,1,2};face.flags=std::uint16_t(smooth);
+            for(auto& vertex:lod.vertices)for(auto& value:vertex.position)if(!(std::cin>>value))return 2;
+            for(auto& normal:lod.normals)for(auto& value:normal.direction)if(!(std::cin>>value))return 2;
+            for(auto& value:face.u)if(!(std::cin>>value))return 2;
+            for(auto& value:face.v)if(!(std::cin>>value))return 2;
+            dfre::ModelLighting lighting;
+            for(auto& value:lighting.light_direction)if(!(std::cin>>value))return 2;
+            for(auto& value:lighting.view_direction)if(!(std::cin>>value))return 2;
+            if(!(std::cin>>lighting.ambient>>lighting.diffuse>>lighting.specular))return 2;
+            lod.faces={face};dfre::ModelMesh mesh;mesh.vertex_count=3;mesh.normal_count=3;mesh.face_count=1;lod.meshes={mesh};
+            dfre::ModelMaterial material;material.flags=flags;
+            for(std::size_t i=0;i<4;++i){material.raw[56+i]=std::uint8_t(std::uint32_t(specular)>>(i*8));material.raw[60+i]=std::uint8_t(std::uint32_t(constant)>>(i*8));}
+            material.raw[64]=std::uint8_t(power);lod.materials={material};
+            dfre::RasterTexture32 texture;texture.width_bits=std::uint8_t(bx);texture.height_bits=std::uint8_t(by);
+            texture.pixels.resize(std::size_t(1)<<(bx+by));texture.shade_colours.resize(64*256);
+            for(std::size_t i=0;i<texture.pixels.size();++i)texture.pixels[i]=std::uint8_t(i*37+test*13);
+            for(std::size_t i=0;i<texture.shade_colours.size();++i)texture.shade_colours[i]=std::uint32_t(i)*0x01010101u^0xffa5c3e7u;
+            std::vector<std::uint32_t> colours(32*24);std::vector<std::uint16_t> depths(32*24);
+            for(std::size_t i=0;i<colours.size();++i){colours[i]=std::uint32_t(i)*1234567u^0xabcdef90u;depths[i]=std::uint16_t(i*317+test*17);}
+            const dfre::RasterMaterial32 binding{&texture,&texture.shade_colours,std::uint8_t(flat),flat};
+            const auto camera=dfre::make_model_camera({},{},{0,0,31,23},90);
+            dfre::draw_model_mesh32(lod,0,{dfre::model_identity_matrix()},camera,lighting,{binding},32,24,colours,depths,{},math?dfre::ModelVertexMath::mmx:dfre::ModelVertexMath::scalar);
+            for(std::size_t i=0;i<colours.size();++i)std::cout<<colours[i]<<' '<<depths[i]<<' ';
+            std::cout<<'\n';
+        }
+        return std::cin.eof()?0:2;
+    }
+    if(argc==2 && std::string(argv[1])=="triangle32") {
+        std::uint32_t test,bx,by,flat;dfre::ModelRasterTriangle face;
+        while(std::cin>>test>>face.flags>>bx>>by>>flat) {
+            if(bx>8 || by>8)return 2;
+            for(auto& v:face.vertices)if(!(std::cin>>v.x>>v.y>>v.depth>>v.u>>v.v>>v.shade))return 2;
+            dfre::RasterTexture32 texture;texture.width_bits=std::uint8_t(bx);texture.height_bits=std::uint8_t(by);texture.uniform_shade=0x12340000;
+            texture.pixels.resize(std::size_t(1)<<(bx+by));texture.shade_colours.resize(64*256);
+            for(std::size_t i=0;i<texture.pixels.size();++i)texture.pixels[i]=std::uint8_t(i*37+test*13);
+            for(std::size_t i=0;i<texture.shade_colours.size();++i)texture.shade_colours[i]=std::uint32_t(i)*0x01010101u^0xffa5c3e7u;
+            std::vector<std::uint32_t> colours(32*24);std::vector<std::uint16_t> depths(32*24);
+            for(std::size_t i=0;i<colours.size();++i){colours[i]=std::uint32_t(i)*1234567u^0xabcdef90u;depths[i]=std::uint16_t(i*317+test*17);}
+            const dfre::RasterMaterial32 binding{&texture,&texture.shade_colours,std::uint8_t(flat),flat};
+            dfre::draw_model_triangle32(face,{0,0,31,23},binding,32,24,colours,depths);
+            for(std::size_t i=0;i<colours.size();++i)std::cout<<colours[i]<<' '<<depths[i]<<' ';
+            std::cout<<'\n';
+        }
+        return std::cin.eof()?0:2;
+    }
+    if(argc==2 && std::string(argv[1])=="flat32") {
+        std::uint32_t test,index;dfre::RasterSpan span;
+        while(std::cin>>test>>index>>span.x>>span.y>>span.length>>span.depth>>span.ddepth>>span.shade>>span.dshade) {
+            if(index>255)return 2;
+            std::vector<std::uint32_t> shades(64*256),colours(512);std::vector<std::uint16_t> depths(512);
+            for(std::size_t i=0;i<shades.size();++i)shades[i]=std::uint32_t(i)*0x01010101u^0xffa5c3e7u;
+            for(std::size_t i=0;i<colours.size();++i){colours[i]=std::uint32_t(i)*1234567u^0xabcdef90u;depths[i]=std::uint16_t(i*317+test*17);}
+            dfre::draw_flat_span32(span,64,8,colours,depths,std::uint8_t(index),shades);
+            for(std::size_t i=0;i<colours.size();++i)std::cout<<colours[i]<<' '<<depths[i]<<' ';
+            std::cout<<'\n';
+        }
+        return std::cin.eof()?0:2;
+    }
     if(argc==2 && std::string(argv[1])=="faces") {
         std::uint32_t flags,flat_normal,material_index,normal_start;
         while(std::cin>>flags>>flat_normal>>material_index>>normal_start) {

@@ -38,12 +38,26 @@ enum class RasterTextureMode { uniform=0x14, varying_shade=0x18, cutout=0x34, va
 // Original 32-bit indexed-texture modes; shade and depth advance per pixel pair.
 std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
     std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,
-    RasterTextureMode mode=RasterTextureMode::uniform);
+    RasterTextureMode mode=RasterTextureMode::uniform,std::optional<std::uint32_t> uniform_shade={});
+// Original 32-bit flat material span; shade and depth advance for each pixel.
+std::size_t draw_flat_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,
+    std::uint8_t palette_index,const std::vector<std::uint32_t>& shade_colours);
 struct ModelRasterTriangle {
     std::array<RasterVertex,3> vertices;
     std::uint32_t flags{};
     std::size_t material{};
 };
+struct RasterMaterial32 {
+    const RasterTexture32* texture=nullptr;
+    const std::vector<std::uint32_t>* shade_colours=nullptr;
+    std::uint8_t flat_index{};
+    std::uint32_t tiny_colour{};
+};
+// Draw one assembled face through the original tiny/flat/textured paths.
+std::size_t draw_model_triangle32(const ModelRasterTriangle& face,const RasterClip& clip,
+    const RasterMaterial32& material,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth);
 struct ModelLighting {
     std::array<std::int32_t,3> light_direction{},view_direction{}; // Mesh-local 22-bit fixed directions.
     std::int32_t ambient{},diffuse{},specular{}; // 16.16 strengths.
@@ -76,4 +90,12 @@ std::size_t draw_tiny_triangle32(const std::array<RasterVertex,3>& triangle,cons
 struct ModelCameraFrame {ModelMatrix matrix{};ModelProjection projection;RasterClip clip;std::vector<ModelClipPlane> planes;};
 ModelCameraFrame make_model_camera(const std::array<std::int32_t,3>& position,
     const std::array<std::uint32_t,3>& angles,const RasterClip& clip,std::uint32_t horizontal_fov);
+// Camera matrices are one world-to-camera mesh matrix for each LOD mesh.
+std::size_t draw_model_mesh32(const ModelLod& lod,std::size_t mesh_index,
+    const std::vector<ModelMatrix>& camera_matrices,const ModelCameraFrame& camera,
+    const ModelLighting& camera_lighting,const std::vector<RasterMaterial32>& materials,
+    std::uint32_t width,std::uint32_t height,std::vector<std::uint32_t>& colour,
+    std::vector<std::uint16_t>& depth,const std::array<std::uint32_t,11>& animation_counters={},
+    ModelVertexMath math=ModelVertexMath::scalar);
+
 }

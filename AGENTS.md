@@ -9,6 +9,6 @@
 - Mark inferred behavior and runtime checks clearly.
 - Use short, simple text in code, docs, and replies.
 - Use `emil-design-eng` for UI work.
-- Test each code change, then commit and push the tested step.
+- Test each complete iteration, then commit and push it. Group related changes to limit GitHub Actions runs.
 
 - Run delegated workers through `scripts/opencode-worker` with Muse Spark 1.3 Contributor at `xhigh` effort on OpenCode Go. The lead agent reviews changes and test evidence, then commits and pushes.

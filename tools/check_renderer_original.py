@@ -70,7 +70,7 @@ def check(executable, probe, count,archive_path=None):
         if list(map(int,line.split()))!=expected:
             raise ValueError(f'triangle gradient/span mismatch at case {number}')
         total+=size
-    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout','varying_cutout')},lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),tiny32=check_tiny32(pe,probe,count),local_lighting=check_local_lighting(pe,probe,count),camera=check_camera(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
+    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout','varying_cutout')},flat32=check_flat32(pe,probe,count),lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),tiny32=check_tiny32(pe,probe,count),local_lighting=check_local_lighting(pe,probe,count),camera=check_camera(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
 
 
 def check_texture32(pe,probe,count,mode):
@@ -106,6 +106,31 @@ def check_texture32(pe,probe,count,mode):
             raise ValueError(f'textured32 target mismatch at case {number}')
         pixels+=length
     return dict(cases=len(cases),span_pixels=pixels,target_pixels=len(cases)*512,mismatches=0,functions=[hex(setup),hex(draw)],code_region='0x468000+0x2000',code_sha256=hashlib.sha256(pe.get_data(0x68000,0x2000)).hexdigest(),scope=f'32-bit {mode} texture; texture bits 0-8; signed UV, shade and step wrap; 64 shade rows; odd/even spans; strict paired depth test')
+
+def check_flat32(pe,probe,count):
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP,UC_X86_REG_EIP
+    u=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    for a,n in [(0x467000,0x1000),(0xa16000,4096),(0x2000000,0x10000),(0x3000000,0x23000),(0x6000000,4096)]:u.mem_map(a,n)
+    code=pe.get_data(0x67000,0x1000);u.mem_write(0x467000,code)
+    rng=random.Random(467430);cases=[]
+    for test in range(count):
+        x=rng.randrange(64);cases.append((test,rng.randrange(256),x,rng.randrange(8),rng.randrange(65-x),*[rng.randrange(-0x80000000,0x80000000)for _ in range(4)]))
+    output=subprocess.check_output([probe,'flat32'],input=(''.join(' '.join(map(str,c))+'\n'for c in cases)).encode()).splitlines()
+    if len(output)!=len(cases):raise ValueError('native flat32 case count differs from input')
+    u.mem_write(0x3010000,b''.join(struct.pack('<I',(i*0x01010101^0xffa5c3e7)&0xffffffff)for i in range(64*256)))
+    for number,(case,line)in enumerate(zip(cases,output)):
+        test,index,x,y,length,z,dz,shade,dshade=case
+        u.mem_write(0x3020000,b''.join(struct.pack('<H',(i*317+test*17)&65535)for i in range(512)))
+        u.mem_write(0x3021000,b''.join(struct.pack('<I',(i*1234567^0xabcdef90)&0xffffffff)for i in range(512)))
+        u.mem_write(0x2001000,struct.pack('<12I',index,0,0,0,0,0,0,0x3020000,0x3021000,0,0x3010000,0))
+        u.mem_write(0x2002000,struct.pack('<10i',y*64+x,length,0,0,z,shade,0,0,dz,dshade))
+        for address,argument in [(0x4672a0,0x2001000),(0x467430,0x2002000)]:
+            u.mem_write(0x2000800,struct.pack('<2I',0x6000000,argument));u.reg_write(UC_X86_REG_ESP,0x2000800);u.emu_start(address,0x6000000,count=100000)
+            if u.reg_read(UC_X86_REG_EIP)!=0x6000000:raise ValueError('original flat32 function exceeded instruction limit')
+        colours=struct.unpack('<512I',u.mem_read(0x3021000,2048));depths=struct.unpack('<512H',u.mem_read(0x3020000,1024));expected=[v for pair in zip(colours,depths)for v in pair]
+        if list(map(int,line.split()))!=expected:raise ValueError(f'flat32 mismatch at case {number}')
+    return dict(cases=count,target_pixels=count*512,mismatches=0,functions=['0x4672a0','0x467430'],code_sha256=hashlib.sha256(code).hexdigest(),scope='32-bit flat material; every palette index; signed depth/shade step wrap; per-pixel strict depth; 64 shade rows')
 
 def check_lighting(pe,probe,count,archive_path=None):
     import unicorn

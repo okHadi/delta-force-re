@@ -114,7 +114,7 @@ std::vector<RasterSpan> raster_triangle_spans(const std::array<RasterVertex,3>& 
 }
 
 std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
-    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,RasterTextureMode mode) {
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,const RasterTexture32& texture,RasterTextureMode mode,std::optional<std::uint32_t> uniform_shade) {
     if(mode!=RasterTextureMode::uniform && mode!=RasterTextureMode::varying_shade && mode!=RasterTextureMode::cutout && mode!=RasterTextureMode::varying_cutout)throw std::invalid_argument("unsupported textured raster mode");
     const auto size=std::uint64_t(width)*height;
     if(size!=colour.size() || size!=depth.size())throw std::invalid_argument("raster target size differs from bounds");
@@ -122,7 +122,7 @@ std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std:
     const auto tw=std::uint64_t(1)<<texture.width_bits,th=std::uint64_t(1)<<texture.height_bits;
     if(tw*th!=texture.pixels.size() || texture.shade_colours.size()!=64*256)throw std::invalid_argument("texture or shade table size differs from bounds");
     if(span.x<0 || span.y<0 || std::uint32_t(span.y)>=height || span.length<0 || std::uint32_t(span.x)>width || std::uint32_t(span.length)>width-std::uint32_t(span.x))throw std::invalid_argument("raster span exceeds target");
-    const auto uniform_row=(texture.uniform_shade>>16)&63;std::size_t writes=0;
+    const auto uniform_row=(uniform_shade.value_or(texture.uniform_shade)>>16)&63;std::size_t writes=0;
     const auto offset=std::size_t(span.y)*width+std::uint32_t(span.x);
     for(std::int32_t i=0;i<span.length;++i) {
         const auto u=std::uint32_t(span.u)+std::uint32_t(i)*std::uint32_t(span.du);
@@ -137,6 +137,50 @@ std::size_t draw_textured_span32(const RasterSpan& span,std::uint32_t width,std:
             const auto row=(mode==RasterTextureMode::varying_shade || mode==RasterTextureMode::varying_cutout)?((shade>>16)&63):uniform_row;
             depth[offset+i]=value;colour[offset+i]=texture.shade_colours[row*256+texel];++writes;
         }
+    }
+    return writes;
+}
+
+std::size_t draw_flat_span32(const RasterSpan& span,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth,
+    std::uint8_t palette_index,const std::vector<std::uint32_t>& shade_colours) {
+    const auto size=std::uint64_t(width)*height;
+    if(size!=colour.size() || size!=depth.size() || shade_colours.size()!=64*256)throw std::invalid_argument("flat raster target or shade table size differs from bounds");
+    if(span.x<0 || span.y<0 || std::uint32_t(span.y)>=height || span.length<0 || std::uint32_t(span.x)>width || std::uint32_t(span.length)>width-std::uint32_t(span.x))throw std::invalid_argument("flat raster span exceeds target");
+    const auto offset=std::size_t(span.y)*width+std::uint32_t(span.x);std::size_t writes=0;
+    for(std::int32_t i=0;i<span.length;++i) {
+        const auto value=std::uint16_t((std::uint32_t(span.depth)+std::uint32_t(i)*std::uint32_t(span.ddepth))>>16);
+        if(value<depth[offset+i]) {
+            const auto row=((std::uint32_t(span.shade)+std::uint32_t(i)*std::uint32_t(span.dshade))>>16)&63;
+            colour[offset+i]=shade_colours[row*256+palette_index];depth[offset+i]=value;++writes;
+        }
+    }
+    return writes;
+}
+
+std::size_t draw_model_triangle32(const ModelRasterTriangle& face,const RasterClip& clip,
+    const RasterMaterial32& material,std::uint32_t width,std::uint32_t height,
+    std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth) {
+    const auto classification=classify_raster_triangle(face.vertices,clip);
+    if(classification.extent<=0)return 0;
+    if(classification.extent<=2)return draw_tiny_triangle32(face.vertices,clip,material.tiny_colour,face.flags,width,height,colour,depth);
+    if(face.flags&0x700)throw std::invalid_argument("model face requires an effect pass");
+    const auto mode=face.flags&0x3c;
+    const bool textured=mode==0x14 || mode==0x18 || mode==0x34 || mode==0x38;
+    if(!textured && mode!=4 && mode!=8)throw std::invalid_argument("unsupported model face pixel mode");
+    auto triangle=face.vertices;
+    if(textured) {
+        if(!material.texture || material.texture->width_bits>16 || material.texture->height_bits>16)throw std::invalid_argument("model face texture is missing or invalid");
+        for(auto& vertex:triangle) {
+            vertex.u=signed_value(std::uint32_t(vertex.u)<<material.texture->width_bits);
+            vertex.v=signed_value(std::uint32_t(vertex.v)<<material.texture->height_bits);
+        }
+    } else if(!material.shade_colours)throw std::invalid_argument("model face shade table is missing");
+    const auto spans=raster_triangle_spans(triangle,clip,2u|(textured?1u:0u)|((mode&8)?4u:0u));
+    std::size_t writes=0;
+    for(const auto& span:spans) {
+        if(textured)writes+=draw_textured_span32(span,width,height,colour,depth,*material.texture,static_cast<RasterTextureMode>(mode),std::uint32_t(triangle[0].shade));
+        else writes+=draw_flat_span32(span,width,height,colour,depth,material.flat_index,*material.shade_colours);
     }
     return writes;
 }
@@ -334,4 +378,36 @@ ModelCameraFrame make_model_camera(const std::array<std::int32_t,3>& position,
     }
     return result;
 }
+std::size_t draw_model_mesh32(const ModelLod& lod,std::size_t mesh_index,
+    const std::vector<ModelMatrix>& camera_matrices,const ModelCameraFrame& camera,
+    const ModelLighting& camera_lighting,const std::vector<RasterMaterial32>& materials,
+    std::uint32_t width,std::uint32_t height,std::vector<std::uint32_t>& colour,
+    std::vector<std::uint16_t>& depth,const std::array<std::uint32_t,11>& animation_counters,ModelVertexMath math) {
+    if(mesh_index>=lod.meshes.size() || mesh_index>=camera_matrices.size() || materials.size()!=lod.materials.size())throw std::invalid_argument("mesh draw table size differs from geometry");
+    if(std::uint64_t(width)*height!=colour.size() || colour.size()!=depth.size() || camera.clip.left<0 || camera.clip.top<0 || camera.clip.right<camera.clip.left || camera.clip.bottom<camera.clip.top || std::uint32_t(camera.clip.right)>=width || std::uint32_t(camera.clip.bottom)>=height)throw std::invalid_argument("mesh draw target or clip is invalid");
+    const auto& mesh=lod.meshes[mesh_index];
+    if(mesh.face_start>lod.faces.size() || mesh.face_count>lod.faces.size()-mesh.face_start)throw std::invalid_argument("mesh face range outside table");
+    auto positions=model_mesh_vertices(lod,mesh_index,camera_matrices,math);
+    std::vector<ModelFace> faces;faces.reserve(mesh.face_count);
+    for(std::size_t i=0;i<mesh.face_count;++i) {
+        auto face=lod.faces[mesh.face_start+i];
+        for(auto& index:face.vertices) {
+            if(index<mesh.vertex_start || std::size_t(index-mesh.vertex_start)>=positions.size())throw std::invalid_argument("mesh face vertex outside mesh");
+            index-=mesh.vertex_start;
+        }
+        faces.push_back(face);
+    }
+    const auto lighting=localize_model_lighting(camera_matrices[mesh_index],camera_lighting);
+    const auto geometry=clip_model_geometry(positions,faces,camera.planes);
+    std::vector<ModelProjectedVertex> projected;projected.reserve(geometry.positions.size());
+    for(const auto& point:geometry.positions)projected.push_back(model_project_vertex(point,camera.projection));
+    std::size_t writes=0;
+    for(const auto& face:geometry.faces) {
+        if(face.rejected)continue;
+        const auto prepared=prepare_model_face(face.face,projected,lod.normals,mesh.normal_start,lod.materials,lighting,animation_counters);
+        if(prepared)writes+=draw_model_triangle32(*prepared,camera.clip,materials[prepared->material],width,height,colour,depth);
+    }
+    return writes;
+}
+
 }

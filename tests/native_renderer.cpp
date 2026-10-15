@@ -91,5 +91,32 @@ int main() {
     try{dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light,counters);check(false,"animated material outside table accepted");}catch(const std::invalid_argument&){}
     face_materials[0].flags=3;assembled_face.normals[0]=3;
     try{dfre::prepare_model_face(assembled_face,projected,face_normals,0,face_materials,face_light);check(false,"normal outside table accepted");}catch(const std::invalid_argument&){}
+    std::vector<std::uint32_t> flat_shades(64*256);
+    for(std::size_t i=0;i<4;++i)flat_shades[i*256+5]=std::uint32_t(10+i*10);
+    dfre::RasterSpan flat_span;flat_span.length=4;flat_span.ddepth=flat_span.dshade=65536;
+    colours.assign(4,0);depths.assign(4,5);
+    check(dfre::draw_flat_span32(flat_span,4,1,colours,depths,5,flat_shades)==4 && colours==std::vector<std::uint32_t>{10,20,30,40} && depths==std::vector<std::uint16_t>{0,1,2,3},"flat span lost per-pixel depth or shade");
+    dfre::RasterTexture32 bound_texture;bound_texture.pixels={7};bound_texture.shade_colours.resize(64*256);bound_texture.shade_colours[3*256+7]=0x12345678;bound_texture.uniform_shade=65536;
+    dfre::ModelRasterTriangle draw_face;draw_face.flags=0x14;
+    draw_face.vertices={dfre::RasterVertex{65536,65536,0,0,0,3*65536},dfre::RasterVertex{65536,7*65536,0,0,0,3*65536},dfre::RasterVertex{7*65536,65536,0,0,0,3*65536}};
+    dfre::RasterMaterial32 binding{&bound_texture,nullptr,0,0xabcdef12};
+    colours.assign(64,0);depths.assign(64,65535);
+    check(dfre::draw_model_triangle32(draw_face,{0,0,7,7},binding,8,8,colours,depths)>0 && colours[18]==0x12345678,"triangle draw did not use the assembled face shade");
+    draw_face.flags|=0x100;
+    try{dfre::draw_model_triangle32(draw_face,{0,0,7,7},binding,8,8,colours,depths);check(false,"effect face used an opaque pixel path");}catch(const std::invalid_argument&){}
+    draw_face.flags=0x14;draw_face.vertices={};binding.texture=nullptr;
+    colours.assign(64,0);depths.assign(64,65535);
+    check(dfre::draw_model_triangle32(draw_face,{0,0,7,7},binding,8,8,colours,depths)==1 && colours[0]==0xabcdef12,"tiny triangle required a texture or lost its cached colour");
+    dfre::ModelLod draw_lod;
+    draw_lod.vertices={{{256,128,128},0},{{256,128,-128},0},{{256,-128,128},0}};
+    draw_lod.normals={{{0,0,0},0}};
+    dfre::ModelFace mesh_face{};mesh_face.vertices={0,1,2};draw_lod.faces={mesh_face};
+    dfre::ModelMesh draw_mesh;draw_mesh.vertex_count=3;draw_mesh.normal_count=1;draw_mesh.face_count=1;draw_lod.meshes={draw_mesh};
+    dfre::ModelMaterial draw_material;draw_material.flags=0x21;draw_material.raw[61]=0x18;draw_lod.materials={draw_material};
+    binding.texture=&bound_texture;colours.assign(64,0);depths.assign(64,65535);
+    const auto mesh_camera=dfre::make_model_camera({},{},{0,0,7,7},90);
+    check(dfre::draw_model_mesh32(draw_lod,0,{dfre::model_identity_matrix()},mesh_camera,{}, {binding},8,8,colours,depths)>0 && colours[27]==0x12345678,"complete mesh path lost its geometry or material shade");
+    draw_lod.faces[0].vertices[0]=3;
+    try{dfre::draw_model_mesh32(draw_lod,0,{dfre::model_identity_matrix()},mesh_camera,{}, {binding},8,8,colours,depths);check(false,"mesh draw accepted a vertex outside the mesh");}catch(const std::invalid_argument&){}
     std::cout<<"raster classification tests passed\n";
 }
