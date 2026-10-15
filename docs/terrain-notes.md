@@ -26,14 +26,18 @@ Run `python3 tools/mission.py GAME_FOLDER C04M07.BMS` to resolve one mission, it
 
 `Df.exe` SHA-256: `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.
 
-| Field | String VA | Address-use VA |
+| Field | String VA | Code reference VA |
 |---|---|---|
-| `terrain_name` | `0x4cd718` | `0x47ab1a` |
-| `color_map` | `0x4cd784` | `0x47ad15` |
-| `elev_map` | `0x4cd794` | `0x47ad76` |
-| `detail_map` | `0x4cd7a0` | `0x47add7` |
+| `terrain_name` | `0x4cd718` | `0x47ab19` |
+| `color_map` | `0x4cd784` | `0x47ad14` |
+| `elev_map` | `0x4cd794` | `0x47ad75` |
+| `detail_map` | `0x4cd7a0` | `0x47add6` |
 
-These addresses come from string and pointer-byte checks. Check their instructions in Ghidra, then follow the image-load calls and height-sample uses.
+REA/Ghidra confirms these references in the terrain field parser at `0x47ab00` (2,289 bytes). The parser stores map names at terrain structure offsets `0x204`, `0x214`, and `0x224`, then applies the filename helper at `0x456560`.
+
+The descriptor loader at `0x47b400` registers this parser as a callback. Image loading and height sampling need separate code checks.
+
+Evidence: `ev_8329fca2a0998008cc221232ae74a061441ebce4fe595392687a14faaaf1cade` and `ev_d587bffbe01b8ddbf324984460d87f3ba4106659e33a3d87edd493569b7caa09`.
 
 ## Open checks
 

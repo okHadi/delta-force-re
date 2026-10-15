@@ -20,3 +20,5 @@ Each record stores four u32 fields: deleted flag, data offset, byte count, times
 Run `python3 tools/pff.py list ARCHIVE` for JSON metadata. Run `python3 tools/pff.py extract ARCHIVE NAME OUTPUT` to create one new file. Keep game data under `.local/`.
 
 [NovaHQ reference](https://github.com/Novahq-net/NovaResearch/blob/main/Shared/PFF%20File%20Format.md): use its PFF3 variant 1 record layout. The first header field in these local files is 20.
+
+REA/Ghidra identifies the archive loader at `Df.exe:0x49e2a0`. It reads a 20-byte header, allocates `record_count × 32` bytes, and seeks to the table offset. Evidence: `ev_ddf1f5eaa29e0613ef677de48b2523849051849b028377b9cfceba8f8724b9b9`.

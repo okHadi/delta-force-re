@@ -10,6 +10,14 @@ On an Intel Mac with Node.js 24 and Python 3.10 or later:
 scripts/setup-tools.sh
 ```
 
+## Build
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
+```
+
 ## Analysis
 
 ```sh
