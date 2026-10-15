@@ -184,15 +184,65 @@ def check_origins(archive_path, executable, probe):
     return dict(source_sha256=source_hash,block_start=hex(begin),block_end_exclusive=hex(end),block_sha256=hashlib.sha256(code).hexdigest(),models=models,lods=lods,vertices=vertices,meshes=meshes,mismatches=0,scope='v5 LODs with flags bit 0; original loader global skip flag is zero')
 
 
+def check_character(path, executable, probe):
+    import subprocess
+    import pefile
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_EBX, UC_X86_REG_ESI, UC_X86_REG_ESP, UC_X86_REG_EFLAGS, UC_X86_REG_EIP
+    exe=Path(executable).read_bytes()
+    source_hash='abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff'
+    if hashlib.sha256(exe).hexdigest()!=source_hash:
+        raise ModelError('expected the documented original executable SHA-256')
+    data=Path(path).read_bytes()
+    native=json.loads(subprocess.check_output([str(Path(probe).resolve()),'--character-poses-json',str(path)]))
+    pe=pefile.PE(data=exe);start,end=0x43a0e0,0x43a145
+    code=pe.get_data(start-pe.OPTIONAL_HEADER.ImageBase,end-start)
+    machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    machine.mem_map(start&~4095,4096);machine.mem_write(start,code)
+    base=0x3000000
+    if len(data)>0x800000:
+        raise ModelError('character check exceeds its mapped range')
+    machine.mem_map(base,(len(data)+4095)&~4095);machine.mem_write(base,data)
+    for address in (0x2000000,0x4000000,0x5000000,0x6000000):
+        machine.mem_map(address,4096)
+    table=struct.unpack_from('<I',data,20)[0]
+    machine.mem_write(base+20,struct.pack('<I',base+table))
+    for i in range(255):
+        pointer=struct.unpack_from('<I',data,table+i*4)[0]
+        if pointer:
+            machine.mem_write(base+table+i*4,struct.pack('<I',base+pointer))
+    machine.mem_write(0x4000000,struct.pack('<I',base))
+    machine.mem_write(0x4000058,struct.pack('<I',52))
+    machine.mem_write(0x4000080,struct.pack('<I',0x5000000))
+    bones=0
+    for item in native:
+        if len(item['pose'])>4096//24:
+            raise ModelError('character bone count exceeds test output buffer')
+        machine.reg_write(UC_X86_REG_EAX,item['slot']);machine.reg_write(UC_X86_REG_EBX,item['frame'])
+        machine.reg_write(UC_X86_REG_ESI,0x4000000);machine.reg_write(UC_X86_REG_ESP,0x2000800);machine.reg_write(UC_X86_REG_EFLAGS,2)
+        machine.mem_write(0x2000800,struct.pack('<I',0x6000000))
+        machine.emu_start(start,0x6000000,count=100000,timeout=1000000)
+        if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+            raise ModelError('original character pose read exceeded instruction limit')
+        raw=bytes(machine.mem_read(0x5000000,len(item['pose'])*24))
+        expected=[list(struct.unpack_from('<6i',raw,i*24)) for i in range(len(item['pose']))]
+        if item['pose']!=expected:
+            raise ModelError(f"character pose mismatch: slot {item['slot']} frame {item['frame']}")
+        bones+=len(item['pose'])
+    return dict(source_sha256=source_hash,character_sha256=hashlib.sha256(data).hexdigest(),function=hex(start),function_bytes=len(code),function_sha256=hashlib.sha256(code).hexdigest(),frames=len(native),bone_poses=bones,mismatches=0,scope='original frame angle and unit-scale read; interpolation and motion are separate')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input');parser.add_argument('--archive',action='store_true');parser.add_argument('--geometry',action='store_true')
-    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--probe')
+    parser.add_argument('--check-origins',metavar='EXE');parser.add_argument('--check-character',metavar='EXE');parser.add_argument('--probe')
     args=parser.parse_args()
+    if args.check_character and (args.archive or not args.probe or args.check_origins):
+        parser.error('--check-character needs --probe and one CHR input')
     if args.check_origins and (not args.archive or not args.probe):
         parser.error('--check-origins requires --archive and --probe')
     try:
-        result=check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
+        result=check_character(args.input,args.check_character,args.probe) if args.check_character else check_origins(args.input,args.check_origins,args.probe) if args.check_origins else (report_archive(args.input) if args.archive else decode(Path(args.input).read_bytes(),args.geometry))
         print(json.dumps(result,indent=2))
     except (OSError,ValueError) as error:
         parser.exit(1,f'model: {error}\n')

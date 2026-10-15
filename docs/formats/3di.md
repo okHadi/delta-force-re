@@ -64,3 +64,31 @@ Repeat with the local Python environment containing `pefile` and `unicorn`:
 ```sh
 python tools/model_report.py /path/to/Df.pff --archive --check-origins /path/to/Df.exe --probe /path/to/models_probe
 ```
+
+## CHR1 character frames
+
+`decode_character()` reads `PLAYER01.CHR`. It keeps the full file, bone records, bounded track ranges, bone map, animation slots, frame headers, and packed angle bytes. `character_frame_pose()` performs the original frame angle read: each unsigned XYZ byte shifts left by 17; scale starts at 65,536 on each axis. This step supplies a pose before motion and interpolation.
+
+| Field | Offset / size |
+| --- | --- |
+| Magic | `CHR1` at 0 |
+| Bone records | file offset at +4; count +8; each record is 92 bytes when its flag at +24 has bit 0, otherwise 60 |
+| Bone map | file offset +12; count +16; `u32` indexes |
+| Animation table | file offset +20; 255 `u32` file offsets; zero means empty |
+| Declared animation count | +24 |
+| Bone track offsets / counts | +0/+4/+8 and +12/+16/+20; observed strides 68/88/24 |
+| Animation header | 20 bytes; frame count +0; mapped bone count +4 |
+| Frame header | 52 bytes; next stride +0; stored pointers +28/+32/+40 |
+| Packed angles | four bytes per mapped bone after the frame header; XYZ use the first three bytes |
+
+Original relocation: function `0x439d20`, REA Evidence `ev_96ed2af0a04f4a0f21cecb04a12bcdb562b59be178ea2e92d3bc4fdfec9515c1`. Constructor `0x439e48` selects the 52-byte CHR1 frame header, Evidence `ev_fb9ca480ec8035bc479449f2a12da0b077931ea0ce2a01cf7f2aac3175e4129f`.
+
+Checked file SHA-256: `85811988a20f2c40f80376a5b321b33f2dafa9eb96fe8fc46ec8bc7077974158`. It contains 15 bones, 204 populated animation slots, and 12,284 frames. Each animation's last frame has stride zero; the other 12,080 frames have stride 160. Track strides fit every observed bone's adjacent data ranges.
+
+The rebuilt pose read matches original function `0x43a0e0` for all 12,284 frames and 184,260 bone poses, with zero mismatches. REA Evidence: `ev_5aa7409cb2f8a4f8648446a8cefefde56498d9ef6511f14a9888fb3f40d1ff4f`. The 101-byte instruction block has SHA-256 `70cdecf863f6e8c3e4ef130bd94fd632f4debf9651df4fe637e32e9fe1b2ce36`.
+
+```sh
+python tools/model_report.py /path/to/PLAYER01.CHR --check-character /path/to/Df.exe --probe /path/to/models_probe
+```
+
+Frame timing, angle interpolation, root motion, bone matrices, and the remaining frame flags need further executable checks.

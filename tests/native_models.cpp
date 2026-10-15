@@ -15,6 +15,14 @@ Bytes triangle(unsigned version) {
     const auto mesh=face+72;put(b,mesh+4,3);put(b,mesh+12,1);put(b,mesh+20,1);
     return b;
 }
+Bytes character() {
+    const std::size_t map=120,bone=124,table=216,animation=1236,frame=1256;
+    Bytes b(1312);put(b,0,0x31524843);put(b,4,bone);put(b,8,1);put(b,12,map);put(b,16,1);put(b,20,table);put(b,24,1);
+    put(b,bone+24,1);put(b,table,animation);put(b,animation,1);put(b,animation+4,1);
+    put(b,frame+28,1311);put(b,frame+32,1311);b[frame+52]=255;b[frame+53]=128;b[frame+54]=1;
+    return b;
+}
+void rejects_character(const Bytes& b){try{dfre::decode_character(b);std::cerr<<"accepted invalid character\n";std::exit(1);}catch(const std::invalid_argument&) {}}
 void check(bool result,const char* message){if(!result){std::cerr<<message<<'\n';std::exit(1);}}
 void rejects(const Bytes& b){try{dfre::decode_model(b);check(false,"accepted invalid model");}catch(const std::invalid_argument&) {}}
 }
@@ -56,5 +64,18 @@ int main() {
     try{dfre::localize_model_lod(raw);check(false,"accepted invalid vertex mesh");}catch(const std::invalid_argument&){}
     raw.flags=0;local=dfre::localize_model_lod(raw);
     check(local.vertices[0].position==raw.vertices[0].position,"unflagged LOD changed");
+    b=character();auto chr=dfre::decode_character(b);
+    check(chr.bones.size()==1 && chr.bone_map[0]==0 && chr.animations.size()==1,"character table changed");
+    const auto pose=dfre::character_frame_pose(chr.animations[0].frames[0]);
+    check(pose[0].angles==std::array<std::int32_t,3>{33423360,16777216,131072} && pose[0].scale==std::array<std::int32_t,3>{65536,65536,65536},"packed character pose changed");
+    for(std::size_t n=0;n<b.size();++n)rejects_character(Bytes(b.begin(),b.begin()+n));
+    auto bad=b;put(bad,8,0xffffffff);rejects_character(bad);
+    bad=b;put(bad,120,1);rejects_character(bad);
+    bad=b;put(bad,20,0xffffffff);rejects_character(bad);
+    bad=b;put(bad,124+12,0xffffffff);rejects_character(bad);
+    bad=b;put(bad,1236,2);rejects_character(bad);
+    bad=b;put(bad,1236+4,2);rejects_character(bad);
+    bad=b;put(bad,1256+28,0xffffffff);rejects_character(bad);
+    bad=b;put(bad,0,0x30524843);rejects_character(bad);
     std::cout<<"model bounds and geometry tests passed\n";
 }

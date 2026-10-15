@@ -57,4 +57,38 @@ struct Model {
 Model decode_model(const std::vector<std::uint8_t>& bytes);
 // Apply the original v5 loader origin step to one decoded LOD. Returns a copy.
 ModelLod localize_model_lod(const ModelLod& lod);
+struct CharacterTrack {
+    std::uint32_t offset{}, count{}, stride{};
+};
+struct CharacterBone {
+    std::uint32_t offset{}, flags{};
+    std::array<CharacterTrack, 3> tracks;
+    std::vector<std::uint8_t> raw;
+};
+struct CharacterFrame {
+    std::uint32_t offset{}, next_stride{};
+    std::array<std::uint8_t, 52> raw_header{};
+    std::vector<std::array<std::uint8_t, 4>> packed_angles;
+};
+struct CharacterAnimation {
+    std::uint32_t slot{}, offset{};
+    std::array<std::uint8_t, 20> raw_header{};
+    std::vector<CharacterFrame> frames;
+};
+struct CharacterModel {
+    std::vector<std::uint8_t> raw;
+    std::vector<CharacterBone> bones;
+    std::vector<std::uint32_t> bone_map;
+    std::uint32_t declared_animation_count{};
+    std::vector<CharacterAnimation> animations;
+};
+struct CharacterBonePose {
+    std::array<std::int32_t, 3> angles; // Original angle units: unsigned stored byte << 17.
+    std::array<std::int32_t, 3> scale; // Original 16.16 units.
+};
+// Reads the observed DF1 CHR1 layout. Track and frame flags stay raw.
+CharacterModel decode_character(const std::vector<std::uint8_t>& bytes);
+// Original 0x43a0e0 pose read; motion and interpolation are separate steps.
+std::vector<CharacterBonePose> character_frame_pose(const CharacterFrame& frame);
+
 }

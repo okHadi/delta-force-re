@@ -102,4 +102,64 @@ ModelLod localize_model_lod(const ModelLod& source) {
     return lod;
 }
 
+CharacterModel decode_character(const std::vector<std::uint8_t>& bytes) {
+    Reader r(bytes);r.range(0,120);
+    require(r.u32(0)==0x31524843,"unsupported character magic");
+    CharacterModel model;model.raw=bytes;
+    const auto bone_count=r.u32(8),map_count=r.u32(16),map_offset=r.u32(12),animation_table=r.u32(20);
+    model.declared_animation_count=r.u32(24);
+    require(bone_count>0 && bone_count<=bytes.size()/60,"character bone count outside file");
+    require(map_count>0 && map_count<=bytes.size()/4,"character bone map count outside file");
+    r.range(map_offset,std::size_t(map_count)*4);r.range(animation_table,255*4);
+    for(std::uint32_t i=0;i<map_count;++i) {
+        auto index=r.u32(map_offset+std::size_t(i)*4);
+        require(index<bone_count,"character bone map outside table");model.bone_map.push_back(index);
+    }
+    std::size_t pos=r.u32(4);
+    for(std::uint32_t i=0;i<bone_count;++i) {
+        r.range(pos,60);CharacterBone bone;bone.offset=static_cast<std::uint32_t>(pos);bone.flags=r.u32(pos+24);
+        const auto stride=(bone.flags&1)?92:60;r.range(pos,stride);bone.raw=r.copy(pos,stride);
+        const std::array<std::uint32_t,3> track_strides{68,88,24};
+        for(std::size_t k=0;k<3;++k) {
+            auto& track=bone.tracks[k];track.offset=r.u32(pos+k*4);track.count=r.u32(pos+12+k*4);track.stride=track_strides[k];
+            require(track.count<=bytes.size()/track.stride,"character track count outside file");
+            r.range(track.offset,std::size_t(track.count)*track.stride);
+        }
+        model.bones.push_back(std::move(bone));pos+=stride;
+    }
+    for(std::uint32_t slot=0;slot<255;++slot) {
+        const auto offset=r.u32(animation_table+slot*4);if(!offset)continue;
+        r.range(offset,20);const auto count=r.u32(offset),mapped=r.u32(offset+4);
+        require(count>0 && count<=bytes.size()/52,"character frame count outside file");
+        require(mapped==map_count,"character animation bone count differs from map");
+        CharacterAnimation animation;animation.slot=slot;animation.offset=offset;std::copy_n(bytes.begin()+offset,20,animation.raw_header.begin());
+        pos=std::size_t(offset)+20;
+        for(std::uint32_t i=0;i<count;++i) {
+            r.range(pos,52);const auto stride=r.u32(pos);const auto payload=std::size_t(map_count)*4;
+            r.range(pos+52,payload);
+            require((i+1==count && stride==0) || stride>=52+payload,"character frame stride is too small");
+            if(stride)r.range(pos,stride);
+            for(std::size_t field:{28,32,40}) {
+                auto pointer=r.u32(pos+field);
+                if(pointer || field!=40)r.range(pointer,1);
+            }
+            CharacterFrame frame;frame.offset=static_cast<std::uint32_t>(pos);frame.next_stride=stride;std::copy_n(bytes.begin()+pos,52,frame.raw_header.begin());
+            for(std::uint32_t k=0;k<map_count;++k) {
+                std::array<std::uint8_t,4> packed;std::copy_n(bytes.begin()+pos+52+std::size_t(k)*4,4,packed.begin());frame.packed_angles.push_back(packed);
+            }
+            animation.frames.push_back(std::move(frame));pos+=stride;
+        }
+        model.animations.push_back(std::move(animation));
+    }
+    return model;
+}
+std::vector<CharacterBonePose> character_frame_pose(const CharacterFrame& frame) {
+    std::vector<CharacterBonePose> result;
+    for(const auto& packed:frame.packed_angles) {
+        CharacterBonePose pose;for(std::size_t k=0;k<3;++k){pose.angles[k]=std::int32_t(packed[k])<<17;pose.scale[k]=65536;}
+        result.push_back(pose);
+    }
+    return result;
+}
+
 }
