@@ -131,5 +131,24 @@ int main() {
     try{dfre::character_bone_matrices(skeleton,zero_pose);check(false,"accepted forward bone parent");}catch(const std::invalid_argument&){}
     skeleton.runtime_prepared=false;
     try{dfre::character_bone_matrices(skeleton,zero_pose);check(false,"accepted unprepared character matrices");}catch(const std::invalid_argument&){}
+    dfre::ModelLod geometry;geometry.meshes.resize(2);geometry.vertices={{{-32768,32767,-1},1}};
+    geometry.meshes[0].vertex_count=1;std::vector<dfre::ModelMatrix> transforms{identity,translation};
+    auto transformed=dfre::model_mesh_vertices(geometry,0,transforms);
+    check(transformed[0]==std::array<std::int32_t,3>{-8388608,8388352,-256},"signed vertex scale changed");
+    geometry.meshes[0].flags=1;transformed=dfre::model_mesh_vertices(geometry,0,transforms,dfre::ModelVertexMath::mmx);
+    check(transformed[0]==std::array<std::int32_t,3>{-8388596,8388318,-200},"vertex owner matrix changed");
+    geometry.meshes[0].flags=0;geometry.vertices[0].position={1,1,1};transforms[0][0]=257;transforms[0][1]=257;transforms[0][2]=257;
+    check(dfre::model_mesh_vertices(geometry,0,transforms)[0][0]==0 && dfre::model_mesh_vertices(geometry,0,transforms,dfre::ModelVertexMath::mmx)[0][0]==0,"small transform coefficients changed");
+    transforms[0][0]=0x3fffff;transforms[0][1]=0x3fffff;transforms[0][2]=0x3fffff;
+    check(dfre::model_mesh_vertices(geometry,0,transforms)[0][0]==765 && dfre::model_mesh_vertices(geometry,0,transforms,dfre::ModelVertexMath::mmx)[0][0]==767,"scalar and MMX rounding changed");
+    geometry.meshes[0].flags=1;geometry.vertices[0].mesh=2;
+    try{dfre::model_mesh_vertices(geometry,0,transforms);check(false,"accepted invalid owner matrix");}catch(const std::invalid_argument&){}
+    geometry.meshes[0].vertex_count=2;
+    try{dfre::model_mesh_vertices(geometry,0,transforms);check(false,"accepted invalid vertex range");}catch(const std::invalid_argument&){}
+    auto projected=dfre::model_project_vertex({65536,65536,-65536},{320,{320,240},65536});
+    check(projected.projected && projected.screen==std::array<std::int32_t,2>{0,36700160},"projection boundary changed");
+    projected=dfre::model_project_vertex({65535,65536,-65536},{320,{320,240},65536});
+    check(!projected.projected && projected.screen==std::array<std::int32_t,2>{0,0},"near depth skip changed");
+    try{dfre::model_project_vertex({1,0,0},{320,{320,240},1});check(false,"accepted unsafe projection divisor");}catch(const std::invalid_argument&){}
     std::cout<<"model bounds and geometry tests passed\n";
 }

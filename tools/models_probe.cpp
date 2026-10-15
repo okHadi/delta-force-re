@@ -5,6 +5,8 @@
 #include <stdexcept>
 int main(int argc,char** argv) {
     if(argc<2){std::cerr<<"Usage: models_probe MODEL...\n";return 2;}
+    const bool vertex_cases=std::string(argv[1])=="--mesh-vertices-json";
+    if(vertex_cases && argc!=3){std::cerr<<"Usage: models_probe --mesh-vertices-json MODEL\n";return 2;}
     const bool mesh_matrices=std::string(argv[1])=="--character-mesh-matrices-json";
     if(mesh_matrices && argc!=4){std::cerr<<"Usage: models_probe --character-mesh-matrices-json CHR MODEL\n";return 2;}
     const bool matrix_cases=std::string(argv[1])=="--character-matrix-cases-json";
@@ -16,10 +18,33 @@ int main(int argc,char** argv) {
     const bool origins=std::string(argv[1])=="--origins-json";
     if(origins && argc!=3){std::cerr<<"Usage: models_probe --origins-json MODEL\n";return 2;}
     bool failed=false;
-    for(int i=(origins||character||deltas||prepare||matrices||matrix_cases||mesh_matrices)?2:1;i<argc;++i)try {
+    for(int i=(origins||character||deltas||prepare||matrices||matrix_cases||mesh_matrices||vertex_cases)?2:1;i<argc;++i)try {
         std::ifstream file(argv[i],std::ios::binary);
         if(!file)throw std::runtime_error("cannot open model");
         std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});
+        if(vertex_cases) {
+            const auto model=dfre::decode_model(bytes);std::cout<<"[";
+            for(std::size_t l=0;l<model.lods.size();++l) {
+                const auto lod=dfre::localize_model_lod(model.lods[l]);std::vector<dfre::ModelMatrix> transforms;
+                for(std::size_t j=0;j<lod.meshes.size();++j)transforms.push_back(dfre::model_local_matrix(
+                    {0x10000+std::int32_t(j)*65536,-0x400000+std::int32_t(j)*1234,0x200000-std::int32_t(j)*4321},
+                    {0x12345678u+std::uint32_t(j)*1234567u,0x3456789au+std::uint32_t(j)*7654321u,0x56789abcu+std::uint32_t(l)*12345u}));
+                if(l)std::cout<<",";std::cout<<"{\"lod\":"<<l<<",\"matrices\":[";
+                for(std::size_t j=0;j<transforms.size();++j){if(j)std::cout<<",";std::cout<<"[";for(std::size_t k=0;k<12;++k){if(k)std::cout<<",";std::cout<<transforms[j][k];}std::cout<<"]";}
+                std::cout<<"],\"meshes\":[";bool first=true;
+                for(std::size_t j=0;j<lod.meshes.size();++j)for(int mode=0;mode<2;++mode) {
+                    if(!first)std::cout<<",";first=false;std::cout<<"{\"index\":"<<j<<",\"mode\":"<<mode<<",\"vertices\":[";
+                    const auto vertices=dfre::model_mesh_vertices(lod,j,transforms,mode?dfre::ModelVertexMath::mmx:dfre::ModelVertexMath::scalar);
+                    for(std::size_t k=0;k<vertices.size();++k) {
+                        if(k)std::cout<<",";const auto projected=dfre::model_project_vertex(vertices[k],{320,{320,240},65536});
+                        std::cout<<"["<<vertices[k][0]<<","<<vertices[k][1]<<","<<vertices[k][2]<<","<<projected.screen[0]<<","<<projected.screen[1]<<","<<projected.projected<<"]";
+                    }
+                    std::cout<<"]}";
+                }
+                std::cout<<"]}";
+            }
+            std::cout<<"]\n";continue;
+        }
         if(mesh_matrices) {
             auto chr=dfre::prepare_character_runtime(dfre::decode_character(bytes));
             std::ifstream model_file(argv[3],std::ios::binary);if(!model_file)throw std::runtime_error("cannot open mesh model");

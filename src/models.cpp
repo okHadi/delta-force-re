@@ -50,7 +50,7 @@ Model decode_model(const std::vector<std::uint8_t>& bytes) {
         const auto face_start=pos;pos+=std::size_t(fc)*72;
         std::uint32_t vb=0,nb=0,fb=0;
         for(std::uint32_t i=0;i<mc;++i,pos+=ms) {
-            ModelMesh m;m.vertex_start=vb;m.normal_start=nb;m.face_start=fb;m.vertex_count=r.u32(pos+4);m.face_count=r.u32(pos+12);m.normal_count=r.u32(pos+20);m.raw=r.copy(pos,ms);
+            ModelMesh m;m.flags=r.u32(pos);m.vertex_start=vb;m.normal_start=nb;m.face_start=fb;m.vertex_count=r.u32(pos+4);m.face_count=r.u32(pos+12);m.normal_count=r.u32(pos+20);m.raw=r.copy(pos,ms);
             if(model.version==5) {m.has_v5_transform=true;m.parent_index=r.u32(pos+36);for(std::size_t k=0;k<3;++k){m.delta_origin[k]=r.i32(pos+40+k*4);m.origin[k]=r.i32(pos+52+k*4);}}
             require(m.vertex_count<=vc-vb && m.normal_count<=nc-nb && m.face_count<=fc-fb,"model mesh count outside geometry");
             for(std::uint32_t j=0;j<m.face_count;++j) {
@@ -320,6 +320,53 @@ std::vector<ModelMatrix> character_mesh_matrices(const CharacterModel& prepared,
     require(!(localized.flags&1) || localized.origins_localized,"mesh matrices require localized origins");
     require(localized.meshes.size()==pose.size(),"mesh matrix count differs from pose");
     return character_matrices(prepared,pose,pitch_adjustment,world,&localized);
+}
+
+std::vector<std::array<std::int32_t,3>> model_mesh_vertices(const ModelLod& lod,std::size_t mesh_index,
+    const std::vector<ModelMatrix>& matrices,ModelVertexMath math) {
+    require(mesh_index<lod.meshes.size(),"mesh index outside table");
+    require(!(lod.flags&1) || lod.origins_localized,"vertex transform requires localized origins");
+    const auto& mesh=lod.meshes[mesh_index];
+    require(mesh.vertex_start<=lod.vertices.size() && mesh.vertex_count<=lod.vertices.size()-mesh.vertex_start,"mesh vertex range outside table");
+    require(mesh_index<matrices.size(),"mesh matrix outside table");
+    std::vector<std::array<std::int32_t,3>> result;result.reserve(mesh.vertex_count);
+    for(std::size_t i=0;i<mesh.vertex_count;++i) {
+        const auto& vertex=lod.vertices[mesh.vertex_start+i];
+        const auto index=(mesh.flags&1)?vertex.mesh:mesh_index;
+        require(index<matrices.size(),"vertex owner matrix outside table");
+        const auto& matrix=matrices[index];
+        std::array<std::int32_t,3> point{};
+        if(math==ModelVertexMath::mmx && !(mesh.flags&1)) {
+            for(std::size_t row=0;row<3;++row) {
+                std::uint32_t sum=0;
+                for(std::size_t k=0;k<3;++k) {
+                    const auto raw=std::uint16_t(std::uint32_t(matrix[row*4+k])>>8);
+                    const auto coefficient=raw<=32767?std::int32_t(raw):std::int32_t(raw)-65536;
+                    sum+=std::uint32_t(std::int32_t(vertex.position[k])*coefficient);
+                }
+                const auto value=signed_word(sum);
+                const auto shifted=value>=0?std::int64_t(value)/64:-((-std::int64_t(value)+63)/64);
+                point[row]=signed_word(std::uint32_t(shifted)+std::uint32_t(matrix[row*4+3]));
+            }
+        } else {
+            for(std::size_t k=0;k<3;++k)point[k]=std::int32_t(vertex.position[k])*256;
+            point=model_transform_point(matrix,point);
+        }
+        result.push_back(point);
+    }
+    return result;
+}
+ModelProjectedVertex model_project_vertex(const std::array<std::int32_t,3>& point,const ModelProjection& projection) {
+    require(projection.near_depth>=3,"projection near depth must be at least three");
+    ModelProjectedVertex result{};result.camera=point;
+    if(point[0]<projection.near_depth)return result;
+    const auto reciprocal=std::int32_t(0x100000000LL/point[0]);
+    const auto factor=signed_word(std::uint32_t(fixed_product(reciprocal,projection.focal_length,0)));
+    for(std::size_t k=0;k<2;++k) {
+        const auto centre=std::uint32_t(projection.centre[k])<<16;
+        result.screen[k]=signed_word(centre-std::uint32_t(fixed_product(point[k+1],factor,16)));
+    }
+    result.projected=true;return result;
 }
 
 }

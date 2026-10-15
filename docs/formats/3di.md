@@ -148,3 +148,19 @@ python tools/model_report.py /path/to/PLAYER01.CHR --check-mesh-matrices /path/t
 ```
 
 This check covers character draw matrices. Vertex projection, face drawing, and held-item attachments need separate checks.
+
+## Mesh vertices and projection
+
+`model_mesh_vertices()` applies the original mesh flag rules. Flag bit 0 selects the matrix from each vertex's owner index. Other meshes use their own matrix. Signed vertex XYZ values shift left by 8 before the scalar transform. The MMX mode truncates rotation entries to signed 16-bit values after a shift by 8, sums products with 32-bit wrap, shifts by 6, and adds translation. Keep the selected math mode explicit; the results can differ. Owner-indexed meshes use scalar math in both modes.
+
+`model_project_vertex()` uses camera component 0 as depth. It returns 16.16 screen coordinates for points at or beyond the near depth. The projection uses the original integer reciprocal and product shifts. Set `near_depth` to at least 3 so the signed division fits. Points below the near depth have `projected=false`; triangle clipping is a later step.
+
+The rebuilt functions match original vertex functions `0x469dc0` and `0x469fc0` and projection `0x46a040` across all 355 bounded v5 models: 1,081 LODs, 8,408 mesh/mode cases, and 331,680 vertices. The generated transforms cross the near plane: 273,419 points project and 58,261 points stay below it. All compared values match. Both scalar and MMX cases run after the original origin conversion. The other eight archive members use other headers or versions.
+
+REA Evidence: scalar/MMX `ev_02c96e2fff9e68a566a8d692adf9b720b0fbfd6433048175533c05ddaf872328`; owner matrices `ev_ad44175b879e5a33745c4afcb584a3d4728e70793fd8024b7747fbe7be75db89`; projection `ev_7cef0043c47975e86877d60dfdd8da98bfe1b1677b86bc7f2c5aa8e42900eabd`. The replay report includes the executable, archive, and function hashes.
+
+```sh
+python tools/model_report.py /path/to/Df.pff --archive --check-vertices /path/to/Df.exe --probe /path/to/models_probe
+```
+
+These checks cover camera-space vertices and screen projection. Face clipping, lighting, texture sampling, and pixel output need their own checks.

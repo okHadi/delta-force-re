@@ -22,6 +22,7 @@ struct ModelFace {
     std::uint16_t flags, face_normal;
 };
 struct ModelMesh {
+    std::uint32_t flags{};
     std::uint32_t vertex_start{}, vertex_count{}, normal_start{}, normal_count{}, face_start{}, face_count{};
     bool has_v5_transform{};
     std::uint32_t parent_index{}; // Raw value; root conventions need runtime checks.
@@ -117,5 +118,21 @@ std::vector<ModelMatrix> character_bone_matrices(const CharacterModel& prepared,
 std::vector<ModelMatrix> character_mesh_matrices(const CharacterModel& prepared,const ModelLod& localized,
     const std::vector<CharacterBonePose>& pose,std::uint32_t pitch_adjustment=0,
     const ModelMatrix* world=nullptr);
+
+enum class ModelVertexMath { scalar, mmx };
+// Mesh flag bit 0 selects per-vertex owner matrices; that path uses scalar math.
+std::vector<std::array<std::int32_t,3>> model_mesh_vertices(const ModelLod& localized,std::size_t mesh_index,
+    const std::vector<ModelMatrix>& matrices,ModelVertexMath math=ModelVertexMath::scalar);
+struct ModelProjection {
+    std::int32_t focal_length{}; // Original whole-pixel focal length.
+    std::array<std::int32_t,2> centre{};
+    std::int32_t near_depth{65536};
+};
+struct ModelProjectedVertex {
+    std::array<std::int32_t,3> camera{}; // Depth is component 0.
+    std::array<std::int32_t,2> screen{}; // 16.16 pixels when projected is true.
+    bool projected{};
+};
+ModelProjectedVertex model_project_vertex(const std::array<std::int32_t,3>& point,const ModelProjection& projection);
 
 }

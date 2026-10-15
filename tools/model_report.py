@@ -475,22 +475,95 @@ def check_character_mesh_matrices(path, executable, probe, archive_path):
     return dict(source_sha256=pose_check['source_sha256'],character_sha256=pose_check['character_sha256'],archive_sha256=hashlib.sha256(Path(archive_path).read_bytes()).hexdigest(),models=model_count,lods=lod_count,cases=case_count,matrices=matrix_count,components=matrix_count*12,mismatches=0,function='0x481130',function_bytes=0x1f7,function_sha256=hashlib.sha256(pe.get_data(0x481130-pe.OPTIONAL_HEADER.ImageBase,0x1f7)).hexdigest(),scope='all v5 primary org0 models; three sampled poses per LOD; original loader origin step; pitch zero; vertex projection separate')
 
 
+def check_model_vertices(archive_path, executable, probe):
+    import subprocess
+    import tempfile
+    import pefile
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP, UC_X86_REG_EIP, UC_X86_REG_EFLAGS, UC_X86_REG_EBX, UC_X86_REG_ESI
+    exe=Path(executable).read_bytes();pe=pefile.PE(data=exe)
+    machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    for address,size in ((0x45c000,0x2000),(0x469000,0x2000),(0x486000,4096),(0x8cf000,4096),(0x8d1000,4096),(0xaaa000,0x20000),(0xad3000,4096),(0x2000000,0x40000),(0x6000000,4096),(0x7000000,0x20000)):
+        machine.mem_map(address,size)
+    for address,size in ((0x45c000,0x2000),(0x469dc0,0x34a),(0x486128,0xdb)):
+        machine.mem_write(address,pe.get_data(address-pe.OPTIONAL_HEADER.ImageBase,size))
+    machine.mem_write(0x8cfa74,struct.pack('<3i',320,320,240));machine.mem_write(0x8d12ac,struct.pack('<i',65536))
+    def call(address,args):
+        machine.mem_write(0x2000800,struct.pack('<'+'I'*(len(args)+1),0x6000000,*args))
+        machine.reg_write(UC_X86_REG_ESP,0x2000800);machine.reg_write(UC_X86_REG_EFLAGS,2)
+        machine.emu_start(address,0x6000000,count=1000000,timeout=1000000)
+        if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+            raise ModelError(f'original vertex function {address:x} exceeded instruction limit')
+    archive=Archive(archive_path);probe=str(Path(probe).resolve());excluded=[]
+    model_count=lod_count=mesh_cases=vertex_cases=projected=0
+    local=Path(__file__).resolve().parent.parent/'.local';local.mkdir(exist_ok=True)
+    with archive.path.open('rb') as source,tempfile.TemporaryDirectory(prefix='df-vertices-',dir=local) as temporary:
+        for entry in archive.entries:
+            if entry.deleted or not entry.name.lower().endswith('.3di'):
+                continue
+            source.seek(entry.offset);data=source.read(entry.size)
+            if data[:4]!=b'3DI\x05':
+                excluded.append(dict(name=entry.name,reason='not v5'));continue
+            try:
+                model=decode(data)
+            except ModelError as error:
+                excluded.append(dict(name=entry.name,reason=str(error)));continue
+            path=Path(temporary)/entry.name;path.write_bytes(data)
+            native=json.loads(subprocess.check_output([probe,'--mesh-vertices-json',str(path)]));model_count+=1
+            if len(native)!=len(model['lods']):
+                raise ModelError('native vertex LOD count differs from source')
+            for row,lod in zip(native,model['lods']):
+                header=bytearray(data[lod['offset']:lod['data_offset']]);vertices=data[lod['data_offset']:lod['data_offset']+lod['vertices_count']*8]
+                meshes=b''.join(data[m['offset']:m['offset']+112] for m in lod['meshes'])
+                if len(vertices)>0xf000 or len(meshes)>0x10000 or len(row['matrices'])>200:
+                    raise ModelError('vertex check exceeds mapped buffers')
+                struct.pack_into('<I',header,0x84,0x7001000);struct.pack_into('<I',header,0x9c,0x7010000)
+                machine.mem_write(0x7000000,bytes(header));machine.mem_write(0x7001000,vertices);machine.mem_write(0x7010000,meshes)
+                if lod['flags']&1:
+                    machine.reg_write(UC_X86_REG_EBX,0x7000000);machine.reg_write(UC_X86_REG_ESI,0);machine.reg_write(UC_X86_REG_ESP,0x2000800)
+                    machine.emu_start(0x486128,0x486203,count=1000000,timeout=1000000)
+                    if machine.reg_read(UC_X86_REG_EIP)!=0x486203:
+                        raise ModelError('original vertex origin block exceeded instruction limit')
+                machine.mem_write(0x2001000,b''.join(struct.pack('<12i16x',*m) for m in row['matrices']))
+                if len(row['meshes'])!=len(lod['meshes'])*2:
+                    raise ModelError('native vertex mesh case count differs from source')
+                lod_count+=1
+                for item in row['meshes']:
+                    mesh=lod['meshes'][item['index']];count=mesh['vertex_count']
+                    # Mesh offsets in the report are absolute; vertex ranges are cumulative.
+                    vertex_start=mesh['vertex_start']
+                    flags=struct.unpack_from('<I',data,mesh['offset'])[0]
+                    machine.mem_write(0xad3d2c,struct.pack('<I',item['mode']))
+                    machine.mem_write(0xaaacb0,bytes(count*32))
+                    matrix=0x2001000 if flags&1 else 0x2001000+item['index']*64
+                    call(0x469fc0 if flags&1 else 0x469dc0,[matrix,count,0x7001000+vertex_start*8])
+                    call(0x46a040,[])
+                    output=bytes(machine.mem_read(0xaaacb0,count*32));expected=[]
+                    for index in range(count):
+                        point=struct.unpack_from('<3i',output,index*32);screen=struct.unpack_from('<2i',output,index*32+24);visible=int(point[0]>=65536)
+                        expected.append([*point,*screen,visible]);projected+=visible
+                    if item['vertices']!=expected:
+                        raise ModelError(f'vertex/projection mismatch: {entry.name} LOD {row["lod"]} mesh {item["index"]} mode {item["mode"]}')
+                    mesh_cases+=1;vertex_cases+=count
+    return dict(source_sha256=hashlib.sha256(exe).hexdigest(),archive_sha256=hashlib.sha256(Path(archive_path).read_bytes()).hexdigest(),models=model_count,lods=lod_count,mesh_cases=mesh_cases,vertex_cases=vertex_cases,projected=projected,mismatches=0,functions=[dict(address=hex(a),bytes=n,sha256=hashlib.sha256(pe.get_data(a-pe.OPTIONAL_HEADER.ImageBase,n)).hexdigest()) for a,n in ((0x469dc0,0x1fc),(0x469fc0,0x73),(0x46a040,0xca))],excluded=excluded,scope='all bounded v5 models; generated matrices; scalar and MMX; owner path; focal 320 centre 320,240 near 65536; original origin step')
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('input');parser.add_argument('--archive',action='store_true');parser.add_argument('--geometry',action='store_true')
     checks=parser.add_mutually_exclusive_group()
-    for name in ('origins','character','deltas','prepare','matrices','mesh-matrices'):
+    for name in ('origins','character','deltas','prepare','matrices','mesh-matrices','vertices'):
         checks.add_argument('--check-'+name,metavar='EXE')
     parser.add_argument('--models-archive');parser.add_argument('--probe')
     args=parser.parse_args()
     selected=next(((name,getattr(args,'check_'+name)) for name in
-        ('origins','character','deltas','prepare','matrices','mesh_matrices') if getattr(args,'check_'+name)),None)
+        ('origins','character','deltas','prepare','matrices','mesh_matrices','vertices') if getattr(args,'check_'+name)),None)
     if selected:
         name,executable=selected
         if not args.probe:
             parser.error('instruction checks require --probe')
-        if args.archive!=(name=='origins'):
-            parser.error('--archive is required only for --check-origins')
+        if args.archive!=(name in ('origins','vertices')):
+            parser.error('--archive is required for origin and vertex checks')
         if name=='mesh_matrices' and not args.models_archive:
             parser.error('--check-mesh-matrices requires --models-archive')
     try:
@@ -499,7 +572,7 @@ def main():
         elif name=='mesh_matrices':
             result=check_character_mesh_matrices(args.input,executable,args.probe,args.models_archive)
         else:
-            check={'origins':check_origins,'character':check_character,'deltas':check_character_deltas,
+            check={'origins':check_origins,'vertices':check_model_vertices,'character':check_character,'deltas':check_character_deltas,
                 'prepare':check_character_prepare,'matrices':check_character_matrices}[name]
             result=check(args.input,executable,args.probe)
         print(json.dumps(result,indent=2))
