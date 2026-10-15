@@ -60,4 +60,9 @@ std::size_t draw_tiny_triangle32(const std::array<RasterVertex,3>& triangle,cons
     std::uint32_t flat_colour,std::uint32_t flags,std::uint32_t width,std::uint32_t height,
     std::vector<std::uint32_t>& colour,std::vector<std::uint16_t>& depth);
 
+// Original camera projection, ordered clip planes, and world-to-camera matrix.
+
+struct ModelCameraFrame {ModelMatrix matrix{};ModelProjection projection;RasterClip clip;std::vector<ModelClipPlane> planes;};
+ModelCameraFrame make_model_camera(const std::array<std::int32_t,3>& position,
+    const std::array<std::uint32_t,3>& angles,const RasterClip& clip,std::uint32_t horizontal_fov);
 }

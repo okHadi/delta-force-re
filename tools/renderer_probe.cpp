@@ -2,7 +2,18 @@
 #include <iostream>
 #include <string>
 int main(int argc,char** argv) {
-    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting"))return 2;
+    if(argc>2 || (argc==2 && std::string(argv[1])!="texture32" && std::string(argv[1])!="texture32-shade" && std::string(argv[1])!="texture32-cutout" && std::string(argv[1])!="spans" && std::string(argv[1])!="lighting" && std::string(argv[1])!="clip" && std::string(argv[1])!="tiny32" && std::string(argv[1])!="local-lighting" && std::string(argv[1])!="camera"))return 2;
+    if(argc==2 && std::string(argv[1])=="camera") {
+        std::array<std::int32_t,3> position;std::array<std::uint32_t,3> angles;dfre::RasterClip clip;std::uint32_t fov;
+        while(std::cin>>clip.left>>clip.top>>clip.right>>clip.bottom>>fov>>position[0]>>position[1]>>position[2]>>angles[0]>>angles[1]>>angles[2]) {
+            const auto camera=dfre::make_model_camera(position,angles,clip,fov);
+            std::cout<<camera.projection.focal_length<<' '<<camera.projection.centre[0]<<' '<<camera.projection.centre[1]<<' '<<camera.projection.near_depth;
+            for(auto value:camera.matrix)std::cout<<' '<<value;
+            for(const auto& plane:camera.planes){for(auto value:plane.normal)std::cout<<' '<<value;std::cout<<' '<<plane.offset;}
+            std::cout<<'\n';
+        }
+        return std::cin.eof()?0:2;
+    }
     if(argc==2 && std::string(argv[1])=="local-lighting") {
         dfre::ModelMatrix matrix;dfre::ModelLighting lighting;std::int32_t scale;
         while(std::cin>>matrix[0]) {

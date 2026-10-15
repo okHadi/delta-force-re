@@ -1,5 +1,6 @@
 #include "dfre/renderer.hpp"
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 namespace dfre {
 namespace {
@@ -249,4 +250,26 @@ std::size_t draw_tiny_triangle32(const std::array<RasterVertex,3>& triangle,cons
     return writes;
 }
 
+
+ModelCameraFrame make_model_camera(const std::array<std::int32_t,3>& position,
+    const std::array<std::uint32_t,3>& angles,const RasterClip& clip,std::uint32_t horizontal_fov) {
+    if(horizontal_fov<1 || horizontal_fov>179 || clip.left<0 || clip.top<0 || clip.right<clip.left || clip.bottom<clip.top || clip.right>32767 || clip.bottom>32767)throw std::invalid_argument("model camera bounds or field of view are invalid");
+    const auto width=clip.right-clip.left+1,height=clip.bottom-clip.top+1;
+    const long double half_angle=static_cast<long double>((horizontal_fov+1)/2)*static_cast<long double>(0.01745329);
+    const auto focal=std::int32_t((static_cast<long double>(width)*0.5L)/std::tan(half_angle)+0.5L);
+    const auto horizontal_sine=std::int32_t(std::sin(half_angle)*4194304.0L),horizontal_cosine=std::int32_t(std::cos(half_angle)*4194304.0L);
+    const auto vertical_angle=std::atan2(static_cast<long double>((height+1)/2),static_cast<long double>(focal));
+    const auto vertical_sine=std::int32_t(std::sin(vertical_angle)*4194304.0L),vertical_cosine=std::int32_t(std::cos(vertical_angle)*4194304.0L);
+    ModelCameraFrame result;result.clip=clip;result.projection={focal,{clip.left+width/2,clip.top+height/2},4096};
+    result.planes={{{4194304,0,0},4096},{{horizontal_sine,-horizontal_cosine,0},0},{{horizontal_sine,horizontal_cosine,0},0},{{vertical_sine,0,vertical_cosine},0},{{vertical_sine,0,-vertical_cosine},0}};
+    auto translation=model_identity_matrix();for(std::size_t k=0;k<3;++k)translation[k*4+3]=negate(position[k]);result.matrix=translation;
+    for(std::size_t i=0;i<3;++i) {
+        const auto axis=2-i;const auto sc=fixed_sine_cosine(angles[i]);const auto cosine=sc[1],sine=negate(sc[0]);auto rotation=model_identity_matrix();
+        if(axis==0){rotation[5]=cosine;rotation[6]=negate(sine);rotation[9]=sine;rotation[10]=cosine;}
+        else if(axis==1){rotation[0]=cosine;rotation[2]=negate(sine);rotation[8]=sine;rotation[10]=cosine;}
+        else{rotation[0]=cosine;rotation[1]=negate(sine);rotation[4]=sine;rotation[5]=cosine;}
+        result.matrix=model_multiply_matrix(rotation,result.matrix);
+    }
+    return result;
+}
 }

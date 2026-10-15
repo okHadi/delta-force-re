@@ -70,7 +70,7 @@ def check(executable, probe, count,archive_path=None):
         if list(map(int,line.split()))!=expected:
             raise ValueError(f'triangle gradient/span mismatch at case {number}')
         total+=size
-    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),tiny32=check_tiny32(pe,probe,count),local_lighting=check_local_lighting(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
+    return dict(source_sha256=hashlib.sha256(source).hexdigest(),code_region='0x461000+0x2000',code_sha256=hashlib.sha256(code).hexdigest(),classification_cases=len(class_cases),gradient_span_cases=len(span_cases),spans=total,mismatches=0,functions=['0x462280','0x461690','0x461b10','0x461cd0','0x461e30'],textured32={mode:check_texture32(pe,probe,count,mode) for mode in ('uniform','varying_shade','cutout')},lighting=check_lighting(pe,probe,count,archive_path),clipping=check_clipping(pe,probe,count),tiny32=check_tiny32(pe,probe,count),local_lighting=check_local_lighting(pe,probe,count),camera=check_camera(pe,probe,count),scope='generated 16.16 triangles; ties, tiny triangles, clipping and both winding orders; gradient flags 0-7; 640x480 inclusive clip; every span field; textured32 has a separate result')
 
 
 def check_texture32(pe,probe,count,mode):
@@ -280,6 +280,39 @@ def check_local_lighting(pe,probe,count):
         if list(map(int,line.split()))!=expected:
             raise ValueError(f'local lighting mismatch at case {number}')
     return dict(cases=count,mismatches=0,functions=['0x46b140','0x45d090','0x45cfe0','0x45cf30'],code_sha256=hashlib.sha256(first+second).hexdigest(),scope='non-singular generated camera matrices; original nested fixed-point determinant and transpose reciprocal; light/view directions; wrapped signed strength scale; translation excluded from directions')
+
+
+def check_camera(pe,probe,count):
+    import unicorn
+    from unicorn.x86_const import UC_X86_REG_ESP,UC_X86_REG_EIP,UC_X86_REG_FPCW
+    machine=unicorn.Uc(unicorn.UC_ARCH_X86,unicorn.UC_MODE_32)
+    ranges=((0x44a000,4096),(0x45c000,0x2000),(0x477000,4096),(0x49b000,4096),(0x4cc000,0x2000),(0x4fb000,4096))
+    for address,size in (*ranges,(0xbd0000,0x4000),(0x2000000,0x10000),(0x6000000,4096)):
+        machine.mem_map(address,size)
+    for address,size in ranges:
+        machine.mem_write(address,pe.get_data(address-pe.OPTIONAL_HEADER.ImageBase,size))
+    machine.reg_write(UC_X86_REG_FPCW,0x037f)
+    def call(address,*args):
+        machine.mem_write(0x2000800,struct.pack('<'+'I'*(len(args)+1),0x6000000,*args));machine.reg_write(UC_X86_REG_ESP,0x2000800)
+        machine.emu_start(address,0x6000000,count=1000000)
+        if machine.reg_read(UC_X86_REG_EIP)!=0x6000000:
+            raise ValueError('original camera setup exceeded instruction limit')
+    call(0x477510);rng=random.Random(420);cases=[]
+    for test in range(count):
+        width=rng.choice([1,2,3,160,320,640,800,1024]);height=rng.choice([1,2,3,100,200,480,600,768]);left=rng.randrange(10);top=rng.randrange(10)
+        cases.append((left,top,left+width-1,top+height-1,test+1 if test<179 else rng.randrange(1,180),*[rng.randrange(-0x80000000,0x80000000) for _ in range(3)],*[rng.randrange(0x100000000) for _ in range(3)]))
+    text=''.join(' '.join(map(str,row))+'\n' for row in cases);native=subprocess.check_output([probe,'camera'],input=text.encode()).decode().splitlines()
+    if len(native)!=len(cases):
+        raise ValueError('native camera case count differs from input')
+    for number,(case,line) in enumerate(zip(cases,native)):
+        left,top,right,bottom,fov,*pose=case;raw=bytearray(80);struct.pack_into('<3i3I',raw,4,*pose)
+        struct.pack_into('<6I',raw,0x24,right+1,bottom+1,(right+1)*4,left,top,right);struct.pack_into('<I',raw,0x3c,bottom);struct.pack_into('<2I',raw,0x48,fov,32)
+        machine.mem_write(0x2001000,bytes(0x2000));machine.mem_write(0x2004000,bytes(raw));call(0x44a820,0x2001000,0x2004000)
+        projection=struct.unpack('<3i',machine.mem_read(0x2001054,12));matrix=struct.unpack('<12i',machine.mem_read(0x2002920,48));planes=struct.unpack('<20i',machine.mem_read(0x2002880,80))
+        expected=[*projection,planes[3],*matrix,*planes[:12],*planes[16:],*planes[12:16]]
+        if list(map(int,line.split()))!=expected:
+            raise ValueError(f'model camera mismatch at case {number}')
+    return dict(cases=count,fov_degrees=[min(row[4] for row in cases),max(row[4] for row in cases)],mismatches=0,function='0x44a820',code_region='0x44a000+0x1000',code_sha256=hashlib.sha256(pe.get_data(0x4a000,4096)).hexdigest(),scope='generated positions/full-turn angles; inclusive viewport and offsets; focal/centre/near; twelve camera matrix components; five planes in original dispatch order; native long-double camera math; original x87 control037f')
 
 
 def main():

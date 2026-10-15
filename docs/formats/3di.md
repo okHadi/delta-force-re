@@ -179,7 +179,7 @@ REA scanline Evidence: `ev_6321ef8512cf179f8fe85414996fd40e27d7c8fb0a4120f2b136a
 python tools/check_renderer_original.py /path/to/Df.exe --probe /path/to/renderer_probe
 ```
 
-This covers span setup and three pixel modes. Shade-table binding, model camera setup, blending, and other pixel modes need separate checks.
+This covers span setup and three pixel modes. Shade-table binding, the model mesh draw bridge, blending, and other pixel modes need separate checks.
 
 ## Normal lighting
 
@@ -212,3 +212,11 @@ The replay matches all 512,000 target colour/depth pairs from 1,000 cases: 148 o
 `localize_model_lighting()` implements original `0x46b140`, `0x45d090`, `0x45cfe0`, and `0x45cf30`. It transforms light/view directions through the original determinant-scaled transpose and scales the three light strengths. Matrix products retain the original nested shifts. Translation has no effect on directions. Singular and overflowing divisions raise an error.
 
 The replay matches 1,000 non-singular generated matrices and contexts, including signed strength wrap. All nine output fields match in every case. The renderer replay includes both checks and their code hashes.
+
+## Model camera
+
+`make_model_camera()` builds original `0x44a820` projection, ordered camera planes, and world-to-camera matrix. Position uses the original fixed units; the three angles use unsigned full-turn units. Horizontal field of view uses whole degrees from 1 through 179. The original half-angle rounds up to a whole degree and uses constant `0.01745329`. Near depth is 4096. Plane output follows the original dispatch order.
+
+The replay matches 1,000 cases with generated positions, full-turn angles, viewport sizes, and viewport offsets. It covers every field of view from 1 through 179. Focal length, centre, near depth, all 12 matrix components, and all 20 plane fields match. The check uses native long-double math and original x87 control word `0x037f`. Windows camera math needs the same probe replay before cross-platform equality is claimed.
+
+The original code-region SHA-256 is `2b60892158d2a8570175a9b6535ed1db16d8603ca191fbab50d1a09c9138f8b3`. Run the renderer replay command above. The renderer probe links both `src/models.cpp` and `src/renderer.cpp`.

@@ -62,5 +62,9 @@ int main() {
     const auto local_light=dfre::localize_model_lighting(camera_identity,lighting,32768);
     check(local_light.light_direction==lighting.light_direction && local_light.ambient==lighting.ambient/2 && local_light.diffuse==lighting.diffuse/2,"local light conversion changed");
     try{dfre::localize_model_lighting({},lighting);check(false,"singular light matrix accepted");}catch(const std::invalid_argument&){}
+    const auto model_camera=dfre::make_model_camera({0,0,0},{0,0,0},{0,0,639,479},90);
+    check(model_camera.projection.focal_length==320 && model_camera.projection.centre==std::array<std::int32_t,2>{320,240} && model_camera.projection.near_depth==4096,"camera projection changed");
+    check(model_camera.planes.size()==5 && model_camera.planes[0].offset==4096 && model_camera.planes[3].normal[2]>0 && model_camera.planes[4].normal[2]<0,"camera plane order changed");
+    try{dfre::make_model_camera({},{},{0,0,639,479},0);check(false,"zero camera field of view accepted");}catch(const std::invalid_argument&){}
     std::cout<<"raster classification tests passed\n";
 }
