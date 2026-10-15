@@ -164,3 +164,19 @@ python tools/model_report.py /path/to/Df.pff --archive --check-vertices /path/to
 ```
 
 These checks cover camera-space vertices and screen projection. Face clipping, lighting, texture sampling, and pixel output need their own checks.
+
+## Triangle spans and textured pixels
+
+`renderer.hpp` provides the original triangle sort, inclusive screen clip, fixed-point gradients, and scanline spans. Gradient flags select texture (1), depth (2), and shade (4). Each span carries its initial values and per-pixel changes. Set raster depth to camera depth shifted left by 6 with 32-bit wrap. Scale normalized 16.16 UV values by the material's texture-size bit counts before span generation.
+
+`draw_textured_span32()` implements original mode `0x14`: opaque indexed texture, uniform shade, and a strict unsigned 16-bit depth test. It wraps texture coordinates at each dimension. Each pixel pair shares one depth value. Supply 64 shade rows of 256 packed colours. Target, texture, table, and span bounds are checked.
+
+Instruction replay matches 10,000 classifications and all 133,840 spans from 1,000 triangles, including clipped, tiny, tied, and reversed cases. It also matches 1,000 textured spans with 16,386 span pixels. All 512,000 target colour and depth pairs match. Texture bit counts range from 0 to 8; UV and depth steps include signed wrap. The replay uses original `0x462280`, `0x461690`, `0x461b10`, `0x461cd0`, `0x461e30`, `0x468a6c`, and `0x468cda`. The report includes source and code-region hashes.
+
+REA scanline Evidence: `ev_6321ef8512cf179f8fe85414996fd40e27d7c8fb0a4120f2b136aec8d03da0ab`. Textured span Evidence: `ev_0e3c16aa98c3958487228952d0bacfa6e44b3dee2b3548083208d50c09e56d4c`. Setup `0x468a6c` uses direct Ghidra entry definition because REA could not define the entry.
+
+```sh
+python tools/check_renderer_original.py /path/to/Df.exe --probe /path/to/renderer_probe
+```
+
+This covers span setup and one pixel mode. Tiny-triangle pixels, shade-table creation, near-plane face clipping, lighting, blending, and other pixel modes need separate checks.
