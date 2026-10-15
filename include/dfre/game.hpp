@@ -8,6 +8,7 @@ namespace dfre {
 
 // Values identify the original state tables. Native code uses owned callbacks.
 enum class GameScreen : std::uint32_t {
+    game = 0x4cece0,
     new_soldier = 0x4cfbc0,
     main_menu = 0x4cf2ec,
     campaign = 0x4d0cd4,

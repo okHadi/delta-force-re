@@ -131,3 +131,5 @@ With `67F528 != 0`, `403D93–403DC4` adds terrain height `47DF40(x,y)` to each 
 World frame `404640` passes this pose to `44A820`, which builds the view matrix and clipping planes, then calls `485610`. Use the same camera pose for terrain and model rendering.
 
 Evidence files under `.local/reports/`: `startup-game-enter-ghidra.json`, `startup-game-actor-create.json`, `startup-game-player-instance-bind.json`, `startup-game-player-definition-init.json`, `startup-game-player-camera-state-init.json`, and `startup-game-camera-update.json`. All use original SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.
+
+The game Start action loads the selected BMS and 32-bit terrain, selects the original single-player start, and draws the initial terrain and cloud frame from its camera pose. The window keeps that frame while world simulation and model drawing are in development. Close the window to exit. Run `game_flow_probe GAME_FOLDER --start` to check soldier selection, campaign selection, briefing, mission entry, and separate save files.

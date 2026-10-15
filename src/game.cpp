@@ -4,6 +4,8 @@
 #include "dfre/campaign.hpp"
 #include "dfre/menu.hpp"
 #include "dfre/platform.hpp"
+#include "dfre/player.hpp"
+#include "dfre/renderer.hpp"
 #include "dfre/state_loop.hpp"
 #include "dfre/soldier_menu.hpp"
 
@@ -51,6 +53,35 @@ public:
                 if (options_.frame_limit && ++frames_ >= options_.frame_limit) close_ = true;
             };
         }
+        auto& world = states_[GameScreen::game];
+        world.enter = [this] {
+            if (!mission_selection_) throw std::runtime_error("Mission selection is missing");
+            const auto mission = load_mission(assets_, mission_selection_->filename);
+            world_ = std::make_unique<TerrainScene32>(prepare_terrain_scene32(
+                load_terrain_runtime(assets_, mission_selection_->filename, 32),
+                load_terrain_gamma(options_.game_folder / "INTRO.KDV")));
+            player_ = initial_player(mission, world_->terrain.geometry);
+            if (!player_) throw std::runtime_error("Mission has no single-player start");
+            const auto view = make_model_camera(player_->camera.position, player_->camera.angles, {0, 0, 639, 479}, 90);
+            VoxelCamera camera;
+            camera.position = player_->camera.position;
+            camera.yaw = player_->camera.angles[0];
+            camera.pitch = player_->camera.angles[1];
+            camera.focal_distance = view.projection.focal_length;
+            frame_ = render_terrain_frame32(*world_, camera).pixels;
+            screen_ = GameScreen::game;
+        };
+        world.update = [this] {
+            if (close_) return 1;
+            for (const auto& event : window_->poll())
+                if (event.kind == InputKind::quit) return 1;
+            return 0;
+        };
+        world.render = [this] {
+            window_->present(frame_);
+            if (options_.frame_limit && ++frames_ >= options_.frame_limit) close_ = true;
+        };
+        world.leave = [this] { world_.reset(); player_.reset(); };
         auto& end = states_[GameScreen::end];
         end.enter = [this] { screen_ = GameScreen::end; soldier_.profiles().save_all(); };
         end.update = [this] {
@@ -80,7 +111,8 @@ private:
 
     void campaign_result(const CampaignResult& result) {
         if (result.mission) mission_selection_ = result.mission;
-        const auto next = static_cast<GameScreen>(result.next_state);
+        // Original single-player PreMenu immediately requests Game (41D430).
+        const auto next = result.next_state == 0x4e6878 ? GameScreen::game : static_cast<GameScreen>(result.next_state);
         if (states_.find(next) != states_.end()) request(next);
         else std::clog << "Pending game state: 0x" << std::hex << result.next_state << std::dec << '\n';
     }
@@ -152,6 +184,8 @@ private:
     std::unique_ptr<CampaignMenu> campaign_;
     std::unique_ptr<MissionSetupMenu> setup_;
     std::optional<MissionSelection> mission_selection_;
+    std::unique_ptr<TerrainScene32> world_;
+    std::optional<InitialPlayer> player_;
     StateLoop loop_;
     std::map<GameScreen, GameState> states_;
     GameScreen screen_ = GameScreen::main_menu;
