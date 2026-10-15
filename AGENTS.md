@@ -3,6 +3,7 @@
 - Target Delta Force (1998) on Windows.
 - Use REA for executable analysis.
 - Keep original game files unchanged.
+- Keep game audio muted during test runs. Keep system volume unchanged.
 - Store game files, extracted assets, and full analysis output in `local/` or `.local/`.
 - Link findings to the executable hash and code addresses.
 - Mark inferred behavior and runtime checks clearly.

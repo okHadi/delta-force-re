@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
+#include <utility>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -48,9 +50,11 @@ public:
     explicit RtxtTable(const AssetBytes& data);
     std::string get(std::string_view group, std::string_view key) const;
     std::string get(std::string_view key) const;
+    std::optional<std::pair<std::uint16_t,std::uint16_t>> coordinates(std::string_view group, std::string_view key) const;
     std::size_t size() const noexcept { return count_; }
 private:
     std::unordered_map<std::string, std::unordered_map<std::string, std::string>> groups_;
+    std::unordered_map<std::string, std::unordered_map<std::string, std::pair<std::uint16_t,std::uint16_t>>> coordinates_;
     std::vector<std::string> order_;
     std::size_t count_ = 0;
 };

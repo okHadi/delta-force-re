@@ -22,6 +22,12 @@ dfre::AssetBytes rtxt() {
 void test_rtxt() {
     auto data=rtxt();dfre::RtxtTable table(data);require(table.size()==1,"RTXT count");require(table.get("group","NAME")=="Hello","RTXT group/key");
     require(table.get("missing").empty(),"RTXT missing key");
+    auto coordinates=rtxt();coordinates.insert(coordinates.begin()+32,16,0);put(coordinates,4,54);put(coordinates,12,2);
+    put(coordinates,20,123u|(456u<<16));put(coordinates,36,999u|(999u<<16));put(coordinates,62,2);
+    const auto duplicate=bytes("Name");coordinates.insert(coordinates.end(),duplicate.begin(),duplicate.end());coordinates.push_back(0);put(coordinates,8,coordinates.size()-58);
+    const dfre::RtxtTable links(coordinates);const auto point=links.coordinates("GROUP","name");
+    require(point && point->first==123 && point->second==456,"RTXT first duplicate map coordinates");
+    require(!links.coordinates("missing","name") && !links.coordinates("group","missing"),"Missing RTXT coordinates");
     put(data,16,1000);bool refused=false;try{dfre::RtxtTable bad(data);}catch(const dfre::AssetError&){refused=true;}require(refused,"RTXT bad offset");
 }
 void test_font() {

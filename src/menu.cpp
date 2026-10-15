@@ -173,6 +173,8 @@ RtxtTable::RtxtTable(const AssetBytes& data) {
             const auto offset=u32(data,16+index*16);
             if (offset>=metadata-text_base) throw AssetError("RTXT text offset outside text block");
             table.emplace(lower(key),cstring(data,text_base+offset,metadata));
+            const auto packed=u32(data,20+index*16);
+            coordinates_[group_key].emplace(lower(key),std::make_pair(std::uint16_t(packed),std::uint16_t(packed>>16)));
             ++count_;
         }
     }
@@ -181,6 +183,11 @@ RtxtTable::RtxtTable(const AssetBytes& data) {
 std::string RtxtTable::get(std::string_view group,std::string_view key) const {
     const auto found=groups_.find(lower(group)); if(found==groups_.end()) return {};
     const auto value=found->second.find(lower(key)); return value==found->second.end()?std::string{}:value->second;
+}
+std::optional<std::pair<std::uint16_t,std::uint16_t>> RtxtTable::coordinates(std::string_view group,std::string_view key) const {
+    const auto found=coordinates_.find(lower(group));if(found==coordinates_.end())return {};
+    const auto value=found->second.find(lower(key));if(value==found->second.end())return {};
+    return value->second;
 }
 std::string RtxtTable::get(std::string_view key) const {
     for(const auto& group:order_) { auto value=get(group,key); if(!value.empty()) return value; }
