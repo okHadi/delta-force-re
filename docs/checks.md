@@ -2,7 +2,7 @@
 
 Checked on 2026-10-15 against the archive hashes in [PFF notes](formats/pff.md).
 
-- 20 Python tests and six C++ tests pass locally.
+- 20 Python tests and eight C++ tests pass locally.
 - Both PFF archive tables validate: 1,293 live members.
 - All 62 BMS missions resolve to terrain maps; 95 unique map members decode.
 - 445 PCX pixel arrays match Pillow 12.3.0 exactly.
@@ -17,6 +17,9 @@ Checked on 2026-10-15 against the archive hashes in [PFF notes](formats/pff.md).
 - Asset and model checks pass with AddressSanitizer and UndefinedBehaviorSanitizer.
 - All 62 C++ BMS decodes preserve the original bytes: 25,492 objects, 2,683 events, 5,002 triggers, and 4,516 actions.
 - Model origin transforms match the original x86 loader for 192 LODs and 53,212 vertices.
+- All 23 menus render from original files. Font scanning matches 1,280 original x86 glyph records.
+- The rebuilt main menu matches all original frame pixels outside the cursor region.
+- Windows x64 cross-build and all eight Windows test executables pass through Wine on this Mac.
 - REA/Ghidra 12.1.4 decompiles the original executable on this Mac.
 - The original game runs under Wine 11.0 on this Intel Mac. Its 640×480 display buffer shows Choose Soldier. Full rebuilt game checks are pending.
 

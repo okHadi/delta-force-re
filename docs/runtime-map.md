@@ -80,6 +80,8 @@ Each row reserves 16 glyph slots. Palette index 1 in the first column ends a ban
 
 Glyph entry: x:u16, width:u16, height:u8, valid:u8, y:u16. `44C190` draws nonzero pixels in the requested color and advances by width+1. Font flag 1 selects palette-based intensity blending. `411A30` handles inline `{C:...}` color names before glyph drawing.
 
+The blend at `44C3AC` uses packed dword addition; preserve carries between adjacent 16-bit color lanes. Hotkey text functions `410420/410510/410620` draw an underscore glyph at the marked character's x position and y+1.
+
 Evidence: `.local/reports/startup-font-{load,file-load,glyph-table,glyph-scan-real,glyph-row-scan,glyph-draw,text-draw}.json`.
 
 ## Mission and world frame
@@ -99,3 +101,11 @@ WinMain `490E60` and window procedure `48FEC0` use four stack arguments and `RET
 `401050` makes its code range writable with VirtualProtect(..., PAGE_EXECUTE_READWRITE). The reason and later code writes remain unverified. Indirect state, menu, and DirectDraw calls need explicit targets for a full rebuild. No complete whole-program lifting result is established.
 
 REA/Ghidra supplied the main dossiers. Callback bodies and window procedure in `startup-callbacks-ghidra.json` use direct Ghidra 12.1.4 after defining function entries from the original state tables. The original file is unchanged. Decompiled code is an analysis result, not original source; assembly is retained for checks.
+
+## Native menu checks
+
+`MenuRuntime` reads original DF.MNU, RTXT, PCX, and font assets. It returns original handler names and action numbers for the game controller. `draw_actions()` supplies owner-draw callbacks; the controller supplies their game data and behavior.
+
+`menu_probe all GAME_FOLDER` draws all 23 static menu layouts. The checked files contain 488 button definitions and 609 RTXT records. `check_font.py GAME_EXE MENU_PROBE` compares all 1,280 glyph entries from five unique font images with the original x86 scanner; all match, including baselines and counts.
+
+The captured original Main Menu and rebuilt menu match at every pixel outside the original cursor bounds `(629,245)–(640,266)`. The 56 remaining differing pixels are in those bounds. Evidence: `startup-main-pixels-check.json`, `startup-font-differential.json`, `startup-menu-all.json` in `.local/reports/`. Other menu screens require their game-specific callbacks and separate frame checks.

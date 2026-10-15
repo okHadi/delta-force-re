@@ -18,6 +18,8 @@ cmake --build build --config Release
 ctest --test-dir build -C Release --output-on-failure
 ```
 
+For Windows builds on this Mac, use [Windows build](docs/windows-build.md).
+
 ## Analysis
 
 ```sh

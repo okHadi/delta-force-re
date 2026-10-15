@@ -1,0 +1,36 @@
+# Windows build on Intel Mac
+
+Install local tools:
+
+```sh
+scripts/setup-runtime-tools.sh
+```
+
+Build Windows x64 code:
+
+```sh
+cmake -S . -B .local/build/windows -DCMAKE_TOOLCHAIN_FILE=cmake/windows-zig.cmake -DCMAKE_BUILD_TYPE=Release
+cmake --build .local/build/windows -j 4
+```
+
+Run Windows test programs through `scripts/wine`. Wine keeps its settings in `.local/wine-prefix/`.
+
+## Original reference
+
+Run a copy of the supplied game from `.local/reference-game/`. Keep the source files unchanged. Use `scripts/wine` with `Df.exe` from the copied folder.
+
+`reference_capture OUTPUT.ppm` reads the original process's 32-bit display buffer. It checks the window version and dispatcher bytes. Use a new output path. The tool reads process memory and writes an image; it keeps game memory unchanged.
+
+Target executable SHA-256: `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.
+
+## Window backend
+
+Windows uses Win32 input and a 32-bit DIB display. The Mac development window uses SDL2:
+
+```sh
+cmake -S . -B build -DDFRE_BUILD_WINDOW=ON
+cmake --build build -j 4
+build/window_probe "/path/to/Delta Force" DFSPLASH.PCX
+```
+
+`window_probe` checks image display. Game states use the same window interface.
