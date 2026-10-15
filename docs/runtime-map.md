@@ -115,3 +115,19 @@ The captured original Main Menu and rebuilt menu match at every pixel outside th
 `MissionAssetCache` loads BMS objects and their item definitions. It caches model graphics, husks, prepared character data, and decoded animation definitions. Keep one binding per BMS object in the original group order. Apply the v5 model origin conversion and CHR preparation once per cached asset.
 
 Run `resources_probe GAME_FOLDER [MISSION.BMS]` to check resource loading. The supplied 62 missions load 25,492 object bindings, including 15,091 model bindings, 205 unique models, one character file, and nine animation definition files. Resource loading prepares data for the world renderer; gameplay callbacks use that data in later steps.
+
+## Single-player start and camera
+
+`415780` sets single-player mission flags, weapon IDs, and BMS filename, then requests Pre Menu `4E6878`. Pre Menu enter `41D430` requests Game `4CECE0` when `67F520 == 0`.
+
+Game enter `403A60` loads the BMS through `449C70`, then prepares object resources (`402EC0`), terrain (`47B590`), model textures (`402930/402940/402B20`), and runtime actors. The full callback has explicit function boundaries in `startup-game-enter-ghidra.json`.
+
+With `67F528 != 0`, `403D93–403DC4` adds terrain height `47DF40(x,y)` to each runtime marker Z. Keep this step before actor creation. `440640` creates active player actors through `45D520`; that factory sets actor flags at `6C` to 3. `43F610` copies six position and angle words from the selected marker to actor `24–38`. Mode 0 selects type 6001, with slot index modulo the count at BMS header `EC`; slot 0 uses its first matching marker.
+
+`4829F0` selects the local actor from the runtime people array: flags at `6C` include mask `1`, and object ID at `08` equals `50133C`. The selected actor pointer is stored at `C23820`.
+
+`42AC10(actor,0)` selects the first-person camera. `42A6E0` copies actor `24–38` into camera `6BA3F4–6BA408`. If actor definition `28` equals 3, add eye height `C23A18` to Z; `4829F0` initializes this height to `B333`. Other definition classes increment the Z high word by 1. Original x86 replay matches 2,000 generated poses, including integer wrap (`startup-camera-check.json`).
+
+World frame `404640` passes this pose to `44A820`, which builds the view matrix and clipping planes, then calls `485610`. Use the same camera pose for terrain and model rendering.
+
+Evidence files under `.local/reports/`: `startup-game-enter-ghidra.json`, `startup-game-actor-create.json`, `startup-game-player-instance-bind.json`, `startup-game-player-definition-init.json`, `startup-game-player-camera-state-init.json`, and `startup-game-camera-update.json`. All use original SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.
