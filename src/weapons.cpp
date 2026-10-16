@@ -1,6 +1,38 @@
 #include "dfre/weapons.hpp"
+#include <stdexcept>
 namespace dfre {
 namespace {
+// Original 4F9704, 28 rows of 0x14 bytes, words +4/+8/+C.
+constexpr std::array<std::array<std::uint8_t,3>,kWeaponLoadoutCount> kLoadouts{{
+    {{0,0,0}},
+    {{0,0,0}},
+    {{1,0,0}},
+    {{2,0,0}},
+    {{3,0,0}},
+    {{4,0,0}},
+    {{5,0,0}},
+    {{8,9,0}},
+    {{6,7,0}},
+    {{6,10,7}},
+    {{8,11,9}},
+    {{12,13,0}},
+    {{15,0,0}},
+    {{16,0,0}},
+    {{17,18,19}},
+    {{20,21,22}},
+    {{23,24,0}},
+    {{25,0,0}},
+    {{26,0,0}},
+    {{27,0,0}},
+    {{28,0,0}},
+    {{29,30,0}},
+    {{31,0,0}},
+    {{32,0,0}},
+    {{37,38,30}},
+    {{0,0,0}},
+    {{33,0,0}},
+    {{34,0,0}},
+}};
 constexpr std::array<WeaponDefinition, kWeaponCount> kWeapons{{
     {0x0000, 0x0000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0x00000000},
     {0x0fa5, 0x0fa4, 6, 2, 0, 41, -65, -148, 0, 0, 0, 0, 70, 0, 0x00000042},
@@ -78,6 +110,18 @@ constexpr std::array<WeaponClassDefinition, kWeaponClassCount> kClasses{{
 
 const std::array<WeaponDefinition, kWeaponCount>& weapon_definitions() noexcept { return kWeapons; }
 const std::array<WeaponClassDefinition, kWeaponClassCount>& weapon_classes() noexcept { return kClasses; }
+
+std::array<std::uint8_t,kWeaponSlotCount> weapon_loadout_slots(const std::array<std::uint32_t,3>& ids) {
+    for(auto id:ids)if(id>=kLoadouts.size())throw std::out_of_range("weapon loadout id exceeds the recipe table");
+    const auto& sidearm=kLoadouts[ids[0]];
+    const auto& primary=kLoadouts[ids[1]];
+    const auto& secondary=kLoadouts[ids[2]];
+    return {27,1,sidearm[0],primary[0],primary[1],primary[2],secondary[0],secondary[1],secondary[2],33};
+}
+void WeaponState::loadout(const std::array<std::uint32_t,3>& ids) {
+    set_slot_map(weapon_loadout_slots(ids));
+    resupply(ids[2]==1); // Original 484914 compares C23A4C with 1.
+}
 
 WeaponState::WeaponState() {
     slot_map_ = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};

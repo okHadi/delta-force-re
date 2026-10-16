@@ -112,7 +112,14 @@ int main(int argc, char** argv) {
         std::istringstream words(line);
         std::string command;
         if (!(words >> command) || command.empty() || command[0] == '#') continue;
-        if (command == "slot_map") {
+        if (command == "loadout") {
+            std::array<std::uint32_t,3> ids{};
+            for(auto& id:ids)if(!(words>>id))return 2;
+            state.loadout(ids);
+            std::cout<<"{\"map\":[";
+            for(std::size_t i=0;i<state.slot_map().size();++i)std::cout<<(i?",":"")<<unsigned(state.slot_map()[i]);
+            std::cout<<"],";arrays(state,std::cout);std::cout<<"}\n";
+        } else if (command == "slot_map") {
             std::array<std::uint8_t, dfre::kWeaponSlotCount> map{};
             int value = 0;
             std::size_t at = 0;

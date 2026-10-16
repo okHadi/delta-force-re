@@ -79,3 +79,13 @@ event order after every step (4521 lines, all compared equal).
 Action id to control mapping (`477D40`), the loadout table behind `AD3ED4`
 (`484970`), and the recoil/sway values owned by the camera side stay
 documented in `.local/opencode/weapons-needs.md`.
+
+## Mission loadout
+
+Call `WeaponState::loadout` with sidearm, primary, and secondary recipe ids. It builds the ten slots from the 28-row table at `4F9704` and applies `4848C0` resupply. Secondary id 1 doubles primary reserve. Select slot 3 after mission initialization, as `4829F0` does.
+
+```sh
+python3 tools/check_weapon_loadout_original.py Df.exe WEAPONS_PROBE --report .local/loadout.json
+```
+
+The replay checks all 21,952 recipe-id triples, the ten slot values, and all 84 ammo-state words after each loadout change.

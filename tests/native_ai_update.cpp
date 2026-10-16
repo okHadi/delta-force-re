@@ -337,6 +337,46 @@ int main() {
                   "Trigger tick marks changed");
         }
 
+        // Runtime calls can replace vector storage while actor slots stay fixed.
+        {
+            dfre::AiActorTables tables;
+            auto actor=make_actor(1,7);actor.field_18=5;actor.field_78=7;actor.field_110=123;
+            tables.groups[3].push_back(actor);
+            dfre::AiUpdateState state;
+            dfre::AiTickHooks hooks;
+            unsigned actions=0;
+            hooks.on_call=[&](const dfre::AiTickCall& call) {
+                if(call.kind!=dfre::AiTickCall::Kind::per_actor_update)return;
+                auto replacement=tables.groups[3];replacement.push_back({});
+                tables.groups[3].swap(replacement);
+                tables.groups[3][0].field_fc=0;
+            };
+            hooks.on_action=[&](const dfre::AiActorAction& action) {
+                check(action.target==123 && tables.groups[3][0].field_fc==0,
+                    "AI callback used state from before the actor update");
+                tables.groups[3][0].field_fc=13;tables.groups[3][0].field_78=4;++actions;
+            };
+            dfre::tick_ai(tables,state,definitions,no_bounds,2,hooks);
+            check(actions==1 && tables.groups[3][0].field_fc==12 && tables.groups[3][0].field_78==3,
+                "AI countdown ran before its runtime callback");
+        }
+        {
+            dfre::AiActorTables tables;
+            auto actor=make_actor(1,0);actor.field_110=123;tables.groups[0].push_back(actor);
+            dfre::AiUpdateState state;
+            dfre::AiTickHooks hooks;
+            std::vector<unsigned> calls;
+            hooks.on_action=[&](const dfre::AiActorAction& action) {
+                calls.push_back(action.target);
+                if(action.kind==dfre::AiActorActionKind::update) {
+                    tables.groups[0][0].field_10c=456;tables.groups[0][0].field_fc=11;
+                } else tables.groups[0][0].field_fc+=7;
+            };
+            dfre::tick_ai(tables,state,definitions,no_bounds,2,hooks);
+            check(calls==std::vector<unsigned>{123,456} && tables.groups[0][0].field_fc==17,
+                "AI secondary callback used state from before the primary callback");
+        }
+
         std::cout << "native_ai_update checks passed\n";
         return 0;
     } catch (const std::exception& error) {

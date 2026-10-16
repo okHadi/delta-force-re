@@ -77,6 +77,14 @@ struct AiTickReport {
     std::vector<std::uint32_t> profiler_marks;  // 0x456E30 arguments in order
 };
 
+// Run each native call at its original point, before later actor writes.
+// Callers keep actor slots stable; callbacks can change records or add slots.
+struct AiTickHooks {
+    std::function<void(const AiTickCall&)> on_call;
+    std::function<void(const AiActorAction&)> on_action;
+    std::function<void(std::uint32_t)> on_mark;
+};
+
 // Original 0x487C50 for one actor: clears +0x108, stores the shared-list start
 // at +0x104, then for definition types 1, 3, and 6 appends in-range records of
 // group 1 and then group 0 to the shared list (cap 2000).
@@ -95,5 +103,10 @@ void rebuild_target_lists(AiActorTables& tables, AiUpdateState& state,
 AiTickReport tick_ai(AiActorTables& tables, AiUpdateState& state,
                      const AiItemDefinitionTable& definitions,
                      const AiBoundsSource& bounds, std::uint32_t tick);
+
+AiTickReport tick_ai(AiActorTables& tables, AiUpdateState& state,
+                     const AiItemDefinitionTable& definitions,
+                     const AiBoundsSource& bounds, std::uint32_t tick,
+                     const AiTickHooks& hooks);
 
 } // namespace dfre

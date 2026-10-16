@@ -8,6 +8,7 @@
 #include "dfre/renderer.hpp"
 #include "dfre/resources.hpp"
 #include "dfre/world_runtime.hpp"
+#include "dfre/weapons.hpp"
 #include "dfre/scene_models.hpp"
 #include "dfre/state_loop.hpp"
 #include "dfre/soldier_menu.hpp"
@@ -77,6 +78,15 @@ public:
             config.player_name = profile.name();
             config.player_face_id = profile.portrait();
             config.campaign_text_file = mission_selection_->text_file;
+            const auto profile_word = [&](std::size_t offset) {
+                std::uint32_t value;
+                std::memcpy(&value,profile.raw().data()+offset,sizeof(value));
+                return value;
+            };
+            weapons_ = WeaponState{};
+            weapons_.loadout({profile_word(0x680),profile_word(0x684),profile_word(0x688)});
+            weapons_.select_slot(3); // Original 4829F0 calls 484970, then 483DD0(3).
+            config.weapon_slot_value = weapons_.current_weapon();
             std::optional<RtxtTable> names;
             if (!config.campaign_text_file.empty() && mission_asset_present(assets_, config.campaign_text_file))
                 names.emplace(assets_.read(config.campaign_text_file).bytes);
@@ -233,6 +243,7 @@ private:
     std::optional<MissionRuntimeResources> mission_resources_;
     std::unique_ptr<MissionRuntimeState> mission_runtime_;
     std::optional<InitialPlayer> player_;
+    WeaponState weapons_;
     StateLoop loop_;
     std::map<GameScreen, GameState> states_;
     GameScreen screen_ = GameScreen::main_menu;

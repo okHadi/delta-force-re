@@ -91,7 +91,25 @@ void rebuild_target_lists(AiActorTables& tables, AiUpdateState& state,
 AiTickReport tick_ai(AiActorTables& tables, AiUpdateState& state,
                      const AiItemDefinitionTable& definitions,
                      const AiBoundsSource& bounds, std::uint32_t tick) {
+    return tick_ai(tables,state,definitions,bounds,tick,AiTickHooks{});
+}
+
+AiTickReport tick_ai(AiActorTables& tables, AiUpdateState& state,
+                     const AiItemDefinitionTable& definitions,
+                     const AiBoundsSource& bounds, std::uint32_t tick, const AiTickHooks& hooks) {
     AiTickReport report;
+    const auto emit_call = [&](AiTickCall call) {
+        report.calls.push_back(call);
+        if(hooks.on_call)hooks.on_call(call);
+    };
+    const auto emit_action = [&](AiActorAction action) {
+        report.actions.push_back(action);
+        if(hooks.on_action)hooks.on_action(action);
+    };
+    const auto emit_mark = [&](std::uint32_t mark) {
+        report.profiler_marks.push_back(mark);
+        if(hooks.on_mark)hooks.on_mark(mark);
+    };
     if (state.call_counter < 0x40) {
         state.call_counter += 1;
     } else {
@@ -100,48 +118,46 @@ AiTickReport tick_ai(AiActorTables& tables, AiUpdateState& state,
     if (state.paused) return report;
 
     if ((tick & 1) != 0) {
-        report.calls.push_back({AiTickCall::Kind::local_player_control, {}});
-        report.calls.push_back({AiTickCall::Kind::fixed_0045e050, {}});
+        emit_call({AiTickCall::Kind::local_player_control, {}});
+        emit_call({AiTickCall::Kind::fixed_0045e050, {}});
     }
 
     if (state.demo) {
         if (!state.local_actor || *state.local_actor >= tables.groups[3].size())
             throw AiError("AI demo update needs the local group 3 actor");
-        AiActorState& actor = tables.groups[3][*state.local_actor];
-        report.calls.push_back({AiTickCall::Kind::per_actor_update, {3, *state.local_actor}});
-        if (static_cast<std::int32_t>(actor.field_fc) > 0) {
-            actor.field_fc -= 1;
+        const auto local = *state.local_actor;
+        emit_call({AiTickCall::Kind::per_actor_update, {3, *state.local_actor}});
+        if (static_cast<std::int32_t>(tables.groups[3][local].field_fc) > 0) {
+            tables.groups[3][local].field_fc -= 1;
             return report;
         }
-        report.actions.push_back(
-            {AiActorActionKind::update, {3, *state.local_actor}, actor.field_110});
-        actor.field_fc -= 1;
+        emit_action(
+            {AiActorActionKind::update, {3, *state.local_actor}, tables.groups[3][local].field_110});
+        tables.groups[3][local].field_fc -= 1;
         return report;
     }
 
-    report.profiler_marks.push_back(0xB);
+    emit_mark(0xB);
     for (std::size_t index = 0; index < tables.groups[3].size(); ++index) {
-        AiActorState& actor = tables.groups[3][index];
-        if (actor.field_18 == 0) continue;
-        report.calls.push_back({AiTickCall::Kind::per_actor_update, {3, index}});
-        if (static_cast<std::int32_t>(actor.field_fc) < 1) {
-            report.profiler_marks.push_back(0xC);
-            report.actions.push_back({AiActorActionKind::update, {3, index}, actor.field_110});
-            report.profiler_marks.push_back(0xB);
+        if (tables.groups[3][index].field_18 == 0) continue;
+        emit_call({AiTickCall::Kind::per_actor_update, {3, index}});
+        if (static_cast<std::int32_t>(tables.groups[3][index].field_fc) < 1) {
+            emit_mark(0xC);
+            emit_action({AiActorActionKind::update, {3, index}, tables.groups[3][index].field_110});
+            emit_mark(0xB);
         }
-        actor.field_fc -= 1;
-        if (actor.field_78 != 0) actor.field_78 -= 1;
+        tables.groups[3][index].field_fc -= 1;
+        if (tables.groups[3][index].field_78 != 0) tables.groups[3][index].field_78 -= 1;
     }
 
-    report.profiler_marks.push_back(9);
+    emit_mark(9);
     for (std::size_t index = 0; index < tables.groups[0].size(); ++index) {
-        AiActorState& actor = tables.groups[0][index];
-        if (actor.definition_index == 0) continue;
-        if (static_cast<std::int32_t>(actor.field_fc) < 1)
-            report.actions.push_back({AiActorActionKind::update, {0, index}, actor.field_110});
-        if (actor.field_10c != 0 && actor.field_10c != kAiDefaultCallback)
-            report.actions.push_back({AiActorActionKind::secondary, {0, index}, actor.field_10c});
-        actor.field_fc -= 1;
+        if (tables.groups[0][index].definition_index == 0) continue;
+        if (static_cast<std::int32_t>(tables.groups[0][index].field_fc) < 1)
+            emit_action({AiActorActionKind::update, {0, index}, tables.groups[0][index].field_110});
+        if (tables.groups[0][index].field_10c != 0 && tables.groups[0][index].field_10c != kAiDefaultCallback)
+            emit_action({AiActorActionKind::secondary, {0, index}, tables.groups[0][index].field_10c});
+        tables.groups[0][index].field_fc -= 1;
     }
 
     for (std::size_t index = 0; index < tables.extra.size() && index < 0x400; ++index) {
@@ -154,20 +170,20 @@ AiTickReport tick_ai(AiActorTables& tables, AiUpdateState& state,
             actor = AiActorState{};
         }
         if (actor.field_10c != 0 && actor.field_10c != kAiDefaultCallback)
-            report.actions.push_back(
+            emit_action(
                 {AiActorActionKind::secondary, {kAiExtraTableGroup, index}, actor.field_10c});
     }
 
-    report.profiler_marks.push_back(10);
-    report.calls.push_back({AiTickCall::Kind::fixed_00464eb0, {}});
-    report.calls.push_back({AiTickCall::Kind::fixed_00465bd0, {}});
-    report.profiler_marks.push_back(9);
+    emit_mark(10);
+    emit_call({AiTickCall::Kind::fixed_00464eb0, {}});
+    emit_call({AiTickCall::Kind::fixed_00465bd0, {}});
+    emit_mark(9);
 
     for (std::size_t index = tick & 0x1F; index < tables.groups[1].size(); index += 0x20) {
         AiActorState& actor = tables.groups[1][index];
         if (actor.definition_index == 0) continue;
         if (static_cast<std::int32_t>(actor.field_fc) < 1) {
-            report.actions.push_back({AiActorActionKind::update, {1, index}, actor.field_110});
+            emit_action({AiActorActionKind::update, {1, index}, actor.field_110});
         } else {
             actor.field_fc -= 0x20;
         }
@@ -176,7 +192,7 @@ AiTickReport tick_ai(AiActorTables& tables, AiUpdateState& state,
         AiActorState& actor = tables.groups[2][index];
         if (actor.definition_index == 0) continue;
         if (static_cast<std::int32_t>(actor.field_fc) < 1) {
-            report.actions.push_back({AiActorActionKind::update, {2, index}, actor.field_110});
+            emit_action({AiActorActionKind::update, {2, index}, actor.field_110});
         } else {
             actor.field_fc -= 0x40;
         }

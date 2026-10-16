@@ -47,6 +47,10 @@ struct WeaponClassDefinition {       // 0x4F9154 record
 constexpr std::size_t kWeaponCount = 39;
 constexpr std::size_t kWeaponClassCount = 28;
 constexpr int kWeaponSlotCount = 10;
+constexpr std::size_t kWeaponLoadoutCount = 28;
+// Original 484970: sidearm, primary, secondary recipe ids.
+std::array<std::uint8_t,kWeaponSlotCount> weapon_loadout_slots(
+    const std::array<std::uint32_t,3>& ids);
 constexpr std::int32_t kReloadTicks = 120; // 4832F0 sets 0x78
 
 const std::array<WeaponDefinition, kWeaponCount>& weapon_definitions() noexcept;
@@ -84,6 +88,7 @@ public:
     void set_unlimited_ammo(bool enabled) noexcept { unlimited_ammo_ = enabled; }
     bool unlimited_ammo() const noexcept { return unlimited_ammo_; }
 
+    void loadout(const std::array<std::uint32_t,3>& ids); // 484970
     void resupply(bool double_primary_slots); // 4848C0
     bool select_slot(int slot);               // 483DD0
     bool cycle_slot(int direction);           // 484B70

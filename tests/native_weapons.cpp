@@ -26,6 +26,21 @@ int main() { try {
     require(weapons[12].weapon_class == 14 && (weapons[12].flags & 0x20) != 0, "M249 auto flag");
     require(classes[7].magazine_size == 30 && classes[14].magazine_size == 200, "magazine sizes");
 
+    {
+        dfre::WeaponState selected;
+        selected.loadout({6,9,21});
+        require(selected.slot_map()==std::array<std::uint8_t,10>{27,1,5,6,10,7,29,30,0,33},
+            "loadout recipe slots");
+        selected.select_slot(3);
+        require(selected.current_weapon()==6,"loadout selected weapon");
+        selected.loadout({6,9,1});
+        require(selected.reserve(7)==classes[7].magazine_count*2-1,"ammo box doubles primary reserve");
+        selected.loadout({6,9,2});
+        require(selected.reserve(7)==classes[7].magazine_count-1,"secondary id must equal one to double reserve");
+        try { selected.loadout({6,28,1});require(false,"invalid loadout id accepted"); }
+        catch(const std::out_of_range&) {}
+    }
+
     // 4848C0 resupply: reserve = spare magazines - 1, magazine = size, pending = 1.
     auto state = make(kMainMap);
     require(state.magazine(7) == 30 && state.reserve(7) == 11 && state.pending(7) == 1, "M4 resupply");

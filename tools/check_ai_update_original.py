@@ -50,6 +50,7 @@ p.add_argument("game", type=Path)
 p.add_argument("probe", type=Path)
 p.add_argument("--report", type=Path)
 p.add_argument("--scale", type=int, default=1, help="multiply generated case counts")
+p.add_argument("--mutating-callbacks", action="store_true")
 args = p.parse_args()
 
 raw = (args.game / "Df.exe").read_bytes()
@@ -445,7 +446,7 @@ tick_cases.append((TICK_DEFS,
                     [(1, 0, UPDATE_KEY, 0, 0, 0)], [(1, 0, UPDATE_KEY, 0, 0, 0)], []],
                    [(1, 4, UPDATE_KEY, SECONDARY_KEY, 0, 0)], 5, 0, 0, -1, 63))
 
-native = probe("tick", [tick_row(*case) for case in tick_cases])
+native = probe("tick-hooks" if args.mutating_callbacks else "tick", [tick_row(*case) for case in tick_cases])
 mismatch = 0
 samples = []
 for index, (case, line) in enumerate(zip(tick_cases, native)):
@@ -468,14 +469,28 @@ for index, (case, line) in enumerate(zip(tick_cases, native)):
         put(base + 0x04, DEF_TABLE + record[0] * 0x13C)
         put(base + 0xFC, record[1])
         put(base + 0x10C, record[3])
+        put(base + 0x110, record[2])
+        put(base + 0x18, record[4])
+        put(base + 0x78, record[5])
     put(LOCAL, TABLES[3][0] + local * ACTOR_STRIDE if local >= 0 else 0)
 
     events = []
     marks = []
+    live_trace=[]
+    def live_call(kind, group=0, slot=0):
+        if not args.mutating_callbacks:return
+        live_trace.append(f'c,{kind},{group},{slot}')
+        if kind==0:put(TABLES[group][0]+slot*ACTOR_STRIDE+0xfc,(slot+tick)%5)
+        if kind==1 and groups[3]:put(TABLES[3][0]+0xfc,0)
+        if kind==2 and groups[0]:put(TABLES[0][0]+0xfc,0)
+        if kind==3 and (tick&31)<len(groups[1]):put(TABLES[1][0]+(tick&31)*ACTOR_STRIDE+0xfc,0)
+        if kind==4 and (tick&63)<len(groups[2]):put(TABLES[2][0]+(tick&63)*ACTOR_STRIDE+0xfc,0)
+
 
     def hook_per_actor(machine, at, size, user):
         sp = u.reg_read(UC_X86_REG_ESP)
         events.append(("per_update", normalize_pointer(word(sp + 8)), word(sp + 4), word(sp + 12)))
+        live_call(0,*normalize_pointer(word(sp+8)))
         u.reg_write(UC_X86_REG_ESP, sp + 4)
         u.reg_write(UC_X86_REG_EIP, word(sp))
 
@@ -483,6 +498,16 @@ for index, (case, line) in enumerate(zip(tick_cases, native)):
         def callback(machine, at, size, user):
             sp = u.reg_read(UC_X86_REG_ESP)
             events.append((kind, normalize_pointer(word(sp + 4)), at))
+            if args.mutating_callbacks:
+                actor=word(sp+4);group,slot=normalize_pointer(actor)
+                action=0 if kind=="action_update" else 1
+                live_trace.append(f'a,{action},{group},{slot},{at},{word(actor+0xfc)}')
+                if action==0:
+                    put(actor+0xfc,11+(slot&3));put(actor+0x78,word(actor+0x78)+3)
+                    put(actor+0x24,word(actor+0x24)+0x1000+slot)
+                    if group==0:put(actor+0x10c,SECONDARY_KEY if word(actor+0x10c)==0 else 0)
+                else:
+                    put(actor+0xfc,word(actor+0xfc)+7);put(actor+0x28,word(actor+0x28)^0x80000000)
             u.reg_write(UC_X86_REG_ESP, sp + 4)
             u.reg_write(UC_X86_REG_EIP, word(sp))
         return callback
@@ -490,6 +515,7 @@ for index, (case, line) in enumerate(zip(tick_cases, native)):
     def hook_simple(letter):
         def callback(machine, at, size, user):
             events.append((letter,))
+            live_call({"l":1,"a":2,"b":3,"c":4}[letter])
             sp = u.reg_read(UC_X86_REG_ESP)
             u.reg_write(UC_X86_REG_ESP, sp + 4)
             u.reg_write(UC_X86_REG_EIP, word(sp))
@@ -498,6 +524,7 @@ for index, (case, line) in enumerate(zip(tick_cases, native)):
     def hook_mark(machine, at, size, user):
         sp = u.reg_read(UC_X86_REG_ESP)
         marks.append(word(sp + 4))
+        if args.mutating_callbacks:live_trace.append("m,"+str(word(sp+4)))
         u.reg_write(UC_X86_REG_ESP, sp + 4)
         u.reg_write(UC_X86_REG_EIP, word(sp))
 
@@ -582,6 +609,20 @@ for index, (case, line) in enumerate(zip(tick_cases, native)):
     got = (fields["calls"], fields["actions"], fields["marks"], int(fields["counter"]),
            int(fields["rebuilt"]), fields["list"], fields["f104"], fields["f108"],
            fields["t3"], fields["t0"], fields["t1"], fields["t2"], fields["xt"])
+    if args.mutating_callbacks:
+        images=[]
+        for group in range(5):
+            base=EXTRA[0] if group==4 else TABLES[group][0]
+            count=len(extra) if group==4 else len(groups[group])
+            for slot in range(count):
+                image=bytearray(u.mem_read(base+slot*ACTOR_STRIDE,ACTOR_STRIDE))
+                definition=struct.unpack_from('<I',image,4)[0]
+                struct.pack_into('<I',image,4,(definition-DEF_TABLE)//0x13c if definition else 0)
+                pointer=struct.unpack_from('<I',image,0x104)[0]
+                struct.pack_into('<I',image,0x104,normalize_list_start(pointer))
+                images.append(image.hex())
+        want+=((';'.join(live_trace) or '-'),(';'.join(images) or '-'))
+        got+=(fields['trace'],fields['images'])
     if want != got:
         mismatch += 1
         if len(samples) < 5:
@@ -592,6 +633,8 @@ report["checks"]["tick_0x487EA0"] = {"cases": len(tick_cases), "mismatches": mis
                                      "samples": samples}
 total += mismatch
 
+report["mutating_callbacks"]=args.mutating_callbacks
+report["full_actor_images_checked"]=len(tick_cases) if args.mutating_callbacks else 0
 report["original_functions"] = [
     "487EA0-4881B5 per-tick actor update (three returns: 48804B, 488096, 4880B4)",
     "487E10-487E73 selected-actor list rebuild entry",
@@ -607,3 +650,5 @@ text = json.dumps(report, indent=2)
 print(text)
 if args.report:
     args.report.write_text(text + "\n")
+
+raise SystemExit(bool(total))

@@ -1,4 +1,5 @@
 #include "dfre/ai_update.hpp"
+#include <iomanip>
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -170,7 +171,7 @@ void case_rebuild(const std::vector<std::string>& fields) {
               << " f108=" << join_indices(counts) << '\n';
 }
 
-void case_tick(const std::vector<std::string>& fields) {
+void case_tick(const std::vector<std::string>& fields, bool live_hooks=false) {
     if (fields.size() < 11) throw std::runtime_error("tick needs defs, five groups, and state");
     const auto definitions = parse_defs(fields[0]);
     dfre::AiActorTables tables;
@@ -193,7 +194,38 @@ void case_tick(const std::vector<std::string>& fields) {
     const auto bounds = [](std::uint32_t) -> dfre::AiActorBounds {
         throw dfre::AiError("bounds not expected in tick cases");
     };
-    const auto report = dfre::tick_ai(tables, state, definitions, bounds, tick);
+    std::vector<std::string> live_trace;
+    dfre::AiTickHooks hooks;
+    const auto actor_at=[&](const dfre::AiActorRef& ref)->dfre::AiActorState& {
+        return ref.group==4?tables.extra.at(ref.index):tables.groups.at(ref.group).at(ref.index);
+    };
+    if(live_hooks) {
+        hooks.on_call=[&](const dfre::AiTickCall& call) {
+            const auto kind=unsigned(call.kind);
+            live_trace.push_back("c,"+std::to_string(kind)+","+std::to_string(call.actor.group)+","+std::to_string(call.actor.index));
+            if(kind==0)actor_at(call.actor).field_fc=std::uint32_t((call.actor.index+tick)%5);
+            if(kind==1 && !tables.groups[3].empty())tables.groups[3][0].field_fc=0;
+            if(kind==2 && !tables.groups[0].empty())tables.groups[0][0].field_fc=0;
+            if(kind==3 && (tick&31u)<tables.groups[1].size())tables.groups[1][tick&31u].field_fc=0;
+            if(kind==4 && (tick&63u)<tables.groups[2].size())tables.groups[2][tick&63u].field_fc=0;
+        };
+        hooks.on_action=[&](const dfre::AiActorAction& action) {
+            auto& actor=actor_at(action.actor);
+            live_trace.push_back("a,"+std::to_string(unsigned(action.kind))+","+std::to_string(action.actor.group)+","+std::to_string(action.actor.index)+","+std::to_string(action.target)+","+std::to_string(actor.field_fc));
+            if(action.kind==dfre::AiActorActionKind::update) {
+                actor.field_fc=11u+std::uint32_t(action.actor.index&3u);
+                actor.field_78+=3;
+                actor.position[0]+=0x1000u+std::uint32_t(action.actor.index);
+                if(action.actor.group==0)actor.field_10c=actor.field_10c==0?0x2004100u:0;
+            } else {
+                actor.field_fc+=7;
+                actor.position[1]^=0x80000000u;
+            }
+        };
+        hooks.on_mark=[&](std::uint32_t mark){live_trace.push_back("m,"+std::to_string(mark));};
+    }
+    const auto report = dfre::tick_ai(tables, state, definitions, bounds, tick,hooks);
+
     std::vector<std::size_t> starts, counts;
     const auto collect = [&](std::uint8_t group) {
         for (std::size_t index = 0; index < tables.groups[group].size(); ++index) {
@@ -282,6 +314,23 @@ void case_tick(const std::vector<std::string>& fields) {
                   << (tables.extra[index].definition_index == 0 ? 1 : 0);
     }
     if (tables.extra.empty()) std::cout << '-';
+    if(live_hooks) {
+        std::cout<<" trace=";
+        for(std::size_t i=0;i<live_trace.size();++i){if(i)std::cout<<';';std::cout<<live_trace[i];}
+        if(live_trace.empty())std::cout<<'-';
+        std::cout<<" images=";
+        bool first=true;
+        const auto print=[&](const std::vector<dfre::AiActorState>& group) {
+            for(const auto& actor:group) {
+                if(!first)std::cout<<';';first=false;
+                for(auto byte:dfre::ai_actor_image(actor))std::cout<<std::hex<<std::setfill('0')<<std::setw(2)<<unsigned(byte);
+            }
+        };
+        for(const auto& group:tables.groups)print(group);
+        print(tables.extra);
+        if(first)std::cout<<'-';
+        std::cout<<std::dec;
+    }
     std::cout << '\n';
 }
 
@@ -321,7 +370,7 @@ int main(int argc, char** argv) {
     try {
         if (argc != 2) throw std::runtime_error("ai_update_probe rebuild|acquire|tick < cases.txt");
         const std::string mode = argv[1];
-        if (mode != "rebuild" && mode != "acquire" && mode != "tick")
+        if (mode != "rebuild" && mode != "acquire" && mode != "tick" && mode != "tick-hooks")
             throw std::runtime_error("ai_update_probe rebuild|acquire|tick < cases.txt");
         std::string line;
         while (std::getline(std::cin, line)) {
@@ -333,7 +382,7 @@ int main(int argc, char** argv) {
             if (fields.empty()) continue;
             if (mode == "rebuild") case_rebuild(fields);
             else if (mode == "acquire") case_acquire(fields);
-            else case_tick(fields);
+            else case_tick(fields,mode=="tick-hooks");
         }
         return 0;
     } catch (const std::exception& error) {
