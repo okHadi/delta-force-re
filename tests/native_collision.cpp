@@ -1,6 +1,7 @@
 // Native checks for the collision stage. Goldens come from the ported
 // original-code replay in tools/check_collision_original.py.
 #include "dfre/collision.hpp"
+#include <iostream>
 
 #include <cstdint>
 #include <cstring>
@@ -307,6 +308,7 @@ void model_ray() {
 } // namespace
 
 int main() {
+    try {
     marches();
     face_tests();
     face_ray_tests();
@@ -315,4 +317,8 @@ int main() {
     model_decode();
     model_ray();
     return 0;
+    } catch(const std::exception& error) {
+        std::cerr<<error.what()<<'\n';
+        return 1;
+    }
 }

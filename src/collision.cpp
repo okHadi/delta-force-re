@@ -1,6 +1,7 @@
 #include "dfre/collision.hpp"
 
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 
 namespace dfre {
@@ -244,7 +245,8 @@ bool collision_point_in_face(const std::array<std::int32_t, 3>& point,
                     const std::int32_t rise = wrap_add(projected_first[index + 1], wrap_negate(projected_first[index]));
                     const std::int32_t run = wrap_add(projected_second[index + 1], wrap_negate(projected_second[index]));
                     const std::int64_t scaled = static_cast<std::int64_t>(rise) * 65536;
-                    if (scaled / run > 2147483647 || scaled / run < -2147483648) {
+                    if (scaled / run > std::numeric_limits<std::int32_t>::max() ||
+                        scaled / run < std::numeric_limits<std::int32_t>::min()) {
                         throw std::invalid_argument("Face edge division outside the original range");
                     }
                     const auto slope = static_cast<std::int32_t>(scaled / run);

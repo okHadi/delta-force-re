@@ -3,6 +3,7 @@
 #include "dfre/world_hits.hpp"
 
 #include <array>
+#include <iostream>
 #include <cstdint>
 #include <stdexcept>
 #include <vector>
@@ -87,9 +88,8 @@ struct CraftedRecord {
     dfre::WorldHitRecord record;
 };
 
-CraftedRecord crafted(std::int32_t material_flags, std::uint32_t identity,
+void crafted(CraftedRecord& fixture, std::int32_t material_flags, std::uint32_t identity,
     const std::array<std::int32_t, 3>& origin, const std::array<std::int32_t, 3>& translation) {
-    CraftedRecord fixture;
     dfre::ModelFace face{};
     face.vertices = {0, 1, 2};
     face.material = 0;
@@ -119,7 +119,6 @@ CraftedRecord crafted(std::int32_t material_flags, std::uint32_t identity,
     fixture.record.position = origin;
     fixture.record.radius = 0x40000;
     fixture.record.meshes.push_back(fixture.mesh);
-    return fixture;
 }
 
 dfre::WorldHitQuery crafted_query() {
@@ -137,7 +136,8 @@ void model_list_hits() {
     const std::array<std::int32_t, 3> translation{0x1000, 0x200, 0x300};
     dfre::WorldModelHit hit;
     {
-        auto fixture = crafted(0, 0x11, {0, 0, 0}, translation);
+        CraftedRecord fixture;
+        crafted(fixture, 0, 0x11, {0, 0, 0}, translation);
         const std::vector<dfre::WorldHitRecord> records{fixture.record};
         require(dfre::world_model_list_hit(records, crafted_query(), hit) == 0, "List hit missing");
         require(hit.hit && hit.record == 0 && hit.mesh == 0 && hit.face == 0 && hit.distance == 0x4000,
@@ -145,38 +145,44 @@ void model_list_hits() {
         require(hit.material_flags == 0 && !hit.divided, "List hit material differs");
     }
     {
-        auto fixture = crafted(0x868C, 0x11, {0, 0, 0}, translation);
+        CraftedRecord fixture;
+        crafted(fixture, 0x868C, 0x11, {0, 0, 0}, translation);
         const std::vector<dfre::WorldHitRecord> records{fixture.record};
         require(dfre::world_model_list_hit(records, crafted_query(), hit) == 2 && !hit.hit && hit.masked == 1,
             "Masked list hit differs");
     }
     {
-        auto fixture = crafted(2, 0x11, {0, 0, 0}, translation);
+        CraftedRecord fixture;
+        crafted(fixture, 2, 0x11, {0, 0, 0}, translation);
         const std::vector<dfre::WorldHitRecord> records{fixture.record};
         require(dfre::world_model_list_hit(records, crafted_query(), hit) == 0 && hit.material_flags == 2,
             "Two-sided list hit differs");
     }
     {
-        auto fixture = crafted(0, 0x11, {0, 0, 0}, translation);
+        CraftedRecord fixture;
+        crafted(fixture, 0, 0x11, {0, 0, 0}, translation);
         const std::vector<dfre::WorldHitRecord> records{fixture.record};
         auto query = crafted_query();
         query.skip = {0x11, 0};
         require(dfre::world_model_list_hit(records, query, hit) == 1 && !hit.hit, "Skipped record accepted");
     }
     {
-        auto fixture = crafted(0, 0x11, {0, 0, 0}, translation);
+        CraftedRecord fixture;
+        crafted(fixture, 0, 0x11, {0, 0, 0}, translation);
         fixture.record.meshes[0].state_flags = 1;
         const std::vector<dfre::WorldHitRecord> records{fixture.record};
         require(dfre::world_model_list_hit(records, crafted_query(), hit) == 1 && !hit.hit, "Skipped mesh accepted");
     }
     {
-        auto fixture = crafted(0, 0x11, {0, 0, 0}, translation);
+        CraftedRecord fixture;
+        crafted(fixture, 0, 0x11, {0, 0, 0}, translation);
         fixture.record.active = 0;
         const std::vector<dfre::WorldHitRecord> records{fixture.record};
         require(dfre::world_model_list_hit(records, crafted_query(), hit) == 1 && !hit.hit, "Inactive record accepted");
     }
     {
-        auto fixture = crafted(0, 0x11, {0, 0, 0}, translation);
+        CraftedRecord fixture;
+        crafted(fixture, 0, 0x11, {0, 0, 0}, translation);
         fixture.record.meshes[0].faces = nullptr;
         const std::vector<dfre::WorldHitRecord> records{fixture.record};
         rejects([&] { dfre::world_model_list_hit(records, crafted_query(), hit); });
@@ -205,7 +211,8 @@ void segment_queries() {
     // Stored face hit above the terrain, then the same record in the second list.
     const std::array<std::int32_t, 3> start{0, 0, 0x3000000};
     const std::array<std::int32_t, 3> translation{0x1000, 0x200, 0x300 - 0x3000000};
-    auto fixture = crafted(0, 0x11, start, translation);
+    CraftedRecord fixture;
+    crafted(fixture, 0, 0x11, start, translation);
     const std::vector<dfre::WorldHitRecord> records{fixture.record};
     result = dfre::world_segment_query(geometry, bounds, 0, records, empty, 0, 0, start,
         {start[0] + 0x8000, start[1], start[2]});
@@ -226,8 +233,13 @@ void segment_queries() {
 } // namespace
 
 int main() {
+    try {
     math_helpers();
     model_list_hits();
     segment_queries();
     return 0;
+    } catch(const std::exception& error) {
+        std::cerr<<error.what()<<'\n';
+        return 1;
+    }
 }
