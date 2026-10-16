@@ -29,6 +29,10 @@ set(DFRE_RUNTIME_MODULES
     effect_deferred
     scene_models
     water
+    collision
+    world_hits
+    actor_behavior
+    actor_queries
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -40,7 +44,7 @@ target_compile_features(dfre_core PUBLIC cxx_std_17)
 set_target_properties(dfre_core PROPERTIES CXX_EXTENSIONS OFF)
 if(MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     enable_language(ASM_MASM)
-    target_sources(dfre_core PRIVATE src/palette_variance_x64.asm)
+    target_sources(dfre_core PRIVATE src/palette_variance_x64.asm src/query_angle_x64.asm)
 endif()
 
 add_executable(filename_probe tools/filename_probe.cpp)
