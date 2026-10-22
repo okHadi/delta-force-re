@@ -1,4 +1,5 @@
 #include "dfre/weapons.hpp"
+#include <cstring>
 #include <stdexcept>
 namespace dfre {
 namespace {
@@ -34,46 +35,45 @@ constexpr std::array<std::array<std::uint8_t,3>,kWeaponLoadoutCount> kLoadouts{{
     {{34,0,0}},
 }};
 constexpr std::array<WeaponDefinition, kWeaponCount> kWeapons{{
-    {0x0000, 0x0000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0x00000000},
-    {0x0fa5, 0x0fa4, 6, 2, 0, 41, -65, -148, 0, 0, 0, 0, 70, 0, 0x00000042},
-    {0x0000, 0x0000, 0, 3, 0, 118, -78, -86, 0, 0, 0, 0, 30, 0, 0x00000000},
-    {0x0000, 0x0000, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0x00000000},
-    {0x0fc0, 0x0fbf, 1, 5, 17, 141, -57, -54, 0, 0, 0, 0, 10, 0, 0x00000002},
-    {0x0fa7, 0x0fa6, 1, 6, 11, 102, -34, -43, 0, 0, 0, 0, 10, 0, 0x00000000},
-    {0x0fd9, 0x0fd8, 1, 7, 7, 72, -44, -75, 0, 0, 0, 0, 6, 4, 0x00000005},
-    {0x0fd9, 0x0fd8, 1, 7, 7, 72, -44, -75, 0, 0, 0, 0, 10, 4, 0x00000005},
-    {0x0fa3, 0x0fa2, 1, 7, 7, 52, -45, -75, 0, 0, 0, 0, 6, 0, 0x00000004},
-    {0x0fa3, 0x0fa2, 1, 7, 7, 52, -45, -75, 0, 0, 0, 0, 6, 0, 0x00000004},
-    {0x0fd9, 0x0fd8, 2, 9, 13, 72, -44, -75, 0, 0, 0, 1, 150, 4, 0x00000015},
-    {0x0fa3, 0x0fa2, 1, 10, 19, 52, -45, -75, 0, 0, 0, 0, 30, 0, 0x00000004},
-    {0x0fb8, 0x0fb7, 1, 11, 14, 85, -43, -73, 0, 0, 0, 0, 6, 0, 0x00000024},
-    {0x0fb8, 0x0fb7, 1, 11, 14, 85, -43, -73, 0, 0, 0, 0, 6, 0, 0x00000004},
-    {0x0fb8, 0x0fb7, 1, 11, 14, 85, -43, -73, 0, 0, 0, 0, 5, 0, 0x00000024},
-    {0x0fbc, 0x0fbb, 1, 12, 15, 45, -20, -42, 0, 0, 0, 0, 55, 8, 0x00000005},
-    {0x0fa3, 0x0fa2, 1, 13, 16, 87, -67, -77, 0, 0, 0, 0, 60, 8, 0x00000007},
-    {0x0fa3, 0x0fa2, 1, 14, 4, 94, -33, -54, 0, 0, 0, 0, 6, 0, 0x00000000},
-    {0x0fa3, 0x0fa2, 1, 14, 4, 94, -33, -54, 0, 0, 0, 0, 6, 0, 0x00000000},
-    {0x0fa3, 0x0fa2, 1, 14, 4, 94, -33, -54, 0, 0, 0, 0, 10, 0, 0x00000000},
-    {0x0fbe, 0x0fbd, 1, 15, 4, 84, -35, -72, 0, 0, 0, 0, 6, 0, 0x00000026},
-    {0x0fbe, 0x0fbd, 1, 15, 4, 84, -35, -72, 0, 0, 0, 0, 6, 0, 0x00000006},
-    {0x0fbe, 0x0fbd, 1, 15, 4, 84, -35, -72, 0, 0, 0, 0, 10, 0, 0x00000006},
-    {0x0fa3, 0x0fa2, 1, 16, 3, 87, -67, -77, 0, 0, 0, 0, 4, 0, 0x00000000},
-    {0x0fa3, 0x0fa2, 1, 16, 3, 87, -67, -77, 0, 0, 0, 0, 35, 0, 0x00000000},
-    {0x0fa3, 0x0fa2, 0, 17, 20, 87, -67, -77, 0, 0, 0, 0, 5, 2, 0x0000000d},
-    {0x0fa3, 0x0fa2, 0, 18, 18, 87, -67, -77, 0, 0, 0, 0, 5, 0, 0x00000000},
-    {0x0fe9, 0x0fea, 10, 19, 0, 66, -45, -33, 0, 0, 0, 0, 180, 2, 0x00000001},
-    {0x0000, 0x0fc9, 2, 20, 27, 30, -67, 0, 0, 0, 0, 0, 130, 2, 0x0000000d},
-    {0x0fb4, 0x0000, 9, 21, 2, 87, -67, -77, 0, 0, 0, 0, 90, 0, 0x00000080},
-    {0x0fe7, 0x0fe8, 8, 21, 0, 73, -88, -140, 0, 0, 0, 0, 5, 0, 0x00000000},
-    {0x0fa3, 0x0fa2, 0, 22, 0, 87, -67, -77, 0, 0, 0, 0, 5, 0, 0x00000000},
-    {0x0fba, 0x0fb9, 1, 23, 22, 60, -35, -45, 0, 0, 0, 0, 70, 8, 0x00000005},
-    {0x0fc5, 0x0fc1, 11, 26, 12, 36, -57, -107, 0, 0, 0, 0, 90, 0, 0x00000082},
-    {0x0fa3, 0x0fa2, 0, 27, 1, 87, -67, -77, 0, 0, 0, 0, 30, 0, 0x00000082},
-    {0x0fa3, 0x0fb6, 1, 7, 23, 52, -45, -75, 0, 0, 0, 0, 5, 4, 0x00000004},
-    {0x0fa3, 0x0fb6, 1, 7, 25, 52, -45, -75, 0, 0, 0, 0, 5, 4, 0x00000004},
-    {0x0fc7, 0x0000, 7, 24, 10, 66, -68, -94, 0, 0, 0, 0, 90, 4, 0x00000080},
-    {0x0fc7, 0x0000, 7, 24, 10, 66, -68, -94, 0, 0, 0, 0, 90, 4, 0x00000080},
-
+    {0x0000, 0x0000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0x00000000, 0x00000000},
+    {0x0fa5, 0x0fa4, 6, 2, 0, 41, -65, -148, 0, 0, 0, 0, 70, 0, 0x00000042, 0x00000000},
+    {0x0000, 0x0000, 0, 3, 0, 118, -78, -86, 0, 0, 0, 0, 30, 0, 0x00000000, 0x00000000},
+    {0x0000, 0x0000, 0, 4, 0, 0, 0, 0, 0, 0, 0, 0, 30, 0, 0x00000000, 0x00000000},
+    {0x0fc0, 0x0fbf, 1, 5, 17, 141, -57, -54, 0, 0, 0, 0, 10, 0, 0x00000002, 0x00000000},
+    {0x0fa7, 0x0fa6, 1, 6, 11, 102, -34, -43, 0, 0, 0, 0, 10, 0, 0x00000000, 0x00000000},
+    {0x0fd9, 0x0fd8, 1, 7, 7, 72, -44, -75, 0, 0, 0, 0, 6, 4, 0x00000005, 0x00000000},
+    {0x0fd9, 0x0fd8, 1, 7, 7, 72, -44, -75, 0, 0, 0, 0, 10, 4, 0x00000005, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 7, 7, 52, -45, -75, 0, 0, 0, 0, 6, 0, 0x00000004, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 7, 7, 52, -45, -75, 0, 0, 0, 0, 6, 0, 0x00000004, 0x00000000},
+    {0x0fd9, 0x0fd8, 2, 9, 13, 72, -44, -75, 0, 0, 0, 1, 150, 4, 0x00000015, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 10, 19, 52, -45, -75, 0, 0, 0, 0, 30, 0, 0x00000004, 0x00000000},
+    {0x0fb8, 0x0fb7, 1, 11, 14, 85, -43, -73, 0, 0, 0, 0, 6, 0, 0x00000024, 0x00000000},
+    {0x0fb8, 0x0fb7, 1, 11, 14, 85, -43, -73, 0, 0, 0, 0, 6, 0, 0x00000004, 0x00000000},
+    {0x0fb8, 0x0fb7, 1, 11, 14, 85, -43, -73, 0, 0, 0, 0, 5, 0, 0x00000024, 0x00000000},
+    {0x0fbc, 0x0fbb, 1, 12, 15, 45, -20, -42, 0, 0, 0, 0, 55, 8, 0x00000005, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 13, 16, 87, -67, -77, 0, 0, 0, 0, 60, 8, 0x00000007, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 14, 4, 94, -33, -54, 0, 0, 0, 0, 6, 0, 0x00000000, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 14, 4, 94, -33, -54, 0, 0, 0, 0, 6, 0, 0x00000000, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 14, 4, 94, -33, -54, 0, 0, 0, 0, 10, 0, 0x00000000, 0x00000000},
+    {0x0fbe, 0x0fbd, 1, 15, 4, 84, -35, -72, 0, 0, 0, 0, 6, 0, 0x00000026, 0x00000000},
+    {0x0fbe, 0x0fbd, 1, 15, 4, 84, -35, -72, 0, 0, 0, 0, 6, 0, 0x00000006, 0x00000000},
+    {0x0fbe, 0x0fbd, 1, 15, 4, 84, -35, -72, 0, 0, 0, 0, 10, 0, 0x00000006, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 16, 3, 87, -67, -77, 0, 0, 0, 0, 4, 0, 0x00000000, 0x00000000},
+    {0x0fa3, 0x0fa2, 1, 16, 3, 87, -67, -77, 0, 0, 0, 0, 35, 0, 0x00000000, 0x00000000},
+    {0x0fa3, 0x0fa2, 0, 17, 20, 87, -67, -77, 0, 0, 0, 0, 5, 2, 0x0000000d, 0x00000000},
+    {0x0fa3, 0x0fa2, 0, 18, 18, 87, -67, -77, 0, 0, 0, 0, 5, 0, 0x00000000, 0x00000000},
+    {0x0fe9, 0x0fea, 10, 19, 0, 66, -45, -33, 0, 0, 0, 0, 180, 2, 0x00000001, 0x00000000},
+    {0x0000, 0x0fc9, 2, 20, 27, 30, -67, 0, 0, 0, 0, 0, 130, 2, 0x0000000d, 0x00000000},
+    {0x0fb4, 0x0000, 9, 21, 2, 87, -67, -77, 0, 0, 0, 0, 90, 0, 0x00000080, 0x00000000},
+    {0x0fe7, 0x0fe8, 8, 21, 0, 73, -88, -140, 0, 0, 0, 0, 5, 0, 0x00000000, 0x00000000},
+    {0x0fa3, 0x0fa2, 0, 22, 0, 87, -67, -77, 0, 0, 0, 0, 5, 0, 0x00000000, 0x00000000},
+    {0x0fba, 0x0fb9, 1, 23, 22, 60, -35, -45, 0, 0, 0, 0, 70, 8, 0x00000005, 0x00000000},
+    {0x0fc5, 0x0fc1, 11, 26, 12, 36, -57, -107, 0, 0, 0, 0, 90, 0, 0x00000082, 0x00000000},
+    {0x0fa3, 0x0fa2, 0, 27, 1, 87, -67, -77, 0, 0, 0, 0, 30, 0, 0x00000082, 0x00000000},
+    {0x0fa3, 0x0fb6, 1, 7, 23, 52, -45, -75, 0, 0, 0, 0, 5, 4, 0x00000004, 0x00000000},
+    {0x0fa3, 0x0fb6, 1, 7, 25, 52, -45, -75, 0, 0, 0, 0, 5, 4, 0x00000004, 0x00000000},
+    {0x0fc7, 0x0000, 7, 24, 10, 66, -68, -94, 0, 0, 0, 0, 90, 4, 0x00000080, 0x00000000},
+    {0x0fc7, 0x0000, 7, 24, 10, 66, -68, -94, 0, 0, 0, 0, 90, 4, 0x00000080, 0x00000000},
 }};
 constexpr std::array<WeaponClassDefinition, kWeaponClassCount> kClasses{{
     {0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0},
@@ -133,24 +133,34 @@ void WeaponState::set_slot_map(const std::array<std::uint8_t, kWeaponSlotCount>&
 
 namespace {
 std::int32_t gun_flags_refire(std::uint32_t flags) noexcept { return (flags & 0x20u) ? 1 : 0; }
+std::int32_t signed_word(std::uint32_t word) noexcept {std::int32_t result;std::memcpy(&result,&word,4);return result;}
+std::int32_t decrement(std::int32_t value) noexcept {return signed_word(std::uint32_t(value)-1);}
 }
 
 const WeaponClassDefinition& WeaponState::class_of(const WeaponDefinition& definition) const noexcept {
     return kClasses[definition.weapon_class];
 }
 
+std::uint32_t& WeaponState::burst_cell() {return burst_storage?burst_storage():burst_counter_;}
+const std::uint32_t& WeaponState::burst_cell() const {return burst_storage?burst_storage():burst_counter_;}
+std::int32_t WeaponState::burst_counter() const {return signed_word(burst_cell());}
+std::uint32_t WeaponState::aim_block_raw() const noexcept {return std::uint32_t(aim_block_);}
+void WeaponState::set_aim_block_raw(std::uint32_t value) noexcept {aim_block_=signed_word(value);}
+
+void WeaponState::run_view_body(WeaponViewKind kind,std::uint32_t weapon){
+    const auto body=view_body;
+    if(!body)throw std::runtime_error("weapon: live view body missing");
+    body(kind,weapon);
+}
+
 void WeaponState::emit_shot() {
-    // 45EA00 calls 46FB40 with a per-weapon kind from table 0x45E96C. The
-    // projectile itself stays an input; only the burst counter part of
-    // 45EA00 (45EB17-45EB5E for weapon index 6) is deterministic weapon
-    // state: first shot sets actor item def +0x6C = 2, follow-up shots
-    // decrement it.
-    const auto index = current_weapon();
-    if (index == 6) {
-        if (burst_counter_ == 0) burst_counter_ = 2;
-        else burst_counter_ -= 1;
+    const auto index=current_weapon();
+    if(shot_mode==WeaponShotMode::live_body)
+        throw std::runtime_error("weapon: live shot requires its view body");
+    if(index==6){
+        if(burst_cell()==0)burst_cell()=2;else --burst_cell();
     }
-    emit({WeaponEventKind::shot, std::int32_t(index)});
+    emit({WeaponEventKind::shot,std::int32_t(index)});
 }
 
 void WeaponState::finish_action(int silent) {
@@ -207,8 +217,9 @@ void WeaponState::expire_charge() { // 483860 (use classes 7, 9, 11)
 }
 
 void WeaponState::expire_laser() { // 483AA0
+    const auto weapon_class=current_definition().weapon_class;
     emit({WeaponEventKind::queue, 0x2C});
-    pending_[current_definition().weapon_class] = 1;
+    pending_[weapon_class] = 1;
 }
 
 void WeaponState::expire_action() { // 483B70
@@ -236,11 +247,13 @@ void WeaponState::fire_gun() { // 482F90
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) {
         emit({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
-        burst_counter_ = 0;
         finish_action(1);
+        burst_cell() = 0;
         return;
     }
-    emit_shot();
+    if(shot_mode==WeaponShotMode::live_body){
+        run_view_body(WeaponViewKind::gun,current_weapon());
+    } else emit_shot();
     pending_[weapon_class] = 0;
     finish_action(1);
 }
@@ -251,18 +264,19 @@ void WeaponState::fire_launcher() { // 483410
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) {
         emit({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
-        burst_counter_ = 0;
+        burst_cell() = 0;
         return; // 4834E9 leaves the action timer untouched
     }
-    emit_shot();
+    if(shot_mode==WeaponShotMode::live_body)run_view_body(WeaponViewKind::launcher,current_weapon());else emit_shot();
     pending_[weapon_class] = 0;
     finish_action(0);
 }
 
 void WeaponState::fire_melee() { // 4838C0
     if (fire_timer_ > 0) return;
-    const auto& definition = current_definition();
-    emit_shot();
+    const auto index=current_weapon();
+    const auto& definition = kWeapons[index];
+    if(shot_mode==WeaponShotMode::live_body)run_view_body(WeaponViewKind::melee,index);else emit_shot();
     pending_[definition.weapon_class] = 0;
     fire_timer_ = definition.fire_delay; // inline, silent
 }
@@ -273,7 +287,8 @@ void WeaponState::fire_claymore() { // 4840B0
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) return;
     const auto index = current_weapon();
-    emit({WeaponEventKind::place, index == 0x25 ? 0xFAE : 0xFC8});
+    if(shot_mode==WeaponShotMode::live_body)run_view_body(WeaponViewKind::claymore,index);
+    else emit({WeaponEventKind::place, index == 0x25 ? 0xFAE : 0xFC8});
     pending_[weapon_class] = 0;
     finish_action(0);
 }
@@ -287,16 +302,18 @@ void WeaponState::fire_satchel() { // 4841F0
     const auto& definition = current_definition();
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) return;
-    emit({WeaponEventKind::place, 0xFB4});
+    if(shot_mode==WeaponShotMode::live_body)run_view_body(WeaponViewKind::satchel,current_weapon());
+    else emit({WeaponEventKind::place, 0xFB4});
     pending_[weapon_class] = 0;
     finish_action(0);
 }
 
 void WeaponState::fire_laser() { // 483A30
     if (fire_timer_ > 0) return;
+    const auto index=current_weapon();
     emit({WeaponEventKind::sound2, 0x1AE});
     emit({WeaponEventKind::message, 0});
-    fire_timer_ = current_definition().fire_delay;
+    fire_timer_ = kWeapons[index].fire_delay;
 }
 
 void WeaponState::fire_grenade() { // 483670
@@ -305,10 +322,10 @@ void WeaponState::fire_grenade() { // 483670
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) {
         emit({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
-        burst_counter_ = 0;
+        burst_cell() = 0;
         return;
     }
-    emit_shot();
+    if(shot_mode==WeaponShotMode::live_body)run_view_body(WeaponViewKind::grenade,current_weapon());else emit_shot();
     pending_[weapon_class] = 0;
     finish_action(0);
 }
@@ -365,7 +382,7 @@ bool WeaponState::select_slot(int slot) { // 483DD0
             break;
         default: break;
     }
-    burst_counter_ = 0;
+    burst_cell() = 0;
     return true;
 }
 
@@ -385,8 +402,7 @@ bool WeaponState::cycle_slot(int direction) { // 484B70
 }
 
 void WeaponState::toggle_aim_block() noexcept { // 484C20 toggles C23B64
-    // Original also seeds C23B68/C23B6C from sincos(rand). Those view-sway
-    // values depend on the RNG and stay outside the deterministic stage.
+    // Blocker primitive. toggle_player_aim owns the full RNG and sway body.
     aim_block_ = aim_block_ != 0 ? 0 : 1;
 }
 
@@ -397,20 +413,20 @@ void WeaponState::tick(bool trigger_held) {
     if (raise_counter_ > 1) raise_counter_ -= 2;
     else raise_counter_ = 0;
     if (fire_timer_ != 0) {
-        fire_timer_ -= 1;
+        fire_timer_ = decrement(fire_timer_);
         if (fire_timer_ <= 0) {
             fire_timer_ = 0;
             expire_action();
         }
     }
     if (reload_timer_ != 0) {
-        reload_timer_ -= 1;
+        reload_timer_ = decrement(reload_timer_);
         if (reload_timer_ <= 0) {
             reload_timer_ = 0;
             expire_reload_timer();
         }
     }
-    if (burst_counter_ != 0 && fire_timer_ <= 0) fire();
+    if (burst_cell() != 0 && fire_timer_ <= 0) fire();
 }
 
 void WeaponState::resupply(bool double_primary_slots) { // 4848C0

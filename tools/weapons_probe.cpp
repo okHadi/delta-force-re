@@ -84,7 +84,7 @@ void dump_tables(std::ostream& out) {
         out << "[" << w.primary_item << "," << w.secondary_item << "," << int(w.use_class) << ","
             << int(w.ui_index) << "," << int(w.weapon_class) << "," << w.muzzle_x << "," << w.muzzle_y << ","
             << w.muzzle_z << "," << w.aim_x << "," << w.aim_y << "," << w.aim_z << "," << w.aim_field << ","
-            << w.fire_delay << "," << w.burst_field << "," << w.flags << "]";
+            << w.fire_delay << "," << w.burst_field << "," << w.flags << "," << w.graphic_item_98 << "]";
     }
     out << "],\"classes\":[";
     const auto& classes = dfre::weapon_classes();

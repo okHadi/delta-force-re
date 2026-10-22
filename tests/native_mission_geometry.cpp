@@ -27,7 +27,7 @@ dfre::Model model() {
     return result;
 }
 dfre::MissionGeometryModel binding(const dfre::Model& model, std::uint32_t handle) {
-    return {handle, &model, {131072,196608}, {{-65536, {-65536,65536,-65536,65536,65536,65536}}}, {}};
+    return {handle, &model, {131072,196608}, {{-65536, {-65536,65536,-65536,65536,65536,65536}}}, {},327680};
 }
 template<class Function> void rejects(Function function, const char* message) {
     bool rejected = false;
@@ -39,10 +39,30 @@ int main() {
     try {
         auto source = model();
         dfre::MissionGeometry geometry({binding(source,1),binding(source,2)});
+        check(geometry.height_68(1)==327680 && geometry.height_68(0)==0,"area height field changed");
         dfre::AiActorImage actor{}; put(actor,0x10,1);
         check(geometry.bounds(1).radius_64 == 131072 && geometry.bounds(1).height_60 == 196608,
             "model header fields changed");
         check(geometry.bounds(0).radius_64 == 0, "null bounds changed");
+        {
+            put(actor,0,1);
+            auto meshes=geometry.projectile_meshes(1,actor,{73});
+            dfre::ProjectileModelBindings query_bindings;
+            query_bindings.radius=[&](std::uint32_t handle){return geometry.bounds(handle).height_60;};
+            query_bindings.state=[&](std::uint32_t,dfre::ProjectileHitActor){return &meshes;};
+            dfre::WorldHitQuery query;
+            query.origin={0,0,131072};query.end={0,0,0};query.direction={0,0,-65536};query.length=131072;
+            query.bounds={0,0,0,0,0,131072};
+            dfre::ProjectileHitResult hit;
+            check(dfre::projectile_model_hit({{&actor,77}},query,hit,query_bindings)==0 && hit.hit &&
+                hit.distance==65536 && hit.material==73,"projectile model binding changed its surface hit");
+            put(actor,0x14,2);put(actor,0x6c,8);
+            meshes=geometry.projectile_meshes(2,actor,{91});
+            check(dfre::projectile_model_hit({{&actor,77}},query,hit,query_bindings)==0 && hit.material==91,
+                "projectile alternate material binding changed");
+            rejects([&]{geometry.projectile_meshes(1,actor,{});},"projectile accepted incomplete material identities");
+            put(actor,0x14,0);put(actor,0x6c,0);
+        }
         auto built = geometry.ground_entities({{77,&actor}}, {0,0,65536});
         auto result = dfre::ground_entity_height(0,{0,0,65536},0,built.entities);
         check(result.height == 65536 && result.entity == &built.entities[0] && built.identities[0] == 77,
@@ -170,6 +190,61 @@ int main() {
             nullptr,nullptr,nullptr,std::uint8_t(0xa6));
         check(palm.flags == std::vector<std::uint8_t>{1,0xa6,0xa6,1,0xa6,1},
             "palm callback changed its copied stack flag");
+        {
+            auto solid = model();
+            solid.render_types[0] = 0x74726565;
+            auto& lod = solid.lods[0];
+            std::array<std::uint8_t,72> raw{};
+            put(raw,0,1);
+            for (std::size_t axis = 0; axis < 3; ++axis) {
+                put(raw,32+axis*4,32768);
+                put(raw,48+axis*8,std::uint32_t(-32768));put(raw,52+axis*8,32768);
+                put(lod.meshes[0].raw,0x40+axis*8,std::uint32_t(-65536));
+                put(lod.meshes[0].raw,0x44+axis*8,65536);
+            }
+            auto unused=raw;put(unused,32,123456);
+            lod.collision_volumes = {raw,unused,unused};
+            put(lod.meshes[0].raw,0x1c,1);put(lod.meshes[0].raw,0x20,0xffffffff);
+            auto empty_model = model();
+            dfre::MissionGeometry physical({binding(solid,1),binding(empty_model,2)});
+            check(physical.collision_model(1).collision_present && physical.collision_model(1).radius_64 == 131072 &&
+                !physical.collision_model(2).collision_present, "actor collision model metadata changed");
+            dfre::AiActorImage actor_image{},target{};put(target,0x10,1);
+            unsigned callback_count = 0;
+            const dfre::MissionGeometryMatrixSource source = [&](const auto&,const auto&,const auto&) {
+                ++callback_count;
+                return dfre::MissionGeometryMatrices{true,{dfre::model_identity_matrix()},{3}};
+            };
+            const auto returned_state = [&] {
+                auto state = physical.collision_state(1,target,source);
+                return state;
+            }();
+            check(returned_state && returned_state->size() == 1 && (*returned_state)[0].volumes.size() == 1 &&
+                (*returned_state)[0].volumes[0].bounds == std::array<std::int32_t,6>{-32768,32768,-32768,32768,-32768,32768},
+                "returned collision state lost the stored volume slice");
+            callback_count = 0;
+            dfre::ActorCollisionBindings bindings;
+            std::optional<std::vector<dfre::ActorCollisionMesh>> state;
+            bindings.model = [&](auto handle) { return physical.collision_model(handle); };
+            bindings.state = [&](auto handle,auto actor) -> const std::vector<dfre::ActorCollisionMesh>* {
+                state=physical.collision_state(handle,*actor.image,source);return state ? &*state : nullptr;
+            };
+            bindings.definition = [](auto) { return dfre::ActorCollisionDefinition{}; };
+            check(dfre::actor_target_collision({&actor_image,1},{&target,2},bindings) == 1 && callback_count == 1,
+                "actor collision did not use volumes with instance skip flags set");
+            check(actor_image[0x24] == 0 && actor_image[0x25] == 0x40 && actor_image[0x26] == 1,
+                "actor collision box push changed");
+            put(target,0x14,2);put(target,0x6c,8);callback_count = 0;
+            check(dfre::actor_target_collision({&actor_image,1},{&target,2},bindings) == 0 && callback_count == 0,
+                "alternate collision-present gate ran the matrix callback");
+            put(target,0x14,0);put(actor_image,0x24,10000000);
+            check(dfre::actor_target_collision({&actor_image,1},{&target,2},bindings) == 0 && callback_count == 0,
+                "actor collision radius gate ran the matrix callback");
+            const dfre::MissionGeometryMatrixSource null = [](const auto&,const auto&,const auto&) {
+                dfre::MissionGeometryMatrices state;state.present=false;return state;
+            };
+            check(!physical.collision_state(1,target,null), "null collision matrix callback produced state");
+        }
         rejects([&] { geometry.bounds(3); }, "unknown model handle was accepted");
         std::cout << "mission geometry tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

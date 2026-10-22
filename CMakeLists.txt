@@ -46,6 +46,10 @@ set(DFRE_RUNTIME_MODULES
     projectile_hits
     player_step
     actor_collision
+    mission_projectile_stage
+    player_weapon_runtime
+    mission_area_live
+    mission_muzzle
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -170,7 +174,7 @@ if(BUILD_TESTING)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)
         add_test(NAME native_${dfre_module} COMMAND native_${dfre_module})
     endforeach()
-    foreach(dfre_view_test native_world_hits native_mission_geometry native_projectile_hits native_actor_collision)
+    foreach(dfre_view_test native_world_hits native_mission_geometry native_projectile_hits native_actor_collision native_mission_live native_mission_projectile_stage native_mission_area_live)
         if(MSVC)
             target_compile_options(${dfre_view_test} PRIVATE /Zc:nrvo-)
         elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

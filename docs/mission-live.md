@@ -18,3 +18,17 @@ and sight rays. Supply current zone records and the score flag. Sight uses group
 each callback's scratch and copied stack flag bytes to zero. This is the rebuilt
 engine's defined state at the callback boundary. The geometry API also accepts
 explicit prior flags for original-state comparisons.
+
+Use `apply_mission_actor_image` after a raw collision or damage helper. It keeps
+record bytes and current tick fields in the same state. Replace person and
+character bindings through their allocation APIs. Apply a cleared image to
+remove an actor and its current animation binding.
+
+Call `bind_mission_actor_collision` with the current geometry and trigger effects.
+Effects read and change the live tick state. Each effect sees earlier collision
+writes. Its changes remain current on return or error. Supply a handler for each
+reached pickup, objective, sound, or removal call.
+
+Call `bind_mission_player_burst` after player setup. Weapons read and write the
+local actor's current person counter. Use `mission_player_burst` as the storage
+provider for full player weapon calls.

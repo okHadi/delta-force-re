@@ -24,6 +24,12 @@ AiActorState decode(const AiActorImage& image,bool active,std::optional<std::siz
     return actor;
 }
 }
+AiActorState read_live_actor_image(const AiActorImage& image,bool active,std::optional<std::size_t> person){
+    return decode(image,active,person);
+}
+BehaviorActorExtra read_live_actor_extra(const AiActorImage& image){
+    return {image[0x6d],half(image,0x74),word(image,0x84),word(image,0x94),word(image,0xf8)};
+}
 MissionActorImages initial_actor_images(const MissionRuntimeState& state){
     MissionActorImages images;
     for(std::size_t group=0;group<images.size();++group){
@@ -52,8 +58,8 @@ MissionActorSeed seed_mission_actors(const MissionRuntimeState& state){
                 const auto& source=state.groups[group].at(slot);active=source.active;person=source.person_slot;
             }
             if(person && *person>=state.people.size())throw std::invalid_argument("Actor person slot exceeds the pool");
-            seed.tables.groups[group].push_back(decode(image,active,person));
-            seed.extras[group].push_back({image[0x6d],half(image,0x74),word(image,0x84),word(image,0x94),word(image,0xf8)});
+            seed.tables.groups[group].push_back(read_live_actor_image(image,active,person));
+            seed.extras[group].push_back(read_live_actor_extra(image));
             seed.person_encoding[group].push_back(created?ActorPersonEncoding::handle:ActorPersonEncoding::slot);
         }
     }

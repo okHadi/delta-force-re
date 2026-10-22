@@ -1,95 +1,63 @@
 # Weapon runtime
 
-Local player weapon state for Delta Force (1998). Source: `Df.exe`, SHA-256
-`abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`. Addresses are original virtual addresses.
+Target: `Df.exe`, SHA-256
+`abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.
 
-The module covers the deterministic timing and ammunition machine: fire
-cadence (483C70 -> 483B10), the action/reload timers (482B00, 483B70,
-483C30), magazines and spares (483240, 4832F0, 483390), slot selection
-(483DD0, 484B70) and the aim blocker (484C20). Ballistic calls (45EA00
-projectile entry, 46FB40 bullet entity) and recoil/camera state stay outside
-and are reported as events.
+`WeaponState` owns timers, ammunition, slot selection, and the aim blocker.
+`player_weapon_step` joins the complete `0x482B00` weapon prefix to recoil,
+eye height, and waypoint updates. A zero local actor skips the function.
 
-## Tables
+## Live bindings
 
-`weapon_definitions()` copies the 39 x 0xA8 records at `4F9934`: item ids
-`+0x64/+0x68`, action class `+0x6C` (1..11), behaviour class `+0x74`,
-muzzle/aim offsets, `fire_delay +0x9C`, flags `+0xA4` (bit `20` = refire
-while held). `weapon_classes()` copies the 28 x 0x34 records at `4F9154`:
-`+0x04` spare magazines, `+0x08` magazine size, sounds at `+0x24/+0x28/+0x2C`.
+Set `WeaponShotMode::live_body` and bind current state through
+`PlayerWeaponBindings`. The scoped prefix restores prior callbacks after
+return or error.
 
-`46BFB0` fills the runtime names from RTXT group `Player Weapons`
-(`STR_PWNAME%02i`, `STR_SPWNAME%02i`) and maps `+0x64/+0x68` through
-`4828C0` to item definitions; the static tables here keep the raw fields.
+- `burst_storage` resolves current local person `+0x6C` on each access.
+- `input_query` runs `0x47A290(0x8C)` only at the gun expiry gate.
+- `effect` completes sound, queue, and UI effects at their source call points.
+- `view_body` completes the reached gun, launcher, melee, claymore, satchel,
+  or grenade view block before later pending and timer writes.
 
-## State machine
+`execute_player_view` owns the view branch, recoil, placement offset, and
+weapon 15 position change. Bind the current actor source, steady query,
+animated action `0x45E7A0`, muzzle path `0x482D90` / `0x4847D0`, full shot,
+placement, actor position write, and separate CRT RNG `0x49AF6C` as reached.
+The shot callback receives its exact original call site and actor handle.
+Read that actor's current `+0x94` weapon at the call point.
 
-Per behaviour class (`+0x74`): `magazine` (C238B8), `spare` (C23938) and
-`pending` (C23838). Shared: `fire_timer` (C23830), `reload_timer` (C23834),
-slot (C239B8) and the slot map (C239C0, 10 entries).
+`execute_player_shot` implements `0x45EA00` for all 39 weapon IDs. It runs
+spread, melee, and projectile calls in source order. Bind its burst source to
+the shot actor's current person pointer. First shots set the burst before
+spawn; follow-ups decrement the current burst cell after spawn. The view
+provider executes this body once. Live `WeaponState` does not repeat its
+burst writes.
 
-- `resupply` (4848C0): spare = magazines - 1, magazine = size, pending = 1.
-  With `C23A4C == 1` slots 3..5 get spare = magazines * 2 - 1.
-- `fire` (483C70): blocked by `C23B64`, empty slot, and a running fire timer.
-  Then dispatches by action class (table `483AD8`).
-- `tick` (482B00 weapon part): fire timer expiry dispatches table `483B44`;
-  reload timer expiry dispatches table `483C1C`; the action class counters
-  `C23A3C` decay; the item definition `+0x6C` burst counter re-enters `fire`
-  when the timer has expired, which produces the M4 three-round burst
-  (weapon 6, `45EB17`).
-- `reload_press` (483BD0, table `483BA4`): guns start the 120-tick reload
-  (magazine 0, sound `+0x28`); launchers and thrown weapons play `+0x24`
-  and set the fire timer.
-- Fire paths per action class: gun 482F90, launcher 483410, melee 4838C0,
-  claymore 4840B0, detonator 470F40, satchel 4841F0, laser 483A30,
-  grenade 483670. Cooldown is always `fire_delay +0x9C`.
-- Expiry per action class: gun 483240 (consume round, refire while held when
-  `+0xA4 & 20` and control `8C` is down), launcher 483610, charges 483860,
-  melee 4839F0, laser 483AA0.
-- Slot select (483DD0) resets both timers, starts a reload for an empty gun,
-  re-arms launcher/charge classes and clears the burst counter. Cycle
-  (484B70) skips empty slots and wraps; the wrap scan includes the current
-  slot, so cycling with one weapon reselects it.
-- `set_unlimited_ammo` reproduces the `67DBC9` bit 0 toggle (`484960`,
-  message `STRMISC26`): rounds are not consumed.
+Supply the shared `0x477860` RNG source for shot spread and aim sway.
+`toggle_player_aim` implements `0x484C20`: enabling sets the blocker before
+RNG and sine/cosine reads; disabling clears it and preserves sway.
 
-## Events
+## Isolated fixtures
 
-Each operation reports ordered events: `shot` (45EA00 burst entry, weapon
-index), `sound` (43E7D0), `sound2` (43E720), `place` (470F60 item id),
-`queue` (46F3E0 message type) and `message` (479F00 HUD text). Ballistic
-callers consume `shot`/`place`/`queue`.
+The default `isolated_fixture` mode keeps its internal burst cell and the
+weapon 6 shot fixture. `tick(bool)` supplies a fixture held value when no
+lazy query is bound. Use these inputs for component tests. `on_event` runs
+before later writes; `take_events` clears recorded observations.
 
-## Checks
+## Tables and checks
 
-Build the probe and test with `/usr/bin/clang++ -std=c++17 -Wall -Wextra
--Iinclude` on `tools/weapons_probe.cpp src/weapons.cpp` and
-`tests/native_weapons.cpp src/weapons.cpp`; sign local binaries with
-`codesign --force --sign -` before running.
-
-`.local/tools/python/bin/python tools/check_weapons_original.py
-"/path/to/Delta Force" weapons_probe [--report .local/reports/weapons-original-check.json]`
-verifies both tables against the executable bytes and replays 25 scripted
-scenarios on the original x86 code with unicorn, comparing slot, weapon,
-timers, per-class magazine/spare/pending, aim flag, burst counter and
-event order after every step (4521 lines, all compared equal).
-
-## Open points
-
-Action id to control mapping (`477D40`), the loadout table behind `AD3ED4`
-(`484970`), and the recoil/sway values owned by the camera side stay
-documented in `.local/opencode/weapons-needs.md`.
-
-## Mission loadout
-
-Bind `WeaponState::on_event` to run effects at each source call site. The
-callback runs before later pending, ammo, and timer writes. Use `take_events`
-to clear the recorded events after processing.
-
-Call `WeaponState::loadout` with sidearm, primary, and secondary recipe ids. It builds the ten slots from the 28-row table at `4F9704` and applies `4848C0` resupply. Secondary id 1 doubles primary reserve. Select slot 3 after mission initialization, as `4829F0` does.
+The static tables contain 39 weapons at `0x4F9934`, 28 classes at `0x4F9154`,
+and 28 loadout recipes at `0x4F9704`. The static weapon `+0x98` words are zero.
+`0x46BFB0` fills runtime definition indices from primary and secondary item
+IDs; resolve these indices against the mission definitions for rendering.
 
 ```sh
-python3 tools/check_weapon_loadout_original.py Df.exe WEAPONS_PROBE --report .local/loadout.json
+python3 tools/check_weapons_original.py GAME_FOLDER WEAPONS_PROBE
+python3 tools/check_player_weapon_runtime_original.py GAME_FOLDER PLAYER_WEAPON_RUNTIME_PROBE
 ```
 
-The replay checks all 21,952 recipe-id triples, the ten slot values, and all 84 ammo-state words after each loadout change.
+The component replay checks timing, ammo, tables, and ordered effect fixtures.
+The live replay executes original `0x484C20`, `0x45EA00`, firing paths, and
+complete `0x482B00`, with real shared RNG and sine instructions. It compares
+raw state and call order with declared geometry, input, CRT, and effect
+fixtures, including effects that change person pointers and player state.

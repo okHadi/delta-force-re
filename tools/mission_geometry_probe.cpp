@@ -10,6 +10,18 @@ namespace {
 template<class Bytes> void put(Bytes& bytes, std::size_t at, std::uint32_t value) {
     for (std::size_t i = 0; i < 4; ++i) bytes.at(at+i) = std::uint8_t(value >> (i*8));
 }
+template<class Bytes> std::int32_t integer(const Bytes& bytes,std::size_t at) {
+    const auto value = std::uint32_t(bytes[at]) | (std::uint32_t(bytes[at+1])<<8) |
+        (std::uint32_t(bytes[at+2])<<16) | (std::uint32_t(bytes[at+3])<<24);
+    return value <= 0x7fffffff ? std::int32_t(value) : std::int32_t(std::int64_t(value)-0x100000000LL);
+}
+void print_volume(const dfre::CollisionVolume& volume) {
+    std::cout << ' ' << volume.type << ' ' << volume.flags;
+    for (const auto value : volume.center) std::cout << ' ' << value;
+    std::cout << ' ' << volume.radius << ' ' << volume.horizontal_radius << ' ' << volume.horizontal_radius_copy;
+    for (const auto value : volume.half_extent) std::cout << ' ' << value;
+    for (const auto value : volume.bounds) std::cout << ' ' << value;
+}
 }
 // Input: translation[3] angles[3] query[3] terrain depth flags primary alternate.
 // Output: radius_64 height_60 returned_height entity_hit piece_count.
@@ -33,6 +45,22 @@ int main(int argc, char** argv) {
         }
         dfre::MissionGeometry geometry({dfre::mission_geometry_model(1, model, bytes),
             dfre::mission_geometry_model(2, model, bytes)});
+        if (mode == "--volumes") {
+            const auto descriptor = geometry.collision_model(1);
+            const dfre::MissionGeometryMatrixSource identity = [](const auto& binding,const auto&,const auto&) {
+                return dfre::MissionGeometryMatrices{true,
+                    std::vector<dfre::ModelMatrix>(binding.model->lods[0].meshes.size(),dfre::model_identity_matrix()),{}};
+            };
+            const auto state = geometry.collision_state(1,dfre::AiActorImage{},identity);
+            std::cout << descriptor.radius_64 << ' ' << descriptor.collision_present << ' ' << (state ? state->size() : 0);
+            if (state) for (const auto& mesh : *state) {
+                for (const auto bound : mesh.bounds) std::cout << ' ' << bound;
+                std::cout << ' ' << mesh.volumes.size();
+                for (const auto& volume : mesh.volumes) print_volume(volume);
+            }
+            std::cout << '\n';
+            return 0;
+        }
         std::string line;
         while (std::getline(std::cin, line)) {
             std::istringstream fields(line);
@@ -78,8 +106,32 @@ int main(int argc, char** argv) {
                 put(image, 0x24+i*4, std::uint32_t(value));
             }
             const dfre::MissionGeometryMatrixSource source = [](const auto& binding,const auto& actor,const auto&) {
-                return dfre::mission_geometry_callback_matrices(binding,actor);
+                const std::vector<std::uint8_t> prior(32);
+                return dfre::mission_geometry_callback_matrices(binding,actor,nullptr,nullptr,&prior,std::uint8_t(0));
             };
+            if (mode == "--collision") {
+                dfre::AiActorImage actor{};
+                std::array<std::int32_t,3> point{};
+                std::uint32_t flags{},primary{},alternate{},definition_flags{};
+                if (!(fields >> point[0] >> point[1] >> point[2] >> flags >> primary >> alternate >> definition_flags))
+                    throw std::invalid_argument("actor collision query is incomplete");
+                for (std::size_t axis = 0; axis < 3; ++axis) put(actor,0x24+axis*4,std::uint32_t(point[axis]));
+                put(image,0x6c,flags);put(image,0x10,primary);put(image,0x14,alternate);
+                dfre::ActorCollisionBindings bindings;
+                unsigned callbacks = 0;
+                std::uint32_t selected = 0;
+                std::optional<std::vector<dfre::ActorCollisionMesh>> state;
+                bindings.model = [&](auto handle) { selected=handle;return geometry.collision_model(handle); };
+                bindings.state = [&](auto handle,auto target) -> const std::vector<dfre::ActorCollisionMesh>* {
+                    ++callbacks;state=geometry.collision_state(handle,*target.image,source);return state ? &*state : nullptr;
+                };
+                bindings.definition = [&](auto) { return dfre::ActorCollisionDefinition{0,definition_flags}; };
+                const auto hit = dfre::actor_target_collision({&actor,1},{&image,2},bindings);
+                std::cout << hit;
+                for (std::size_t axis = 0; axis < 3; ++axis) std::cout << ' ' << integer(actor,0x24+axis*4);
+                std::cout << ' ' << callbacks << ' ' << selected << '\n';
+                continue;
+            }
             if (mode == "--world") {
                 dfre::WorldHitQuery query;
                 for (auto& value : query.origin) fields >> value;

@@ -1,5 +1,7 @@
 #include "dfre/mission_live.hpp"
+#include "dfre/mission_muzzle.hpp"
 #include "dfre/player.hpp"
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 int main(int argc,char** argv){try{
@@ -13,6 +15,19 @@ int main(int argc,char** argv){try{
     config.player_object_id=start->marker_object_id;
     const auto initial=assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,config);
     MissionAnimations animations(initial,cache);MissionGeometry geometry(initial,cache,store);
+    MissionMuzzle muzzle(initial,cache,animations);
+    for(std::uint32_t index=0;index<kWeaponCount;++index){
+        const auto& source=weapon_definitions()[index];const auto& binding=muzzle.weapon(index);
+        if(binding.primary_definition!=runtime_item_index(initial.definitions,source.primary_item) ||
+           binding.secondary_definition!=runtime_item_index(initial.definitions,source.secondary_item))
+            throw std::runtime_error("Muzzle weapon bindings differ from the loaded item table");
+    }
+    for(const auto& model:initial.models){
+        const auto source=store.read(model.name).bytes;std::int32_t height;
+        if(source.size()<0x6c)throw std::runtime_error("Model header is incomplete");
+        std::memcpy(&height,source.data()+0x68,4);
+        if(geometry.height_68(model.handle)!=height)throw std::runtime_error("Area model height differs from its source");
+    }
     MissionTickState state;init_mission_tick(state,{},initial,0);
     const auto matrices=initialized_mission_matrices(initial,cache,animations);
     bind_mission_animations(state,animations);bind_mission_geometry(state,geometry,matrices);

@@ -1,5 +1,6 @@
 #include "dfre/mission_live.hpp"
 #include <cstring>
+#include <exception>
 #include <map>
 #include <memory>
 
@@ -13,6 +14,29 @@ std::int32_t signed_word(const AiActorImage& image,std::size_t at){
 }
 std::int32_t signed_bits(std::uint32_t value){std::int32_t result;std::memcpy(&result,&value,4);return result;}
 }
+void apply_mission_actor_image(MissionTickState& state,const AiActorRef& ref,const AiActorImage& image){
+    auto* actor=state.actor_at(ref);
+    if(ref.group>=4 || !actor)throw MissionTickError("Actor image exceeds its mission table");
+    const auto index=word(image,0);
+    if(index!=word(image,4))throw MissionTickError("Actor image has different definition bindings");
+    if(index>=state.definitions.entries().size())throw MissionTickError("Actor definition exceeds its table");
+    const auto current=snapshot_mission_actor(state,ref);
+    const bool active=index!=0;
+    if(active && word(image,0xc)!=word(current,0xc))throw MissionTickError("Actor image needs an explicit person binding");
+    if(!active && word(image,0xc))throw MissionTickError("Inactive actor image retains a person binding");
+    if(word(image,0x18) && word(image,0x18)!=actor->field_18)
+        throw MissionTickError("Actor image needs an explicit character binding");
+    auto& runtime=state.runtime_for(ref);
+    if(word(image,0x18) && runtime.driver && word(image,0x80)!=std::uint32_t(runtime.driver->current_action()))
+        throw MissionTickError("Actor image needs its current animation action");
+    const auto person=active?actor->person_slot:std::nullopt;
+    *actor=read_live_actor_image(image,active,person);
+    state.extra_for(ref)=read_live_actor_extra(image);
+    state.stored_actor_images.at(ref.group).at(ref.index)=image;
+    runtime.byte_6e=image[0x6e];runtime.roll_38=word(image,0x38);runtime.vertical_44=signed_word(image,0x44);
+    runtime.ground_100=word(image,0x100);runtime.link_90=word(image,0x90);
+    if(!word(image,0x18)){runtime.driver.reset();runtime.animation=nullptr;}
+}
 void bind_mission_animations(MissionTickState& state,MissionAnimations& animations){
     for(std::size_t group=0;group<4;++group)for(std::size_t slot=0;slot<state.tables.groups[group].size();++slot){
         const auto instance=state.tables.groups[group][slot].field_18;
@@ -23,6 +47,16 @@ void bind_mission_animations(MissionTickState& state,MissionAnimations& animatio
         if(!actor || !actor->field_18)throw MissionTickError("Frame mask needs a character instance");
         return animations.controller(actor->field_18).frame_mask();
     };
+}
+std::uint32_t& mission_player_burst(MissionTickState& state){
+    if(!state.config.local_actor)throw MissionTickError("Player burst needs the local actor");
+    const auto* actor=state.actor_at({3,*state.config.local_actor});
+    if(!actor || !actor->person_slot || *actor->person_slot>=state.people.size())
+        throw MissionTickError("Player burst needs a current person record");
+    return state.person_extra(*actor->person_slot).field_6c;
+}
+void bind_mission_player_burst(MissionTickState& state){
+    state.weapons.burst_storage=[&state]()->std::uint32_t&{return mission_player_burst(state);};
 }
 void bind_mission_geometry(MissionTickState& state,const MissionGeometry& geometry,
     MissionGeometryMatrixSource matrices){
@@ -53,6 +87,54 @@ void bind_mission_geometry(MissionTickState& state,const MissionGeometry& geomet
         for(std::size_t axis=0;axis<3;++axis)result.position[axis]=signed_word(image,0x24+axis*4);
         result.rotation=word(image,0x90);result.offset_x=signed_word(image,0x3c);result.offset_y=signed_word(image,0x40);
         return result;
+    };
+}
+void bind_mission_actor_collision(MissionTickState& state,const MissionGeometry& geometry,
+    MissionCollisionEffect effect,MissionGeometryMatrixSource matrices){
+    state.world.target_collision=[&state,&geometry,effect=std::move(effect),matrices=std::move(matrices)](
+        const AiActorRef& actor,const AiActorRef& target){
+        struct Record {AiActorRef ref;AiActorImage image;};
+        std::map<std::uint32_t,Record> records;
+        const auto record=[&](std::uint32_t identity)->ActorCollisionActor{
+            if(identity<kActorHandleBase)throw MissionTickError("Collision actor handle is invalid");
+            const auto key=identity-kActorHandleBase;
+            const auto group=key/0x10000u,slot=key%0x10000u;
+            if(group>=4 || slot>=state.tables.groups[group].size())throw MissionTickError("Collision actor exceeds its table");
+            const auto ref=AiActorRef{std::uint8_t(group),slot};
+            auto found=records.find(identity);
+            if(found==records.end())found=records.emplace(identity,Record{ref,snapshot_mission_actor(state,ref)}).first;
+            return {&found->second.image,identity};
+        };
+        const auto flush=[&]{for(const auto& entry:records)apply_mission_actor_image(state,entry.second.ref,entry.second.image);};
+        const auto refresh=[&]{for(auto& entry:records)entry.second.image=snapshot_mission_actor(state,entry.second.ref);};
+        ActorCollisionBindings bindings;bindings.host=state.globals.mission_67f528!=0;
+        bindings.model=[&geometry](std::uint32_t handle){return geometry.collision_model(handle);};
+        std::optional<std::vector<ActorCollisionMesh>> mesh_state;
+        bindings.state=[&](std::uint32_t handle,ActorCollisionActor view)->const std::vector<ActorCollisionMesh>*{
+            mesh_state=geometry.collision_state(handle,*view.image,matrices);
+            return mesh_state?&*mesh_state:nullptr;
+        };
+        bindings.definition=[&](std::uint32_t index){
+            if(index>=state.definitions.entries().size())throw MissionTickError("Collision definition exceeds its table");
+            const auto& definition=state.definitions.entries()[index];
+            return ActorCollisionDefinition{definition.id,definition.flags24};
+        };
+        bindings.actor=record;
+        bindings.call=[&](const ActorCollisionCall& call){
+            flush();
+            std::optional<std::uint32_t> result;
+            try {if(effect)result=effect(state,call);}
+            catch(...){refresh();throw;}
+            refresh();
+            if(!result)throw MissionTickError("Collision effect is not bound: "+std::to_string(std::uint32_t(call.site)));
+            return *result;
+        };
+        const auto source=record(actor_handle(actor.group,actor.index));
+        const auto destination=record(actor_handle(target.group,target.index));
+        std::uint32_t result;
+        try {result=actor_target_collision(source,destination,bindings);}
+        catch(...){const auto error=std::current_exception();flush();std::rethrow_exception(error);}
+        flush();return result;
     };
 }
 MissionGeometryMatrixSource initialized_mission_matrices(const MissionRuntimeState& initial,

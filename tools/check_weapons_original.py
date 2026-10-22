@@ -18,7 +18,7 @@ Covered original routines: 4848C0 resupply, 483DD0 slot select,
 Ballistic calls (45EA00 projectile creation, 46FB40 bullet entity) and
 recoil/eye-height view state stay outside the comparison. The 45EA00 stub
 only reproduces the statically read burst counter side (45EB17-45EB5E:
-actor item definition +0x6C), which is timing-visible state.
+actor person +0x6C), which is timing-visible state.
 
 Usage: check_weapons_original.py GAME_FOLDER WEAPONS_PROBE [--report REPORT]
 """
@@ -732,7 +732,7 @@ def main():
     for i in range(39):
         d = struct.unpack_from('<17i', raw, weapon_off + i * 0xA8 + 0x64)
         want = [d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8], d[9],
-                d[10], d[11], d[14], d[15], d[16] & 0xFFFFFFFF]
+                d[10], d[11], d[14], d[15], d[16] & 0xFFFFFFFF, d[13] & 0xFFFFFFFF]
         got = tables['weapons'][i]
         if want != got:
             table_errors.append(('weapon', i, want, got))

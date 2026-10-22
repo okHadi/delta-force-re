@@ -18,6 +18,9 @@ struct MissionActorSeed {
 // Keep every original byte while loading the fields owned by the tick code.
 MissionActorImages initial_actor_images(const MissionRuntimeState& state);
 MissionActorSeed seed_mission_actors(const MissionRuntimeState& state);
+AiActorState read_live_actor_image(const AiActorImage& image,bool active,
+    std::optional<std::size_t> person);
+BehaviorActorExtra read_live_actor_extra(const AiActorImage& image);
 AiActorImage merge_live_actor_image(const AiActorImage& stored,const AiActorState& actor,
     const BehaviorActorExtra& extra,ActorPersonEncoding encoding);
 } // namespace dfre

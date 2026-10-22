@@ -166,6 +166,7 @@ MissionGeometryModel mission_geometry_model(std::uint32_t handle,
     result.handle = handle;
     result.model = &localized;
     result.bounds = {signed_word(word(source, 0x64)), signed_word(word(source, 0x60))};
+    result.height_68 = signed_word(word(source,0x68));
     result.faces = collision_face_boxes(source, 0);
     if (result.faces.size() != lod.faces.size())
         throw std::invalid_argument("mission geometry source face count differs from loaded model");
@@ -182,6 +183,8 @@ MissionGeometry::MissionGeometry(std::vector<MissionGeometryModel> models) : mod
             if (models_[j].handle == value.handle)
                 throw std::invalid_argument("mission geometry model handle is repeated");
         const auto& lod = value.model->lods.front();
+        const auto volumes = decode_collision_volumes(lod);
+        std::size_t volume_start = 0;
         value.meshes.clear();
         value.meshes.reserve(lod.meshes.size());
         for (const auto& mesh : lod.meshes) {
@@ -189,8 +192,14 @@ MissionGeometry::MissionGeometry(std::vector<MissionGeometryModel> models) : mod
                 throw std::invalid_argument("mission geometry mesh face range is invalid");
             const auto start = mesh.face_start;
             const auto end = std::size_t(start) + mesh.face_count;
+            const auto volume_count = word(mesh.raw,0x1c);
+            if (volume_count > volumes.size() - volume_start)
+                throw std::invalid_argument("mission geometry mesh collision range is invalid");
+            const auto volume_end = volume_start + volume_count;
             value.meshes.push_back({{lod.faces.begin()+start, lod.faces.begin()+end},
-                {value.faces.begin()+start, value.faces.begin()+end}});
+                {value.faces.begin()+start, value.faces.begin()+end},
+                {volumes.begin()+volume_start,volumes.begin()+volume_end}});
+            volume_start = volume_end;
         }
     }
 }
@@ -208,6 +217,44 @@ const MissionGeometryModel& MissionGeometry::require(std::uint32_t handle) const
 }
 AiActorBounds MissionGeometry::bounds(std::uint32_t handle) const {
     return handle ? require(handle).bounds : AiActorBounds{};
+}
+std::int32_t MissionGeometry::height_68(std::uint32_t handle) const {
+    return handle?require(handle).height_68:0;
+}
+ActorCollisionModel MissionGeometry::collision_model(std::uint32_t handle) const {
+    if (!handle) return {};
+    const auto& binding = require(handle);
+    return {binding.bounds.radius_64,!binding.model->lods.front().collision_volumes.empty()};
+}
+
+std::optional<std::vector<ActorCollisionMesh>> MissionGeometry::collision_state(std::uint32_t handle,
+    const AiActorImage& actor, const MissionGeometryMatrixSource& matrices) const {
+    if (!handle) return {};
+    const auto& binding = require(handle);
+    const auto& lod = binding.model->lods.front();
+    if (lod.collision_volumes.empty()) return {};
+    MissionGeometryMatrices state;
+    if (binding.model->render_types[0] == 0x676e7263u) state = generic_matrices(lod,actor);
+    else {
+        if (!matrices) throw std::invalid_argument("mission geometry tag requires a matrix source");
+        const std::array<std::int32_t,3> position{signed_word(word(actor,0x24)),
+            signed_word(word(actor,0x28)),signed_word(word(actor,0x2c))};
+        state = matrices(binding,actor,position);
+    }
+    if (!state.present) return {};
+    if (state.matrices.size() < lod.meshes.size())
+        throw std::invalid_argument("mission geometry collision matrix slots are incomplete");
+    std::vector<ActorCollisionMesh> result;
+    result.reserve(lod.meshes.size());
+    for (std::size_t mesh = 0; mesh < lod.meshes.size(); ++mesh) {
+        ActorCollisionMesh value;
+        value.matrix = state.matrices[mesh];
+        for (std::size_t bound = 0; bound < 6; ++bound)
+            value.bounds[bound] = signed_word(word(lod.meshes[mesh].raw,0x40+bound*4));
+        value.volumes = binding.meshes[mesh].volumes;
+        result.push_back(std::move(value));
+    }
+    return result;
 }
 
 std::optional<MissionGroundEntity> MissionGeometry::ground_entity(const AiActorImage& actor,
@@ -354,6 +401,19 @@ std::vector<WorldHitMesh> MissionGeometry::world_hit_meshes(std::uint32_t handle
         value.materials = &lod.materials;
         result.push_back(value);
     }
+    return result;
+}
+
+std::vector<ProjectileHitMesh> MissionGeometry::projectile_meshes(std::uint32_t handle,
+    const AiActorImage& actor,const std::vector<std::uint32_t>& material_ids,
+    const MissionGeometryMatrixSource& matrices) const {
+    const auto& binding=require(handle);
+    if(material_ids.size()!=binding.model->lods.front().materials.size())
+        throw std::invalid_argument("Projectile material bindings differ from the model table");
+    auto meshes=world_hit_meshes(handle,actor,matrices);
+    std::vector<ProjectileHitMesh> result;
+    result.reserve(meshes.size());
+    for(auto& mesh:meshes)result.push_back({std::move(mesh),material_ids});
     return result;
 }
 

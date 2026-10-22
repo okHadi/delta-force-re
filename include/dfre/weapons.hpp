@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <functional>
 #include <string_view>
+#include <stdexcept>
 #include <vector>
 namespace dfre {
 // Original weapon runtime state for Delta Force (1998).
@@ -27,6 +28,7 @@ struct WeaponDefinition {
     std::int32_t fire_delay = 0;      // +0x9C ticks between shots
     std::int32_t burst_field = 0;     // +0xA0
     std::uint32_t flags = 0;          // +0xA4, bit 0x20 = refire while held
+    std::uint32_t graphic_item_98 = 0; // +0x98 runtime item-definition index (static image zero)
 };
 
 struct WeaponClassDefinition {       // 0x4F9154 record
@@ -58,7 +60,7 @@ const std::array<WeaponDefinition, kWeaponCount>& weapon_definitions() noexcept;
 const std::array<WeaponClassDefinition, kWeaponClassCount>& weapon_classes() noexcept;
 
 enum class WeaponEventKind : std::uint8_t {
-    shot,      // 45EA00 projectile burst entry, value = weapon index
+    shot,      // isolated 45EA00 fixture entry, value = weapon index
     sound,     // 43E7D0 positional sound, value = sound id
     sound2,    // 43E720 global sound/asset, value = id
     place,     // 470F60 entity placement, value = item id
@@ -79,6 +81,10 @@ inline bool operator!=(const WeaponEvent& left, const WeaponEvent& right) noexce
 // Deterministic local-player weapon stage: 482B00 (tick), 483C70 (fire),
 // 483BD0 (change magazine), 483DD0 (slot select), 484B70 (cycle),
 // 484C20 (aim toggle), 4848C0 (resupply). Ballistic calls stay inputs.
+enum class WeaponViewKind : std::uint8_t { gun,launcher,melee,claymore,satchel,grenade };
+enum class WeaponShotMode : std::uint8_t { isolated_fixture, live_body };
+struct WeaponTimingState { std::int32_t fire=0,reload=0,raise=0; };
+
 class WeaponState {
 public:
     WeaponState();
@@ -107,16 +113,27 @@ public:
     std::int32_t reserve(int weapon_class) const noexcept { return reserve_[std::size_t(weapon_class)]; }   // C23938
     std::int32_t pending(int weapon_class) const noexcept { return pending_[std::size_t(weapon_class)]; }   // C23838
     bool aim_blocked() const noexcept { return aim_block_ != 0; }   // C23B64
-    std::int32_t burst_counter() const noexcept { return burst_counter_; } // actor item def +0x6C
+    std::int32_t burst_counter() const; // current person +0x6C
+    std::uint32_t aim_block_raw() const noexcept;
+    void set_aim_block_raw(std::uint32_t value) noexcept;
+    WeaponTimingState timing() const noexcept {return {fire_timer_,reload_timer_,raise_counter_};}
+    void restore_timing(WeaponTimingState value) noexcept {fire_timer_=value.fire;reload_timer_=value.reload;raise_counter_=value.raise;}
     std::int32_t raise_counter() const noexcept { return raise_counter_; } // C23A3C
     std::vector<WeaponEvent> take_events();
     // Execute effects at their source call sites, before later weapon writes.
     std::function<void(const WeaponEvent&)> on_event;
     // Original 47A290(0x8C) query at gun expiry. Empty uses tick's fixture input.
     std::function<bool()> trigger_query;
+    // Resolve current person +0x6C at each read/write. Empty is fixture storage.
+    std::function<std::uint32_t&()> burst_storage;
+    WeaponShotMode shot_mode=WeaponShotMode::isolated_fixture;
+    // Live gun view/shot/recoil block, before pending and timer writes.
+    std::function<void(WeaponViewKind,std::uint32_t weapon)> view_body;
 
 private:
     void emit(WeaponEvent event);
+    std::uint32_t& burst_cell();
+    const std::uint32_t& burst_cell() const;
     const WeaponClassDefinition& class_of(const WeaponDefinition&) const noexcept;
     void fan_dispatch();          // 483B10 by use class
     void expire_action();         // 483B70 by use class
@@ -136,7 +153,8 @@ private:
     void expire_laser();          // 483AA0
     void start_reload();          // 4832F0
     void complete_reload();       // 483390
-    void emit_shot();             // 45EA00 counter part + event
+    void run_view_body(WeaponViewKind kind,std::uint32_t weapon);
+    void emit_shot();             // isolated 45EA00 counter fixture + event
 
     std::array<std::uint8_t, kWeaponSlotCount> slot_map_{};
     int slot_ = 0;
@@ -146,7 +164,7 @@ private:
     std::array<std::int32_t, kWeaponClassCount> magazine_{};
     std::array<std::int32_t, kWeaponClassCount> reserve_{};
     std::int32_t aim_block_ = 0;
-    std::int32_t burst_counter_ = 0;
+    std::uint32_t burst_counter_ = 0;
     std::int32_t raise_counter_ = 0;
     bool unlimited_ammo_ = false;
     bool trigger_held_ = false;

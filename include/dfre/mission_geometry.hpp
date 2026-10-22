@@ -1,7 +1,9 @@
 #pragma once
 #include "dfre/ai_update.hpp"
+#include "dfre/actor_collision.hpp"
 #include "dfre/collision.hpp"
 #include "dfre/motion_clearance.hpp"
+#include "dfre/projectile_hits.hpp"
 #include "dfre/resources.hpp"
 #include "dfre/world_runtime.hpp"
 #include "dfre/world_hits.hpp"
@@ -13,6 +15,7 @@ namespace dfre {
 struct MissionGeometryMesh {
     std::vector<ModelFace> faces;
     std::vector<CollisionFaceBox> boxes;
+    std::vector<CollisionVolume> volumes;
 };
 struct MissionGeometryModel {
     std::uint32_t handle{};
@@ -20,6 +23,7 @@ struct MissionGeometryModel {
     AiActorBounds bounds{}; // Stored model header +64/+60.
     std::vector<CollisionFaceBox> faces; // First LOD, stored face order.
     std::vector<MissionGeometryMesh> meshes; // Stable per-mesh views for world hits.
+    std::int32_t height_68{}; // Stored header field used by area queries.
 };
 MissionGeometryModel mission_geometry_model(std::uint32_t handle,
     const Model& localized, const AssetBytes& source);
@@ -68,6 +72,17 @@ public:
     MissionGeometry(const MissionRuntimeState& state, const MissionAssetCache& cache,
         const AssetStore& assets);
     AiActorBounds bounds(std::uint32_t handle) const;
+    std::int32_t height_68(std::uint32_t handle) const;
+    ActorCollisionModel collision_model(std::uint32_t handle) const;
+    // Call after the actor-collision radius/presence gates. Nullopt is a null
+    // matrix callback result. Returned meshes own volume slices and matrices.
+    std::optional<std::vector<ActorCollisionMesh>> collision_state(std::uint32_t handle,
+        const AiActorImage& actor, const MissionGeometryMatrixSource& matrices = {}) const;
+    // Resolve after projectile radius gates. Material identities follow the
+    // bound model's material order and remain stable through impact dispatch.
+    std::vector<ProjectileHitMesh> projectile_meshes(std::uint32_t handle,
+        const AiActorImage& actor,const std::vector<std::uint32_t>& material_ids,
+        const MissionGeometryMatrixSource& matrices = {}) const;
     std::optional<MissionGroundEntity> ground_entity(const AiActorImage& actor,
         const std::array<std::int32_t,3>& query,
         const MissionGeometryMatrixSource& matrices = {}) const;

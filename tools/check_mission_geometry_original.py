@@ -251,10 +251,128 @@ with tempfile.TemporaryDirectory(prefix='dfre-geometry-') as folder:
       if got[at+1:at+13]!=matrix:raise ValueError(f'callback {key:#x} case{index} slot{mesh}: original{matrix}, native{got[at+1:at+13]}')
      callback_slots+=1
    callback_cases+=1;character_cases+=bool(pose)
+
+# Execute the real 485E30 loader with source LOD bytes. Only file-read and
+# allocation services are supplied; pointer slicing and geometry writes run.
+u.mem_map(0x2500000,0x1000000)
+loader={'reads':[],'heap':0x2500000}
+w(0x500b0c,0x2005000);u.mem_write(0x2005000,bytes(range(256)))
+w(0x500b10,0x2004000);u.mem_write(0x2004000,bytes(range(256)))
+def loader_hook(_u,address,_size,_data):
+ sp=u.reg_read(UC_X86_REG_ESP)
+ if address==0x499280:
+  destination,length=r(sp+4),r(sp+8)
+  if not loader['reads']:raise ValueError('original loader read beyond supplied source')
+  data=loader['reads'].pop(0)
+  if length!=len(data):raise ValueError('original loader requested an unexpected source span')
+  u.mem_write(destination,data)
+ else:
+  size,alignment=r(sp+4),r(sp+8)
+  pointer=(loader['heap']+alignment-1)&~(alignment-1)
+  loader['heap']=pointer+size
+  if loader['heap']>0x3500000:raise ValueError('original loader test heap is full')
+  u.reg_write(UC_X86_REG_EAX,pointer)
+ u.reg_write(UC_X86_REG_ESP,sp+4);u.reg_write(UC_X86_REG_EIP,r(sp))
+u.hook_add(unicorn.UC_HOOK_CODE,loader_hook,None,0x499280,0x499280)
+u.hook_add(unicorn.UC_HOOK_CODE,loader_hook,None,0x497f60,0x497f60)
+SECONDARY=MODEL+0x80
+selected_model=[0]
+def selected_read(_u,_access,address,_size,_value,_data):
+ selected_model[0]=1 if address==MODEL+0x64 else 2
+u.hook_add(unicorn.UC_HOOK_MEM_READ,selected_read,None,MODEL+0x64,MODEL+0x64)
+u.hook_add(unicorn.UC_HOOK_MEM_READ,selected_read,None,SECONDARY+0x64,SECONDARY+0x64)
+
+def original_load_lod(path):
+ b,verts,normals,faces,meshes,materials,header,hardpoints=parse(path)
+ wc=lambda at:struct.unpack_from('<I',b,at)[0]
+ start=128
+ for _ in range(wc(124)):start+=36+wc(start+16)+1024
+ total=struct.unpack_from('<I',header,20)[0]
+ loader['reads']=[header,b[start+184:start+184+total]];loader['heap']=0x2500000
+ w(0xc65dcc,0);w(0xc80d10,0)
+ original.call(0x485e30,[0,0,0])
+ loaded=u.reg_read(UC_X86_REG_EAX)
+ if not loaded or loader['reads']:raise ValueError('original LOD loader did not consume the stored first LOD')
+ key=struct.unpack_from('<I',b,40)[0]
+ address=next(address for tag,address in callback_rows if tag==key)
+ for model in (MODEL,SECONDARY):
+  u.mem_write(model,b[:124]);w(model+0x4c,address);w(model+0x50,loaded)
+ return b,loaded,address
+
+collision_names=['CRATE1.3DI','CRATE2.3DI','BRIDGE.3DI','HOUSE7.3DI','BARAK.3DI',
+ 'OILTANK.3DI','RUIN8.3DI','PICKUP.3DI','BMP.3DI','BRDM.3DI','BLACKHWK.3DI',
+ 'PALMX1.3DI','PINE.3DI','HUMVEE.3DI','RUSS04.3DI','TEMPLEA.3DI']
+collision_cases=collision_hits=collision_callbacks=collision_volume_fields=0
+collision_models=[]
+for name in collision_names:
+ path=args.models/name;b,loaded,address=original_load_lod(path)
+ present=bool(r(loaded+0xb0));mesh_count=r(loaded+0x98);mesh_pointer=r(loaded+0x9c)
+ # Compare typed native decoding with records produced by original485E30.
+ want=[sg(r(MODEL+0x64)),int(present),mesh_count if present else 0]
+ model_volumes=[]
+ if present:
+  for mesh in range(mesh_count):
+   part=mesh_pointer+mesh*112;count=r(part+0x1c);volume_pointer=r(part+0x20)
+   want.extend(struct.unpack('<6i',u.mem_read(part+0x40,24)));want.append(count)
+   for volume in range(count):
+    words=list(struct.unpack('<18I',u.mem_read(volume_pointer+volume*72,72)))
+    values=[value if index<2 else sg(value) for index,value in enumerate(words)]
+    want.extend(values[:11]+values[12:]);collision_volume_fields+=17
+    model_volumes.append((mesh,values))
+ native=subprocess.run([str(args.probe.resolve()),'--volumes',str(path)],capture_output=True,text=True,check=True)
+ got=list(map(int,native.stdout.split()))
+ if got!=want:raise ValueError(f'{name}: collision volume decode differs from original485E30')
+ rng=random.Random(0x4889c0+len(model_volumes))
+ rows=[]
+ radius=struct.unpack_from('<i',b,0x64)[0]
+ for index in range(120):
+  transform=[rng.randrange(-8,9)*65536 for _ in range(3)]+[rng.choice([0,0x40000000,0x80000000,rng.randrange(2**32)]),0,0]
+  point=[sg(transform[axis]+rng.randrange(-max(radius*2,1),max(radius*2,1))) for axis in range(3)]
+  flags=rng.choice([0,8,0x1008]);primary=rng.choice([0,1,1]);alternate=rng.choice([0,2])
+  rows.append([*transform,*point,flags,primary,alternate,0x10 if index%7==0 else 0])
+ # Actor points are sampled from actual loaded volume centres and edges.
+ for mesh,volume in model_volumes:
+  for variant in range(12):
+   transform=[3*65536,-4*65536,5*65536,variant*0x10000000,0,0]
+   u.mem_write(ENTITY,bytes(0x114))
+   for axis,value in enumerate(transform):w(ENTITY+0x24+axis*4,value)
+   original.call(address,[loaded,ENTITY,0]);matrices=u.reg_read(UC_X86_REG_EAX)
+   if not matrices:continue
+   point=volume[2:5].copy()
+   point[variant%3]+=(-1 if variant&1 else 1)*(0 if variant<3 else 0xbfff)
+   u.mem_write(POINT,struct.pack('<3i',*point))
+   original.call(0x45cda0,[matrices+mesh*64,POINT,POINT+0x20])
+   world=list(struct.unpack('<3i',u.mem_read(POINT+0x20,12)))
+   rows.append([*transform,*world,8 if variant&1 else 0,1,2 if variant&1 else 0,0x10 if variant%5==0 else 0])
+ native=subprocess.run([str(args.probe.resolve()),'--collision',str(path)],input=''.join(' '.join(map(str,row))+'\n' for row in rows),capture_output=True,text=True)
+ if native.returncode:raise ValueError(f'{name}: native actor collision failed: {native.stderr}')
+ replies=[list(map(int,line.split())) for line in native.stdout.splitlines()]
+ if len(replies)!=len(rows):raise ValueError('native actor collision row count differs')
+ model_hits=0
+ for index,(row,got) in enumerate(zip(rows,replies)):
+  transform=row[:6];point=row[6:9];flags,primary,alternate,definition_flags=row[9:]
+  u.mem_write(ACTOR,bytes(0x114));u.mem_write(ENTITY,bytes(0x114))
+  for axis,value in enumerate(point):w(ACTOR+0x24+axis*4,value)
+  for axis,value in enumerate(transform):w(ENTITY+0x24+axis*4,value)
+  w(ENTITY+0x10,MODEL if primary else 0);w(ENTITY+0x14,SECONDARY if alternate else 0);w(ENTITY+0x6c,flags)
+  w(ENTITY+4,0x2350000);w(0x2350024,definition_flags);w(0x67f528,0)
+  selected_model[0]=0;callback_count=[0]
+  def called(_u,_address,_size,_data):callback_count[0]+=1
+  hook_id=u.hook_add(unicorn.UC_HOOK_CODE,called,None,address,address)
+  original.call(0x4889c0,[ACTOR,ENTITY]);u.hook_del(hook_id)
+  code=u.reg_read(UC_X86_REG_EAX)
+  want=[code,*struct.unpack('<3i',u.mem_read(ACTOR+0x24,12)),callback_count[0],selected_model[0]]
+  if got!=want:raise ValueError(f'{name} collision{index}: native{got} original{want} row{row}')
+  collision_cases+=1;collision_hits+=bool(code);collision_callbacks+=callback_count[0];model_hits+=bool(code)
+ collision_models.append(dict(name=name,sha256=hashlib.sha256(b).hexdigest(),meshes=mesh_count,
+  volumes=len(model_volumes),cases=len(rows),hits=model_hits))
 report=dict(source_sha256=base.EXPECTED_HASH,cases=checked,hits=hits,models=reports,
  world_cases=world_cases,world_hits=world_hits,callback_cases=callback_cases,
  callback_slots=callback_slots,character_pose_cases=character_cases,callback_sources=callback_sources,
+ collision_cases=collision_cases,collision_hits=collision_hits,collision_callbacks=collision_callbacks,
+ collision_volume_fields=collision_volume_fields,collision_models=collision_models,
  original_helper_calls={hex(a):n for a,n in calls.items()},
- hooks=['terrain47DF40 returns explicit terrain height; no geometry helper hooks'],mismatches=0)
+ hooks=['terrain47DF40 returns explicit terrain height; no geometry helper hooks',
+        '485E30 file reads and allocation supplied from the unchanged source model'],mismatches=0)
 if args.report:args.report.write_text(json.dumps(report,indent=2)+'\n')
 print(json.dumps(report,indent=2))

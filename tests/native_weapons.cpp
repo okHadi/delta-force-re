@@ -41,6 +41,18 @@ int main() { try {
     }
 
     {
+        dfre::WeaponState live;std::array<std::uint8_t,10> slots{};slots.fill(27);
+        live.set_slot_map(slots);live.resupply(false);live.restore_timing({1,0,0});
+        live.on_event=[&](const dfre::WeaponEvent& event){
+            require(event.kind==dfre::WeaponEventKind::queue && event.value==0x2c,"laser expiry queue");
+            slots.fill(28);live.set_slot_map(slots);
+        };
+        live.tick(false);
+        require(live.current_weapon()==28 && live.pending(0)==1 && live.pending(27)==0,
+            "laser expiry writes the class cached before the queue effect");
+    }
+
+    {
         dfre::WeaponState selected;
         selected.loadout({6,9,21});
         require(selected.slot_map()==std::array<std::uint8_t,10>{27,1,5,6,10,7,29,30,0,33},
