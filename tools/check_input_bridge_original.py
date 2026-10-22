@@ -30,15 +30,50 @@ class Rig(Original):
         self._return_from(address, self.digit)
 
     def digit(self):
-        if self.mutation:
+        if self.mutation&1:
             self._write_u32(INPUT_MODE, 1)
             self._write_u32(DIGIT_FLAG, 0)
         return 0
 
     def __init__(self, source, bindings):
+        self.split_enabled=False
         super().__init__(source)
         self.bindings = bindings
         self._return_from(0x479A80, self.chat)
+        def pulse_hook(uc,address,size,user):
+            if self.split_enabled:
+                event=self._read_u32(uc.reg_read(UC_X86_REG_ESP)+4)
+                self.order.append(f'P,{event}')
+        self.u.hook_add(UC_HOOK_CODE,pulse_hook,begin=PULSE,end=PULSE)
+
+    def _install_stubs(self):
+        # Explicit source helper fixtures; DISPATCH can run the real PULSE body.
+        self._return_from(STRING_GET, SCRATCH + 0xf000)
+        self._return_from(RESET_MOUSE, 0)
+        self._return_from(READ_AXES, 0)
+        self._return_from(STEADY, lambda: self.steady_value)
+        self._log_from(DIGIT_HANDLER, 'digit', 1)
+        self._log_from(FLIGHT_PAGE, 'flight_page', 1)
+        self._log_from(MENU_PAGE, 'menu_page', 1)
+        def dispatch_hook(uc,address,size,user):
+            sp=uc.reg_read(UC_X86_REG_ESP);ret=self._read_u32(sp)
+            values=list(struct.unpack('<3I',self._read(sp+4,12)));self.dispatch_log.append(tuple(values))
+            if self.split_enabled:self.order.append('D,'+','.join(map(str,values)))
+            if self.split_enabled and self.phase=='consume' and self.budget:
+                self.budget-=1
+                if self.mutation&2:
+                    self._write_u32(MENU_FLAG,self._read_u32(MENU_FLAG)^1)
+                    actor=self._read_u32(ACTOR_PTR);self._write_u32(actor+0x6c,self._read_u32(actor+0x6c)^4)
+                # Execute original47A150 in the same machine and call stack.
+                # Its return trampoline removes its argument before the original
+                # 479450 caller resumes with the three dispatch arguments intact.
+                trampoline=SCRATCH+0xe000
+                self.u.mem_write(trampoline,b'\x83\xc4\x04\x31\xc0\x68'+struct.pack('<I',ret)+b'\xc3')
+                self._write_u32(sp-4,trampoline);self._write_u32(sp,self.during)
+                uc.reg_write(UC_X86_REG_ESP,sp-4);uc.reg_write(UC_X86_REG_EIP,PULSE)
+            else:
+                uc.reg_write(UC_X86_REG_ESP,sp+4);uc.reg_write(UC_X86_REG_EAX,0);uc.reg_write(UC_X86_REG_EIP,ret)
+        self.u.hook_add(UC_HOOK_CODE,dispatch_hook,begin=DISPATCH,end=DISPATCH)
 
     def chat(self):
         if self._read_u32(INPUT_MODE) != 1:
@@ -46,7 +81,7 @@ class Rig(Original):
         sp = self.u.reg_read(UC_X86_REG_ESP) - 4  # _return_from has popped the return address
         character, key = struct.unpack('<2I', self._read(sp + 4, 8))
         self.chats.append([character, key])
-        if self.mutation:
+        if self.mutation&1:
             self._write_u32(INPUT_MODE, 0)
             # Declared chat fixture appends the KEY_PRESS(34,0) producer state.
             self.u.mem_write(KEY_STATE + 34, b'\x01')
@@ -57,7 +92,8 @@ class Rig(Original):
             self._write_u32(0xD096B8, slot)
         return 0
 
-    def run(self, head, events):
+    def run(self, head, events, split=None):
+        self.split_enabled=False
         self._zero_state()
         self.restore_table()
         base = SCRATCH + 0x40000
@@ -71,7 +107,7 @@ class Rig(Original):
         tick, mode, live, windowed, active, scale, flip, steady, menu, actor_flags, self.mutation = head
         for address, value in [(INPUT_MODE, mode), (RUN_FLAG, 0 if live else 1), (WINDOWED, windowed),
                                (WINDOW_ACTIVE, active), (MOUSE_SCALE, scale), (MOUSE_FLIP, flip),
-                               (MENU_FLAG, menu), (DIGIT_FLAG, 1 if self.mutation else 0)]:
+                               (MENU_FLAG, menu), (DIGIT_FLAG, 1 if self.mutation&1 else 0)]:
             self._write_u32(address, value)
         actor = SCRATCH + 0x50000
         self._write_u32(ACTOR_PTR, actor)
@@ -101,6 +137,16 @@ class Rig(Original):
                 self._call(0x498B00, [a])
             elif kind == 7:
                 self._write_u32(0xD096BC, a)
+        if split:
+            consume_tick,between,self.during,self.budget=split
+            self.split_enabled=True;self.phase='begin';self.order=['B']
+            self._call(FRAME_PUSH,[tick])
+            def queued():return [list(struct.unpack('<4I',self._read(QUEUE+i*0x20,16))) for i in range(self._read_u32(QUEUE_COUNT))]
+            begin=queued();self.phase='between'
+            if between:self._call(PULSE,[between])
+            self.order.append('C');self.phase='consume';self._call(FRAME_CONSUME,[consume_tick]);self.split_enabled=False
+            return {'begin':begin,'calls':[list(call) for call in self.dispatch_log],'queue':queued(),'order':self.order,
+                    'state':[self.dx,self.dy,self._read_u32(WINDOW_ACTIVE),self._read_u32(MOUSE_BUTTONS),self._read_u32(MENU_FLAG),self._read_u32(actor+0x6c)]}
         self._call(FRAME_PUSH, [tick])
         self._call(FRAME_CONSUME, [tick])
         # The source executable has zero query fields at row140, separate from
@@ -157,9 +203,42 @@ def main():
         expected, actual = rig.run(head, events), json.loads(row)
         if actual != expected:
             raise AssertionError(f'case{i}: {lines[i]}\noriginal={expected}\nnative={actual}')
-    report = {'status': 'passed', 'cases': len(cases), 'source_sha256': SOURCE_HASH,
-              'real_bodies': '41CE20,47A300,498AE0,498A60,498A70,498B00,498B20,498B80,479750,479450,47A290',
-              'providers': 'axes, steady, dispatch, digit and chat bodies; callback source mutation'}
+    split_cases=[]
+    for budget in (0,1,2,31,32,40):
+        for between in (0,2,8,0x20,0x100,0x200):
+            for consume_tick in (0,9,10):
+                split_cases.append(([10,0,1,0,1,1,0,0,0,0,2],[(0,17,0),(4,3,-4)],(consume_tick,between,8,budget)))
+    for tick in (0x7fffffff,0x80000000,0xffffffff):
+        for consume_tick in (0,tick,(tick-1)&0xffffffff):
+            split_cases.append(([tick,0,1,0,1,1,0,0,0,0,0],[(2,1,0)],(consume_tick,8,0x200,2)))
+    for count in (0,1,30,31,32,33,64):
+        split_cases.append(([100,0,1,0,1,1,0,0,0,0,0],[(2,1,0)]*count,(99,8,0x200,10)))
+    for i in range(1200):
+        tick=rng.choice([0,1,10,0x7fffffff,0x80000000,0xffffffff])
+        head=[tick,rng.randrange(3),rng.randrange(2),rng.randrange(2),rng.randrange(2),rng.choice([0,1,128,-1]),rng.randrange(2),rng.randrange(2),rng.randrange(2),rng.choice([0,4]),rng.choice([0,2])]
+        events=[]
+        for _ in range(rng.randrange(36)):
+            kind=rng.randrange(6)
+            if kind in (0,1):events.append((kind,rng.choice(keys),rng.randrange(2)))
+            elif kind in (2,3):events.append((kind,rng.randrange(4),0))
+            elif kind==4:events.append((kind,rng.randrange(-100,101),rng.randrange(-100,101)))
+            else:events.append((kind,0,0))
+        split=(rng.choice([0,tick,(tick-1)&0xffffffff]),rng.choice([0,2,8,0x20,0x100,0x200]),rng.choice([2,8,0x20,0x100,0x200]),rng.choice([0,1,2,8,40]))
+        split_cases.append((head,events,split))
+    split_lines=[' '.join(map(str,head+list(split)+[len(events)]+[n for event in events for n in event])) for head,events,split in split_cases]
+    process=subprocess.run([str(args.probe.resolve()),'split-oracle'],input='\n'.join(split_lines)+'\n',text=True,capture_output=True)
+    if process.returncode:raise RuntimeError(process.stderr)
+    split_rows=process.stdout.splitlines();assert len(split_rows)==len(split_cases)
+    injected=remaining=0
+    for i,((head,events,split),row) in enumerate(zip(split_cases,split_rows)):
+        expected,actual=rig.run(head,events,split),json.loads(row)
+        if expected!=actual:
+            if args.report:args.report.with_suffix('.failure.json').write_text(json.dumps({'case':i,'input':split_lines[i],'expected':expected,'actual':actual},indent=2)+'\n')
+            raise AssertionError(f'split case{i}: {split_lines[i]}\noriginal={expected}\nnative={actual}')
+        injected+=sum(entry.startswith('P,') for entry in expected['order'][expected['order'].index('C')+1:]);remaining+=bool(expected['queue'])
+    report = {'status': 'passed', 'cases': len(cases), 'split_cases':len(split_cases),'during_dispatch_real_pulses':injected,'split_cases_with_remaining_queue':remaining,'source_sha256': SOURCE_HASH,
+              'real_bodies': '41CE20,47A300,498AE0,498A60,498A70,498B00,498B20,498B80,47A150,479FA0,47A000,47A070,479750,479450,47A290',
+              'providers': 'axes, steady, dispatch, digit and chat bodies; callback source mutation; real47A150 executed between479750/479450 and during477D40 fixtures','file_replay_fixture':'BD4840=1, no remaining file records','dispatch_fixture':'477D40 capture plus an optional real47A150 call on the original stack through a balanced return trampoline'}
     if args.report: args.report.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report))
 

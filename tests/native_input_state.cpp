@@ -78,6 +78,14 @@ void check_queue() {
     require(queue.push({99, 0, 0, 0}) && queue.size() == 32, "Push after pop");
     queue.clear();
     require(queue.size() == 0 && !queue.pop(record), "Clear and empty pop");
+    queue.push({1,0,0,0});queue.push({2,0xffffffffu,0,0});
+    require(queue.due_count(0x80000000u)==0,"Signed minimum query keeps a zero-time head");
+    require(queue.due_count(0xffffffffu)==0,"Signed negative query keeps a zero-time head");
+    require(queue.due_count(0)==2,"Zero query keeps its all-records rule");
+    queue.clear();queue.push({1,0x80000000u,0,0});queue.push({2,0xffffffffu,0,0});queue.push({3,1,0,0});
+    require(queue.due_count(0x80000000u)==1,"Signed minimum tick is due at equality");
+    require(queue.due_count(0xffffffffu)==2,"Signed negative ticks precede positive ticks");
+    require(queue.due_count(1)==3,"Signed positive query includes negative timestamps");
 }
 
 void check_held_keys() {

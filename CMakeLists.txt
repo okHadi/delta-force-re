@@ -65,6 +65,8 @@ set(DFRE_RUNTIME_MODULES
     mission_logic
     mission_actor_lifecycle
     mission_host_pump
+    mission_client_outbox
+    mission_round_services
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -192,6 +194,9 @@ if(BUILD_TESTING)
     add_executable(native_mission_messages_live tests/native_mission_messages_live.cpp)
     target_link_libraries(native_mission_messages_live PRIVATE dfre_core)
     add_test(NAME native_mission_messages_live COMMAND native_mission_messages_live)
+    add_executable(native_mission_results_live tests/native_mission_results_live.cpp)
+    target_link_libraries(native_mission_results_live PRIVATE dfre_core)
+    add_test(NAME native_mission_results_live COMMAND native_mission_results_live)
     foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
         add_executable(native_${dfre_module} tests/native_${dfre_module}.cpp)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)

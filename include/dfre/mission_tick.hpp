@@ -284,6 +284,9 @@ struct MissionTickInputs {
     // view at the pump stage (the original reads current fields).
     std::vector<MissionCommandEvent> commands;
     std::function<DispatchResult(std::uint32_t, std::int32_t)> dispatch_command;
+    // Live 479450 source. Query again after each dispatch and its effects.
+    // The argument is the tick captured when the command stage starts.
+    std::function<std::optional<MissionCommandEvent>(std::uint32_t)> next_command;
     // Precomputed alternative: already-dispatched results in event order.
     std::vector<DispatchResult> dispatch;
 };

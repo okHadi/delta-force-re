@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -13,7 +14,7 @@ namespace dfre {
 
 // Live command table. The original keeps it at 0x4fb2fc: 121 rows of 0x2c
 // bytes with id, name, key (+0x24), mouse (+0x26), joystick (+0x28) and flags
-// (+0x2a). Rows with flags bit 2 are not player commands.
+// (+0x2a). Rows with flags bit 2 are polled commands.
 struct CommandBinding {
     std::uint32_t id=0;
     std::string_view name;
@@ -42,7 +43,7 @@ public:
     void set_binding(std::size_t index,std::uint32_t key,std::uint32_t mouse);
     // 0x41ce20 with the shipped 47 pairs; rows missing from the table are skipped.
     void apply_profile_bindings(const ActionBindings& bindings);
-    // 0x47a300: indices of rows whose flags bit 2 is clear, in table order.
+    // 0x47a300: indices of rows whose flags bit 2 is set, in table order.
     std::vector<std::uint32_t> active_command_indices() const;
 
 private:
@@ -50,7 +51,7 @@ private:
 };
 
 // 0x479fa0/0x47a000/0x47a070: the 0xbd4850 action queue, 32 records of
-// {id, tick, value, extra}. Records are due when tick <= query tick; a query
+// {id, tick, value, extra}. Records are due by signed32 tick order; a query
 // tick of 0 reports every record.
 struct InputRecord {
     std::uint32_t id=0,tick=0,value=0,extra=0;
@@ -113,7 +114,7 @@ struct InputMouseLook {
     bool flip=false,steady=false;
 };
 
-// One frame of inputs for 0x479750 plus the live half of 0x479450.
+// Current inputs for 0x479750.
 struct FrameInput {
     std::uint32_t tick=0;
     std::array<std::uint8_t,256> keys{};
@@ -171,8 +172,9 @@ public:
     bool command_active(std::size_t index,const std::array<std::uint8_t,256>& keys,
                         std::uint32_t mouse_buttons,std::uint32_t joystick_buttons) const;
 
-    // 0x479750 and the live half of 0x479450.
+    // 0x479750 input production, followed by the 0x479450 queue operations.
     FrameOutput begin_frame(const FrameInput& input);
+    std::optional<InputRecord> pop_due(std::uint32_t tick);
     std::vector<InputRecord> take_due(std::uint32_t tick);
 
 private:

@@ -113,7 +113,8 @@ bool InputQueue::pop(InputRecord& record) {
 std::size_t InputQueue::due_count(std::uint32_t tick) const {
     if(tick==0)return count_;
     std::size_t due=0;
-    while(due<count_&&records_[due].tick<=tick)++due;
+    // 47A090 uses signed JL. Flipping the sign bit keeps that order portable.
+    while(due<count_&&(records_[due].tick^0x80000000u)<=(tick^0x80000000u))++due;
     return due;
 }
 
@@ -354,13 +355,13 @@ FrameOutput InputStage::begin_frame(const FrameInput& input) {
     return out;
 }
 
+std::optional<InputRecord> InputStage::pop_due(std::uint32_t tick) {
+    if(!queue_.due_count(tick))return std::nullopt;
+    InputRecord record;queue_.pop(record);return record;
+}
 std::vector<InputRecord> InputStage::take_due(std::uint32_t tick) {
     std::vector<InputRecord> out;
-    while(queue_.due_count(tick)>0){
-        InputRecord record;
-        queue_.pop(record);
-        out.push_back(record);
-    }
+    while(const auto record=pop_due(tick))out.push_back(*record);
     return out;
 }
 

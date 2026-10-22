@@ -1,4 +1,5 @@
 #include "dfre/mission_tick.hpp"
+#include "dfre/input_bridge.hpp"
 #include <iostream>
 #include <cstring>
 #include <stdexcept>
@@ -16,6 +17,46 @@ void seed(MissionTickState& state,bool paused=false){
     state.world.bounds=[](std::uint32_t){return AiActorBounds{};};
 }
 int main(){
+    {
+        MissionTickState state;seed(state,true);
+        state.weapons.set_slot_map({0,0,0,1,2,0,0,0,0,0});state.weapons.resupply(false);state.weapons.select_slot(3);
+        auto bridge=InputBridge::with_shipped_profile();InputSourceFlags flags;flags.live_input=true;
+        InputEvent forward{InputKind::key_down};forward.key=38;bridge.feed(forward);
+        const auto old=state.world.external_stage;
+        state.world.external_stage=[&](auto& current,const auto& call)->std::optional<std::uint32_t>{
+            if(call.address==0x479750){CHECK(bridge.begin_frame(call.args[0],flags).commands.empty());return 0;}
+            if(call.address==0x479ed0){CHECK(bridge.stage().queue().size()==2);InputEvent fire{InputKind::pointer_down};fire.button=1;bridge.feed(fire);return 0;}
+            return old(current,call);
+        };
+        MissionTickInputs input;std::vector<std::uint32_t> commands;
+        input.next_command=[&](auto tick)->std::optional<MissionCommandEvent>{
+            CHECK(tick==1);if(!commands.empty())CHECK(state.weapons.slot()==4);
+            const auto record=bridge.pop_due(tick);if(!record)return std::nullopt;
+            return MissionCommandEvent{record->id,std::int32_t(record->value)};
+        };
+        input.dispatch_command=[&](auto id,auto){
+            commands.push_back(id);DispatchResult result;
+            if(id==0xa3){
+                result.calls.push_back({DispatchCallKind::weapon_select,0x483dd0,{4},false});
+                InputEvent fire{InputKind::pointer_down};fire.button=1;bridge.feed(fire);
+                state.tick_67dbf4=777;
+            }
+            return result;
+        };
+        mission_tick(state,input);
+        CHECK(commands==std::vector<std::uint32_t>({0xa3,143,140,140}));
+        CHECK(bridge.stage().queue().size()==0);
+        state.world.external_stage=old;
+        MissionTickInputs missing;bool consumed=false;
+        missing.next_command=[&](auto)->std::optional<MissionCommandEvent>{consumed=true;return std::nullopt;};
+        bool failed=false;try{mission_tick(state,missing);}catch(const MissionTickError&){failed=true;}
+        CHECK(failed&&!consumed);
+        unsigned pops=0;MissionTickInputs throwing;
+        throwing.next_command=[&](auto)->std::optional<MissionCommandEvent>{++pops;return MissionCommandEvent{1,0};};
+        throwing.dispatch_command=[](auto,auto)->DispatchResult{throw std::runtime_error("Command stopped");};
+        failed=false;try{mission_tick(state,throwing);}catch(const std::runtime_error&){failed=true;}
+        CHECK(failed&&pops==1);
+    }
     {
         MissionTickState state;seed(state,true);state.mission_timer_67dbe8=10;
         auto first=mission_tick(state,{});CHECK(first.paused);CHECK(first.tick==1);CHECK(state.globals.command_tick_6e471c==1);CHECK(state.tick_6e4720==0);CHECK(state.tick_6e4724==0);CHECK(state.mission_timer_67dbe8==10);

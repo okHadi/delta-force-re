@@ -143,7 +143,8 @@ public:
             const auto state=client(i,0x1c4,2);if(state!=5&&(state==3||state==4))client_put(i,0x1c4,2,2);
             build(p);logic_need(b_.publish,"Mission result needs the current client outbox producer")(i,0x1e,p);
         }
-        if(read(0x67f53c)==2||read(0x67f53c)==4||read(0x67f53c)==5){
+        const auto game_type=read(0x67f53c);
+        if(game_type==2||game_type==4||game_type==5){
             put(0x6e5774,read(0x6e5774)+1);
             if(mode==1)put(0x6e576c,read(0x6e576c)+1);else if(mode==2)put(0x6e5770,read(0x6e5770)+1);
         }

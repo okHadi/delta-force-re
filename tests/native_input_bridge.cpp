@@ -499,6 +499,24 @@ void check_ring_and_live_sources(){
     require(failed && contains(ids(error.frame(2).commands),162),"Provider error preserves the unread ring event");
 }
 
+void check_split_frame() {
+    auto bridge=dfre::InputBridge::with_shipped_profile();
+    bridge.feed(key_down(38));
+    const auto frame=bridge.begin_frame(10,active_flags());
+    require(frame.commands.empty()&&bridge.stage().queue().size()==2,
+            "Input sampling must keep commands in the shared queue");
+    bridge.feed(pointer_event(dfre::InputKind::pointer_down,1));
+    require(bridge.pop_due(9)==std::nullopt,"Future head record must stay queued");
+    const auto first=bridge.pop_due(10);
+    require(first&&first->id==0xa3,"Split frame starts with the tick command");
+    bridge.feed(pointer_event(dfre::InputKind::pointer_down,1));
+    std::vector<std::uint32_t> remaining;
+    while(const auto record=bridge.pop_due(10))remaining.push_back(record->id);
+    require(remaining==std::vector<std::uint32_t>({143,140,140}),
+            "Split drain must include commands added between dispatches");
+    require(bridge.stage().queue().size()==0,"Split drain left due commands");
+}
+
 } // namespace
 
 int main() {
@@ -515,6 +533,7 @@ int main() {
         check_adapter_and_dispatch();
         check_sequence();
         check_ring_and_live_sources();
+        check_split_frame();
         std::cout << "input_bridge checks passed\n";
         return 0;
     } catch (const std::exception& error) {

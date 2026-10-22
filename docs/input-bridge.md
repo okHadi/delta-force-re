@@ -5,8 +5,13 @@ event in poll order. Keys use Windows VK values. Buttons use 1 left, 2 right,
 3 middle; legacy button 0 means left. Supply relative pointer movement through
 `pointer_delta`.
 
-Call `frame(mission_tick,flags)` once per mission update. Use the mission tick
-counter for queue timestamps. Supply current input mode, live-input gate,
+Call `begin_frame(mission_tick, flags)` at the `479750` input stage. Keep
+commands in the shared queue until `479450`. At that stage, call `pop_due`
+after each completed command and its effects. With `mission_tick`, bind
+`MissionTickInputs::next_command` to that pop operation and bind the live
+dispatcher. Use the captured command-stage tick for queue timestamps.
+
+Supply current input mode, live-input gate,
 window state, mouse scale/flip, steady gate, joystick buttons and global-key
 state. Use `set_live_sources()` to read canonical game cells before each key
 and sample stage and to execute global effects and chat bodies synchronously.
@@ -28,9 +33,12 @@ Supply loaded rows beyond the profile table with `set_query_row_source()`.
 The source executable's row `8C` has zero key/mouse/joystick words; command
 ID `140` has a separate profile row. Keep these values separate.
 
-Send `frame.commands` to the mission command pump in order. The frame starts
-with `A3`, which clears per-frame control bits. Global immediate calls occur
-during input generation, before queued command consumption.
+The queue starts each frame with `A3`, which clears per-frame control bits.
+Global immediate calls run during input generation. Keep each synchronous
+effect complete before the next command pop.
+
+Use `frame(tick, flags)` to sample and collect commands in one call for isolated
+callers. It returns the same records through `frame.commands`.
 
 Run `native_input_bridge` and `native_input_state`. Run
 `check_input_bridge_original.py GAME INPUT_BRIDGE_PROBE --report REPORT`

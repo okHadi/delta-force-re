@@ -31,7 +31,7 @@ This stage turns per-profile bindings and raw device state into the exact action
 | `479630` | Only when `503130==0` and `CC0884!=0` (windowed off, window active). `497D20` fills `D0934C`/`D09350`; flip `67F4FC==0` negates Y; scale `(67F500<<14)>>2` when `484740` is nonzero; value `(axis<<16 * scale)>>16`; X>0 `9E`, X<0 `9D`, Y>0 `9B`, Y<0 `9C` with positive magnitudes; then polled rows with `mouse & D09348` push |
 | `47A150` | Mouse message pulses, registered by `497A30` and called from `497A40`: `2` left, `8` right (menu `67DBC0` or actor `+6C` bit 2 queue `D`), `20` middle, `100` queue `C0`, `200` queue `BF`. First matching row only, tick 0 |
 
-The queue `BD4850` holds 32 records of `{id, tick, value, extra}` (`479FA0` push, `47A000` pop). `47A070(tick)` counts leading records with `tick <= query`, and query 0 reports all. `479450` pops every due record and calls `477D40(id, value, extra)`.
+The queue `BD4850` holds 32 records of `{id, tick, value, extra}` (`479FA0` push, `47A000` pop). `47A070(tick)` counts leading records with signed32 `tick <= query`, and query 0 reports all. `479450` pops every due record and calls `477D40(id, value, extra)`.
 
 Discrete commands (`attack_1` 140, `attack_2` 141, `scope` 6, `Prone` 162, weapons, menus) fire once per key event or mouse press. Polled commands (`move_forward` 143, `move_back` 142, jump 144, look 145/146, slide 147/148, turn 149/150, `NoRun` 159, zoom, camera) push while held.
 

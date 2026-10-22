@@ -980,7 +980,14 @@ void run_command_pump(MissionTickState& state, const MissionTickInputs& inputs,
             sync_record_to_dispatch(state);
         }
     };
-    if(inputs.dispatch_command) {
+    if(inputs.next_command) {
+        if(!inputs.dispatch_command)throw MissionTickError("mission tick: live input dispatcher missing");
+        const auto tick=state.tick_67dbf4;
+        while(const auto command=inputs.next_command(tick)){
+            sync_record_to_dispatch(state);
+            apply_result(inputs.dispatch_command(command->id,command->value));
+        }
+    } else if(inputs.dispatch_command) {
         for(const MissionCommandEvent& command:inputs.commands){
             sync_record_to_dispatch(state);
             apply_result(inputs.dispatch_command(command.id,command.value));

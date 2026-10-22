@@ -46,17 +46,19 @@ std::string effect_name(dfre::GlobalKeyEffect effect) {
 
 int main(int argc, char** argv) {
     const std::string mode = argc > 1 ? argv[1] : "";
-    if(mode=="oracle"){
+    if(mode=="oracle"||mode=="split-oracle"){
+        const bool split=mode=="split-oracle";
         std::string line;while(std::getline(std::cin,line)){std::istringstream stream(line);
             std::uint32_t tick,mode_word,live,windowed,active,flip,steady,menu,actor,mutation,count;
-            std::int32_t scale;stream>>tick>>mode_word>>live>>windowed>>active>>scale>>flip>>steady>>menu>>actor>>mutation>>count;
+            std::int32_t scale;stream>>tick>>mode_word>>live>>windowed>>active>>scale>>flip>>steady>>menu>>actor>>mutation;
+            std::uint32_t consume_tick=tick,between=0,during=0,budget=0;if(split)stream>>consume_tick>>between>>during>>budget;stream>>count;
             auto bridge=dfre::InputBridge::with_shipped_profile();dfre::InputSourceFlags flags;
             flags.input_mode=std::uint8_t(mode_word);flags.live_input=live!=0;flags.windowed=windowed!=0;flags.window_active=active!=0;
             flags.mouse_scale=scale;flags.mouse_flip=flip!=0;flags.steady=steady!=0;flags.global.menu_flag=std::uint8_t(menu);flags.global.actor_flags=actor;
-            if(mutation)flags.global.digit_flag=1;
+            if(mutation&1)flags.global.digit_flag=1;
             bridge.set_live_sources([&]{return flags;},[&](const auto& result){
-                if(mutation && result.effect==dfre::GlobalKeyEffect::digit){flags.input_mode=1;flags.global.digit_flag=0;}
-            },[&](const auto&){if(mutation){flags.input_mode=0;dfre::InputEvent key{dfre::InputKind::key_down};key.key=34;bridge.feed(key);}});
+                if((mutation&1) && result.effect==dfre::GlobalKeyEffect::digit){flags.input_mode=1;flags.global.digit_flag=0;}
+            },[&](const auto&){if(mutation&1){flags.input_mode=0;dfre::InputEvent key{dfre::InputKind::key_down};key.key=34;bridge.feed(key);}});
             bridge.set_source_flags(flags);
             bridge.set_query_row_source([](auto row)->std::optional<dfre::CommandBinding>{if(row==0x8c)return dfre::CommandBinding{};return std::nullopt;});
             for(std::uint32_t i=0;i<count;++i){int kind,a,b;stream>>kind>>a>>b;
@@ -66,6 +68,18 @@ int main(int argc, char** argv) {
                 if(kind==5){bridge.focus_lost();flags.window_active=false;}
                 if(kind==6)bridge.feed_character(std::uint8_t(a));
                 if(kind==7)flags.keyboard_ring_blocked=a!=0;
+            }
+            if(split){
+                std::vector<dfre::InputRecord> calls;std::vector<std::string> order{"B"};
+                const auto dispatch=[&](const auto& r){calls.push_back(r);order.push_back("D,"+std::to_string(r.id)+","+std::to_string(r.value)+","+std::to_string(r.extra));};
+                const auto pulse=[&](std::uint32_t value){order.push_back("P,"+std::to_string(value));bridge.stage().push_mouse_pulse(value,flags.global.menu_flag,flags.global.actor_flags);};
+                const auto frame=bridge.begin_frame(tick);if(!frame.commands.empty())throw std::runtime_error("Input begin removed commands");for(const auto& r:frame.immediate)dispatch(r);
+                const auto& queue=bridge.stage().queue();std::vector<dfre::InputRecord> begin(queue.records(),queue.records()+queue.size());
+                if(between)pulse(between);order.push_back("C");
+                while(const auto r=bridge.pop_due(consume_tick)){dispatch(*r);if(budget){--budget;if(mutation&2){flags.global.menu_flag^=1;flags.global.actor_flags^=4;}pulse(during);}}
+                const auto print_records=[&](const auto& records,bool full){std::cout<<'[';bool first=true;for(const auto& r:records){if(!first)std::cout<<',';first=false;std::cout<<'['<<r.id;if(full)std::cout<<','<<r.tick;std::cout<<','<<r.value<<','<<r.extra<<']';}std::cout<<']';};
+                std::cout<<"{\"begin\":";print_records(begin,true);std::cout<<",\"calls\":";print_records(calls,false);std::cout<<",\"queue\":";print_records(std::vector<dfre::InputRecord>(queue.records(),queue.records()+queue.size()),true);
+                std::cout<<",\"order\":[";for(std::size_t i=0;i<order.size();++i){if(i)std::cout<<',';std::cout<<'"'<<order[i]<<'"';}std::cout<<"],\"state\":["<<std::uint32_t(bridge.pending_delta_x())<<','<<std::uint32_t(bridge.pending_delta_y())<<','<<flags.window_active<<','<<bridge.mouse_buttons()<<','<<unsigned(flags.global.menu_flag)<<','<<flags.global.actor_flags<<"]}\n";continue;
             }
             const auto frame=bridge.frame(tick);
             std::cout<<"{\"calls\":[";bool first=true;

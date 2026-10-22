@@ -41,8 +41,8 @@ struct BridgeFrame {
 // Persistent join between the GameWindow InputEvent stream (Windows VK values,
 // extended flag, buttons 1 left / 2 right / 3 middle, pointer_delta and
 // focus_lost) and the original input stage. The Game owns one instance, feeds
-// every poll and calls frame(tick) once per update with the current source
-// flags. See docs/input-bridge.md.
+// every poll and calls begin_frame(tick) at479750 with current source flags.
+// The479450 stage pops each due command after the prior dispatch completes. See docs/input-bridge.md.
 class InputBridge {
 public:
     // Applies the profile DFDK.KEY bindings (0x41ce20) and builds the polled
@@ -77,6 +77,12 @@ public:
     // the two-argument form takes the frame's flags from the caller.
     BridgeFrame frame(std::uint32_t tick);
     BridgeFrame frame(std::uint32_t tick,const InputSourceFlags& flags);
+
+    // 479750 queues current input. Call pop_due at the later 479450 stage,
+    // once after each completed dispatch, to include callback queue changes.
+    BridgeFrame begin_frame(std::uint32_t tick);
+    BridgeFrame begin_frame(std::uint32_t tick,const InputSourceFlags& flags);
+    std::optional<InputRecord> pop_due(std::uint32_t tick){return stage_.pop_due(tick);}
 
     const InputStage& stage() const noexcept{return stage_;}
     InputStage& stage() noexcept{return stage_;}

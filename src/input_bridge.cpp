@@ -138,6 +138,14 @@ BridgeFrame InputBridge::frame(std::uint32_t tick,const InputSourceFlags& flags)
 }
 
 BridgeFrame InputBridge::frame(std::uint32_t tick) {
+    auto result=begin_frame(tick);
+    result.commands=stage_.take_due(tick);
+    return result;
+}
+BridgeFrame InputBridge::begin_frame(std::uint32_t tick,const InputSourceFlags& flags) {
+    flags_=flags;return begin_frame(tick);
+}
+BridgeFrame InputBridge::begin_frame(std::uint32_t tick) {
     const auto source=[this,tick]{
     if(sources_)flags_=sources_();
     FrameInput input;
@@ -165,7 +173,6 @@ BridgeFrame InputBridge::frame(std::uint32_t tick) {
     input.on_mouse_sampled=[this]{delta_x_=0;delta_y_=0;};
     const auto output=stage_.begin_frame(input);
     BridgeFrame result;
-    result.commands=stage_.take_due(tick);
     result.immediate=output.immediate;
     result.effects=output.effects;
     result.digits=output.digits;
