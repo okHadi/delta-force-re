@@ -368,6 +368,19 @@ std::vector<SceneModelRecord> scene_model_records(const MissionRuntimeState& sta
     return records;
 }
 
+std::vector<SceneModelRecord> scene_model_records(const MissionRuntimeState& state,
+    const MissionActorImages& current) {
+    std::vector<SceneModelRecord> records;
+    for(const std::size_t group:{3u,0u,1u})for(std::size_t slot=0;slot<current[group].size();++slot){
+        const auto& image=current[group][slot];
+        const auto index=read_u32(image.data(),0);
+        if(index==0)continue;
+        if(index>=state.definitions.size())throw std::invalid_argument("Live actor definition exceeds the table");
+        records.push_back({scene_model_identity(actor_handle(group,slot)),image,group,slot,state.definitions[index].type==3});
+    }
+    return records;
+}
+
 // ---------------------------------------------------------------------------
 // SceneModels32
 
@@ -935,7 +948,17 @@ MissionScene32::MissionScene32(const MissionRuntimeState& state,const MissionAss
 MissionScene32::~MissionScene32()=default;
 MissionSceneFrame32 MissionScene32::render(const TerrainScene32& terrain,const VoxelCamera& camera,
     const TerrainFrameOptions32& options) {
+    return render(terrain,camera,options,MissionSceneLiveInputs32{});
+}
+MissionSceneFrame32 MissionScene32::render(const TerrainScene32& terrain,const VoxelCamera& camera,
+    const TerrainFrameOptions32& options,const MissionSceneLiveInputs32& live) {
     auto& renderer=*impl_->renderer;
+    for(std::size_t slot=0;slot<impl_->state->character_instances.size();++slot){
+        const auto instance=kCharacterInstanceBase+std::uint32_t(slot);
+        const auto initial=impl_->poses.find(instance);
+        const auto* pose=live.pose?live.pose(instance):(initial==impl_->poses.end()?nullptr:&initial->second);
+        renderer.set_character_pose(instance,pose);
+    }
     auto& deferred=impl_->deferred;
     const auto& state=*impl_->state;
     const auto& water=impl_->water;
@@ -945,7 +968,7 @@ MissionSceneFrame32 MissionScene32::render(const TerrainScene32& terrain,const V
     const auto view=make_scene_model_view(camera.position,{camera.yaw,camera.pitch,0},clip,std::uint32_t(camera.field_of_view));
     renderer.begin_frame();
     SceneModelCollectInputs collect;
-    collect.view=view;collect.records=scene_model_records(state);
+    collect.view=view;collect.records=live.actors?scene_model_records(state,*live.actors):scene_model_records(state);
     const auto queues=renderer.collect(collect);
     SceneModelPassInputs pass;pass.view=view;pass.time=options.time;
     pass.z_reference=std::int32_t(camera.yaw);pass.direction_reference=std::int32_t(camera.pitch);

@@ -139,6 +139,18 @@ void expect_gap(const std::vector<dfre::SceneModelGap>& gaps, dfre::SceneModelGa
 int main() {
     using namespace dfre;
     try {
+        {
+            auto state=make_state();MissionActorImages current;
+            current[3].resize(3);current[0].resize(1);current[1].resize(1);current[2].resize(1);
+            current[3][2]=make_image(0x71000000,0x74000000,1,0x12340000,0);
+            current[0][0]=make_image(0x71000000,0,1,0,0);
+            current[1][0]=current[0][0];current[2][0]=current[0][0];
+            auto records=scene_model_records(state,current);
+            check(records.size()==3 && records[0].group==3 && records[0].slot==2 && records[1].group==0 && records[2].group==1,"live record order");
+            check(records[0].image==current[3][2] && records[0].character,"live record fields");
+            current[3][2].fill(0);records=scene_model_records(state,current);
+            check(records.size()==2 && records[0].group==0,"live actor removal");
+        }
         // Tag dispatch: every proven row key and the unknown-key fallback.
         check(scene_model_tag(0x676e7263u).kind == SceneModelTagKind::generic_crng, "gnrc dispatch");
         check(scene_model_tag(0x6f726730u).kind == SceneModelTagKind::character_org0, "org0 dispatch");
@@ -423,6 +435,13 @@ int main() {
         character_draw.depth = &character_depth;
         const auto character_stats = character_renderer.draw_plan(character_plan, character_draw);
         check(character_stats.items == 1 && character_stats.pixel_writes > 0, "org0 draw");
+        pose[0].angles[2]=0x200000;
+        character_renderer.collect(character_inputs);
+        const auto changed_pose=character_renderer.plan_after_terrain(pass);
+        check(changed_pose.calls.size()==1 && changed_pose.calls[0].tables!=character_plan.calls[0].tables,
+            "current pose did not change mesh matrices");
+        pose[0].angles[2]=0;
+
 
         // Asset join through resolvers, including unresolved entries.
         auto resolver_state = make_state();

@@ -1,5 +1,6 @@
 #pragma once
 #include "dfre/actor_runtime.hpp"
+#include "dfre/live_world.hpp"
 #include "dfre/model_bindings.hpp"
 #include "dfre/model_characters.hpp"
 #include "dfre/model_instances.hpp"
@@ -180,6 +181,8 @@ struct SceneModelRecord {
 // This helper returns the three BMS tables in that order; group 2 markers are
 // not collected by the original.
 std::vector<SceneModelRecord> scene_model_records(const MissionRuntimeState& state);
+std::vector<SceneModelRecord> scene_model_records(const MissionRuntimeState& state,
+    const MissionActorImages& current);
 
 // One 0x9f3098 effect record (stride 0x114). The caller owns the effect table;
 // the gate is counter_fc > 0.
@@ -388,6 +391,10 @@ struct MissionSceneFrame32 {
     std::vector<SceneModelGap> gaps;
     std::size_t models{}, characters{}, records{}, large{}, near{}, people{}, items{}, pixel_writes{};
 };
+struct MissionSceneLiveInputs32 {
+    const MissionActorImages* actors{};
+    std::function<const std::vector<CharacterBonePose>*(std::uint32_t)> pose;
+};
 class MissionScene32 {
 public:
     MissionScene32(const MissionRuntimeState& state,const MissionAssetCache& cache,
@@ -397,6 +404,8 @@ public:
     MissionScene32& operator=(const MissionScene32&)=delete;
     MissionSceneFrame32 render(const TerrainScene32& terrain,const VoxelCamera& camera,
         const TerrainFrameOptions32& options={});
+    MissionSceneFrame32 render(const TerrainScene32& terrain,const VoxelCamera& camera,
+        const TerrainFrameOptions32& options,const MissionSceneLiveInputs32& live);
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

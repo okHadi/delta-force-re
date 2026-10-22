@@ -33,6 +33,7 @@ set(DFRE_RUNTIME_MODULES
     world_hits
     actor_behavior
     actor_queries
+    live_world
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
