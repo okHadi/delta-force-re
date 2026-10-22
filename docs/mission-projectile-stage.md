@@ -3,7 +3,7 @@
 Source: `Df.exe`, SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.
 
 - Bind `mission_listener_stage` to `45E050`. Supply the local actor, alternate pose and synchronous `43EBA0` listener provider.
-- Bind `mission_pending_area_stage` to `465BD0`. It checks area effects in actor groups 3, 1, 0, in that order, for each queued record.
+- Bind `mission_pending_area_stage` to `465BD0`. It checks area effects in canonical actor groups 3, 0, 1, in that order, for each queued record. Group 0 is table `7DDE80`; group 1 is table `867E80`.
 - Supply live actor counts, images, identities, definitions and model bounds `+64/+68`.
 - Bind `segment` to the real `42E2B0(actor,start,0,end)` query. Preserve its signed return value.
 - Execute actor update callbacks and local-hit effects when called. Bind `random` to the canonical `MissionTickState.behavior` object.

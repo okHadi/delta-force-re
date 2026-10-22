@@ -20,6 +20,7 @@ struct MissionModelResource {
 struct MissionRuntimeResources {
     MissionData mission;
     ResourcePlan plan;
+    ResourcePlanOptions options;
     std::vector<MissionModelResource> models; // First loads in original registry order.
     std::vector<std::string> missing_models; // Original failed loads keep a null model handle.
 };
@@ -29,6 +30,8 @@ public:
     MissionScene load(std::string_view mission);
     // Start with an empty cache. Load the original single-player resource plan.
     MissionRuntimeResources load_runtime(std::string_view mission,const ResourcePlanOptions& options={});
+    // Separate 4633F0 load pass. Call after load_runtime and before assembly.
+    void load_projectile_runtime(MissionRuntimeResources&);
     const ObjectAppearance& appearance(std::uint32_t item_id);
     const Model& model(std::string_view name) const;
     const CharacterModel& character(std::string_view name) const;
@@ -38,6 +41,7 @@ public:
     std::size_t character_count() const noexcept { return characters_.size(); }
     std::size_t animation_count() const noexcept { return animations_.size(); }
 private:
+    void load_runtime_steps(MissionRuntimeResources&,std::size_t begin);
     const AssetStore& assets_;
     ItemCatalog items_;
     std::map<std::uint32_t,ObjectAppearance> appearances_;

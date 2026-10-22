@@ -1,9 +1,33 @@
 #include "dfre/resources.hpp"
+#include "dfre/world_runtime.hpp"
 #include <iostream>
 #include <set>
 int main(int argc,char** argv){
     if(argc<2||argc>4)return 2;
     try {
+        if(argc>=3 && std::string(argv[2])=="--projectiles"){
+            const dfre::AssetStore assets(argv[1]);
+            const auto names=argc==4?std::vector<std::string>{argv[3]}:assets.missions();
+            for(const auto& name:names){
+                dfre::MissionAssetCache cache(assets);auto resources=cache.load_runtime(name);
+                const auto before_calls=resources.plan.calls.size(),before_models=resources.models.size();
+                cache.load_projectile_runtime(resources);
+                const auto terrain=dfre::load_terrain_runtime(assets,name);
+                const auto state=dfre::assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,{});
+                std::cout<<"{\"mission\":\""<<name<<"\",\"before_models\":"<<before_models<<",\"models\":"<<resources.models.size()<<",\"loads\":[";
+                for(std::size_t i=0;i<3;++i){const auto& call=resources.plan.calls.at(before_calls+i);
+                    const auto& definition=state.definitions.at(call.item_index);
+                    const auto handle=definition.model;std::string model;unsigned bank=0;
+                    for(const auto& binding:state.models)if(binding.handle==handle){model=binding.name;bank=binding.bank;}
+                    std::cout<<(i?",":"")<<"{\"id\":"<<call.item_id<<",\"index\":"<<call.item_index<<",\"handle\":"<<handle<<",\"name\":\""<<model<<"\",\"bank\":"<<bank<<'}';
+                }
+                const auto count=resources.models.size(),steps=resources.plan.steps.size();cache.load_projectile_runtime(resources);
+                if(resources.models.size()!=count || cache.model_count()!=count || resources.plan.steps.size()!=steps)
+                    throw dfre::AssetError("Repeated projectile pass changed the loaded registry");
+                std::cout<<"]}\n";
+            }
+            return 0;
+        }
         if(argc>=3 && std::string(argv[2])=="--runtime") {
             const dfre::AssetStore assets(argv[1]);
             const auto names=argc==4?std::vector<std::string>{argv[3]}:assets.missions();

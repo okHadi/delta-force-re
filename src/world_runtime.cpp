@@ -327,6 +327,12 @@ std::uint32_t actor_handle(std::size_t group, std::size_t slot) noexcept {
            static_cast<std::uint32_t>(slot);
 }
 
+std::uint32_t mission_actor_source_address(std::size_t group,std::size_t slot) {
+    constexpr std::array<std::uint32_t,4> bases{0x7dde80u,0x867e80u,0x8ace80u,0x7cca80u};
+    if(group>=bases.size())throw AssetError("Actor source group is invalid");
+    return bases[group]+std::uint32_t(slot)*0x114u;
+}
+
 std::string original_campaign_text_file(std::uint32_t campaign_index) {
     char text[32];
     std::snprintf(text, sizeof(text), "dfcamp%02i.bin", int(campaign_index) + 1);

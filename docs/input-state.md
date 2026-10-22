@@ -37,6 +37,13 @@ Discrete commands (`attack_1` 140, `attack_2` 141, `scope` 6, `Prone` 162, weapo
 
 ## Code
 
+Use `FrameInput::current` for current source cells at each key and sampling
+stage. Use `next_event` for the live ring. Its zero word ends the drain.
+Execute `on_global_key` and `on_chat_key` bodies synchronously. Result lists
+contain observations. `on_mouse_sampled` marks consumption of the axes.
+Providers can change source state or append ring entries before the next read.
+`command_active` accepts a table row index.
+
 `include/dfre/input_state.hpp`, `src/input_state.cpp`:
 
 - `CommandTable` with `find_by_name`, `set_binding`, `apply_profile_bindings`, `active_command_indices`.

@@ -140,7 +140,7 @@ struct MissionTickWorld {
     // 0x484740 steady predicate.
     std::function<bool()> steady;
     // Original input test 0x47A290; resolve when the weapon body asks.
-    std::function<bool(std::uint32_t command_id)> trigger_held_47a290;
+    std::function<bool(std::uint32_t row_index)> trigger_held_47a290;
     // 0x464EB0 collision queries.
     ProjectileQuery projectile_query;
     // Group-2 markers, 0x78F280 lists and foreign pointer resolvers.
@@ -233,6 +233,8 @@ void init_mission_tick(MissionTickState& state,MissionTickConfig config,
     const MissionRuntimeState& initial,std::uint32_t behavior_rng);
 AiActorImage snapshot_mission_actor(const MissionTickState& state,const AiActorRef& ref);
 MissionActorImages snapshot_mission_actors(const MissionTickState& state);
+// Record and execute a weapon effect at its source call site.
+void mission_weapon_effect(MissionTickState& state,const WeaponEvent& event);
 
 // Bind the NPC helpers to current records and the shared behavior RNG.
 // The source supplies each actor's current geometry and sight bindings.

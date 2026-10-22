@@ -36,6 +36,12 @@ std::int32_t dot_shr16(std::int32_t left, std::int32_t right) noexcept {
 std::int32_t wrap_add(std::int32_t left, std::int32_t right) noexcept {
     return std::int32_t(std::uint32_t(left) + std::uint32_t(right));
 }
+std::int32_t wrap_sub(std::int32_t left, std::int32_t right) noexcept {
+    return std::int32_t(std::uint32_t(left) - std::uint32_t(right));
+}
+std::int32_t wrap_abs(std::int32_t value) noexcept {
+    return value < 0 ? std::int32_t(0u-std::uint32_t(value)) : value;
+}
 } // namespace
 
 const std::array<std::int32_t, 2561> kSineTableQ22=[] {
@@ -302,15 +308,11 @@ ProjectileEntity spawn_projectile(Fixed3 origin, Angle3 aim, const ClassSpawnFie
     if (owner_slot >= 0)
         entity.color = global_8cf982_bit4 ? 0x8000FF00 : team_color;
     const std::uint32_t flags = fields.flags;
-    if ((flags & 0x01) != 0 || (flags & 0x40) != 0) {
+    if ((flags & 0x51) != 0) {
         entity.item_main = item_pointers[0];
         entity.item_alt = item_pointers[1];
         entity.item_field = item_field;
-        entity.color = 0xFFFFFFFF;
-    } else if ((flags & 0x10) != 0) {
-        entity.item_main = item_pointers[0];
-        entity.item_alt = item_pointers[1];
-        entity.item_field = item_field;
+        if ((flags&1) || (!(flags&0x10)&&(flags&0x40)))entity.color = 0xFFFFFFFF;
     }
     return entity;
 }
@@ -333,18 +335,16 @@ void tick_projectile(ProjectileEntity& entity, Fixed3 world_center,
                                     ((std::int64_t(entity.velocity.y) * entity.velocity.y) >> 16) +
                                     ((std::int64_t(entity.velocity.z) * entity.velocity.z) >> 16);
     const std::int32_t square = std::int32_t(std::uint32_t(std::int32_t(square_sum)));
-    const std::int32_t length = isqrt32(square) << 8;
+    const std::int32_t length = std::int32_t(std::uint32_t(isqrt32(square)) << 8);
     if (length == 0) {
-        entity.velocity.z -= 0xB2;
-        entity.ttl -= 1;
+        entity.velocity.z = wrap_sub(entity.velocity.z,0xB2);
+        entity.ttl = wrap_sub(entity.ttl,1);
         return;
     }
     const std::int32_t factor = std::int32_t(0x100000000LL / std::int64_t(length));
     const Fixed3 step{mul_shr16(entity.velocity.x, factor), mul_shr16(entity.velocity.y, factor),
                       mul_shr16(entity.velocity.z, factor)};
     const Fixed3 start = entity.position;
-    Fixed3 next{wrap_add(start.x, entity.velocity.x), wrap_add(start.y, entity.velocity.y),
-                wrap_add(start.z, entity.velocity.z)};
     std::int32_t distance = length;
     std::uint8_t hit_type = 0;
     std::int32_t reported = 0;
@@ -355,7 +355,7 @@ void tick_projectile(ProjectileEntity& entity, Fixed3 world_center,
         }
     };
     const std::int32_t terrain = query.terrain ? query.terrain(entity, step, length, reported) : 1;
-    if (terrain != 1) distance = -terrain;
+    if (terrain != 1) distance = wrap_sub(0,terrain);
     if (query.actors_a && query.actors_a(entity, step, length, reported = 0) == 0) accept(reported, 1);
     if (query.actors_b && query.actors_b(entity, step, length, reported = 0) == 0) accept(reported, 2);
     if (query.special_a && query.special_a(entity, step, length, reported = 0) == 0) accept(reported, 3);
@@ -368,17 +368,19 @@ void tick_projectile(ProjectileEntity& entity, Fixed3 world_center,
     };
     const auto record_move = [&](const Fixed3& to) {
         bool emit = false;
-        if (query.alternate_move_filter) emit = (entity.class_flags & 0x60) != 0;
+        const bool alternate=query.use_alternate_move_filter ? query.use_alternate_move_filter() : query.alternate_move_filter;
+        if (alternate) emit = (entity.class_flags & 0x60) != 0;
         else emit = (entity.class_flags & 0x90) == 0;
-        if (emit) emit_event({ProjectileEventKind::move, 0, to, start});
+        if (emit) emit_event({ProjectileEventKind::move, 0, to, entity.position});
     };
-    const auto edge_check = [&]() {
-        const std::int32_t delta_x = std::abs(start.x - world_center.x);
-        const std::int32_t delta_y = std::abs(start.y - world_center.y);
-        if (delta_x >= 0x280000 || delta_y >= 0x280000) return;
-        const std::int32_t dot = dot_shr16(wrap_add(world_center.x, -start.x), step.x) +
-                                 dot_shr16(wrap_add(world_center.y, -start.y), step.y) +
-                                 dot_shr16(wrap_add(world_center.z, -start.z), step.z);
+    const auto edge_check = [&](const Fixed3& final_position) {
+        const auto center=query.current_world_center ? query.current_world_center() : world_center;
+        const auto near=[](std::int32_t value,std::int32_t origin){return wrap_abs(wrap_sub(value,origin))<0x280000;};
+        if ((!near(entity.position.x,center.x)&&!near(final_position.x,center.x)) ||
+            (!near(entity.position.y,center.y)&&!near(final_position.y,center.y))) return;
+        const std::int32_t dot = wrap_add(wrap_add(dot_shr16(wrap_sub(center.x,start.x),step.x),
+                                 dot_shr16(wrap_sub(center.y,start.y),step.y)),
+                                 dot_shr16(wrap_sub(center.z,start.z),step.z));
         if (dot >= 0 && dot < length) {
             const Fixed3 crossing{wrap_add(start.x, mul_shr16(step.x, dot)),
                                   wrap_add(start.y, mul_shr16(step.y, dot)),
@@ -386,21 +388,23 @@ void tick_projectile(ProjectileEntity& entity, Fixed3 world_center,
             emit_event({ProjectileEventKind::world_edge, 0x41, crossing, {}});
         }
     };
-    Fixed3 final_position = next;
+    Fixed3 final_position{wrap_add(entity.position.x,entity.velocity.x),
+                          wrap_add(entity.position.y,entity.velocity.y),
+                          wrap_add(entity.position.z,entity.velocity.z)};
     if (distance < length) {
-        const std::int32_t slide = distance - 0x4000;
-        final_position = Fixed3{wrap_add(start.x, mul_shr16(step.x, slide)),
-                                wrap_add(start.y, mul_shr16(step.y, slide)),
-                                wrap_add(start.z, mul_shr16(step.z, slide))};
+        const std::int32_t slide = wrap_sub(distance,0x4000);
+        final_position = Fixed3{wrap_add(entity.position.x, mul_shr16(step.x, slide)),
+                                wrap_add(entity.position.y, mul_shr16(step.y, slide)),
+                                wrap_add(entity.position.z, mul_shr16(step.z, slide))};
         emit_event({ProjectileEventKind::impact, hit_type, final_position, {}});
         entity.ttl = 0;
         entity.item_main = 0;
     }
     // shared tail: record move, world edge check, store, gravity, ttl
     record_move(final_position);
-    edge_check();
+    edge_check(final_position);
     entity.position = final_position;
-    if ((entity.class_flags & 0x40) == 0) entity.velocity.z -= 0xB2;
-    entity.ttl -= 1;
+    if ((entity.class_flags & 0x40) == 0) entity.velocity.z = wrap_sub(entity.velocity.z,0xB2);
+    entity.ttl = wrap_sub(entity.ttl,1);
 }
 } // namespace dfre

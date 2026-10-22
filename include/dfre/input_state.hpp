@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string_view>
 #include <vector>
 
@@ -125,6 +126,12 @@ struct FrameInput {
     bool mouse_enabled=false;         // 0x503130 == 0 && 0xcc0884 != 0
     std::uint16_t priority_key=0;     // 0x4fcbde >> 16, zero in this build
     GlobalKeyState global;
+    // Optional live sources. Read each key and sample stage from current cells.
+    std::function<FrameInput()> current;
+    std::function<InputKeyEvent()> next_event; // zero word ends the ring drain
+    std::function<void(const GlobalKeyResult&)> on_global_key;
+    std::function<void(const InputKeyEvent&)> on_chat_key;
+    std::function<void()> on_mouse_sampled;
 };
 
 struct FrameOutput {

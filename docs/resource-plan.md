@@ -18,6 +18,19 @@ files produce null handles, as in `486530`; their names appear in
 `missing_models`. The stock weapon table requests missing `null.3di`.
 Character and animation files use separate caches.
 
+Call `cache.load_projectile_runtime(resources)` after `load_runtime()` and
+before `assemble_mission_runtime()`. This adds the separate `4633F0` pass:
+item IDs `FA1`, `FC1`, `FCA`, in that order. The pass uses the same item,
+model, character and animation registries and the saved palette-bank mode.
+Each appended call has stage `projectiles`. The first model load fixes its
+handle and bank. Repeated passes keep the existing file bindings.
+
+`build_resource_plan()` supplies `402EC0`. Use
+`append_projectile_resource_plan(plan,input)` for the later item-load pass.
+The original single-player caller runs these bodies at `403C12` and
+`403C17`. Supply loaded projectile models before a graphic spawn branch.
+Missing files keep null model handles.
+
 The plan records squad and powerup slot removals. Apply these removals in
 the actor runtime. Supply `ResourcePlanOptions` for the caller's mode flags.
 
@@ -26,3 +39,8 @@ Verification: `native_resource_plan`, `resource_plan_probe`, and
 item calls, and 6,064 file requests. It compares a separate plan made from
 stock files and source constants. Original x86 replay checks 20 bank cases
 and the person model/character/animation load order.
+
+Run `native_resources` for cache, shared-name, missing-file and bank checks.
+Run `check_resources_original.py GAME RESOURCES_PROBE --report REPORT`
+for the original `4633F0`, item lookup and loader bodies with the stock
+model registry and assembled handles.

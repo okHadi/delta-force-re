@@ -7,6 +7,7 @@ Call `mission_area_live_stage(state, geometry, call, bindings)` from the mission
 - Supply real segment, actor update, local-hit and listener callbacks for each reached path.
 - Use the segment actor handle as the first skip identity and zero as the second skip identity.
 - Use the update callback address and message supplied by the adapter.
+- Use canonical runtime groups: group 0 is `7DDE80`, group 1 is `867E80`, and group 3 is `7CCA80`. The area pass visits groups 3, 0, then 1. Group 0 uses radial model bounds; group 1 uses model bounds on all three axes.
 - Change canonical mission state inside callbacks. Actor changes, queue appends, water, local-player selection, rules and RNG remain live after each call.
 - Use `apply_mission_actor_image` for raw callback changes that need mission write-back.
 

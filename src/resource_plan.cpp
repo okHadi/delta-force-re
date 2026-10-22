@@ -65,6 +65,19 @@ public:
         groups();
         return std::move(plan_);
     }
+    ResourcePlan projectile_pass(const ResourcePlan& prior) {
+        for(const auto& step:prior.steps){
+            if(step.item_index>=settled_graphic_.size())throw AssetError("Projectile resource plan uses another item catalog");
+            switch(step.kind){
+            case ResourceKind::model:settled_graphic_[step.item_index]=1;models_.insert(lower_name(step.name));break;
+            case ResourceKind::husk:settled_husk_[step.item_index]=1;models_.insert(lower_name(step.name));break;
+            case ResourceKind::character:characters_.insert(lower_name(step.name));break;
+            case ResourceKind::animation:animations_.insert(lower_name(step.name));break;
+            }
+        }
+        for(const auto id:{0xfa1u,0xfc1u,0xfcau})add_lookup(ResourceStage::projectiles,no_slot,id,false);
+        return std::move(plan_);
+    }
 
 private:
     void soldiers() {
@@ -294,6 +307,13 @@ std::vector<const ResourceStep*> ResourcePlan::first_loads() const {
 ResourcePlan build_resource_plan(const ResourcePlanInput& input) {
     if (!input.items) throw AssetError("Resource plan needs an item catalog");
     return PlanBuilder(input).build();
+}
+void append_projectile_resource_plan(ResourcePlan& plan,const ResourcePlanInput& input){
+    if(!input.items)throw AssetError("Projectile resource plan needs an item catalog");
+    auto next=PlanBuilder(input).projectile_pass(plan);
+    plan.calls.insert(plan.calls.end(),next.calls.begin(),next.calls.end());
+    plan.steps.insert(plan.steps.end(),next.steps.begin(),next.steps.end());
+    plan.null_lookups+=next.null_lookups;
 }
 
 } // namespace dfre

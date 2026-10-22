@@ -63,6 +63,7 @@ public:
             if (!mission_selection_) throw std::runtime_error("Mission selection is missing");
             mission_assets_ = std::make_unique<MissionAssetCache>(assets_);
             mission_resources_ = mission_assets_->load_runtime(mission_selection_->filename);
+            mission_assets_->load_projectile_runtime(*mission_resources_);
             const auto& mission = mission_resources_->mission;
             const auto gamma = load_terrain_gamma(options_.game_folder / "INTRO.KDV");
             world_ = std::make_unique<TerrainScene32>(prepare_terrain_scene32(

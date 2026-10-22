@@ -564,6 +564,10 @@ def main():
         team = random.choice([0, 1, 2])
         gbit = random.choice([False, True])
         spawn_cases.append((origin, aim, speed, f10, f14, f18, flags, item_field, team, gbit))
+    for flags in (0x11,0x41,0x50,0x51):
+        for team in (1,2):
+            for gbit in (False,True):
+                spawn_cases.append(([0,0,65536],[0,0,0],1000,3,8,10,flags,7,team,gbit))
     def item_pair(flags):
         if flags & 0x01: return (SCRATCH + 0x9030, SCRATCH + 0x9010)
         if flags & 0x10: return (SCRATCH + 0x9040, SCRATCH + 0x9000)
@@ -615,7 +619,7 @@ def main():
             def token(value):
                 return 'none' if value is None else str(value)
             script.append(f'q {terrain} {token(step.get("a"))} {token(step.get("b"))} '
-                          f'{token(step.get("s"))} {token(step.get("x"))}\n')
+                          f'{token(step.get("s"))} {token(step.get("x"))} {step.get("action",0)}\n')
         native = run_probe(args.probe, ''.join(script))
         original = []
         for step in steps:
@@ -635,6 +639,23 @@ def main():
             rig.poke_u(0x006E4708, world[0] & 0xFFFFFFFF)
             rig.poke_u(0x006E4704, world[1] & 0xFFFFFFFF)
             rig.poke_u(0x006E4700, world[2] & 0xFFFFFFFF)
+            def impact_mutation():
+                if step.get('action')==1:rig.poke(0x67f549,0x10)
+                if step.get('action')==2:
+                    for at,value in zip((0x24,0x28,0x2c),(123,456,789)):rig.poke(record+at,value)
+                rig.finish(0)
+            def move_mutation():
+                rig.stub_move()
+                if step.get('action')==3:
+                    for at in (0x6e4708,0x6e4704,0x6e4700):rig.poke(at,0)
+                    for at in (0x24,0x28,0x2c):rig.poke(record+at,0)
+            def terrain_mutation():
+                if step.get('action')==4:
+                    for at,value in zip((0x24,0x28,0x2c),(123,456,789)):rig.poke(record+at,value)
+                    for at,value in zip((0x3c,0x40,0x44),(1000,2000,3000)):rig.poke(record+at,value)
+                rig.finish(rig.queries['terrain'])
+            rig.stubs[0x47e390]=terrain_mutation
+            rig.stubs[0x45dab0]=impact_mutation;rig.stubs[0x463350]=move_mutation
             rig.call(0x464EB0)
             events = rig.take_events()
             mapped = []
@@ -662,6 +683,7 @@ def main():
                                  'vx': row['vx'], 'vy': row['vy'], 'vz': row['vz'], 'ttl': row['ttl'],
                                  'item': row['item'], 'color': row['color'], 'events': events})
         bad = 0
+        if len(native_fixed)!=len(original):raise ValueError('tick probe row count differs')
         for index, (a, b) in enumerate(zip(native_fixed, original)):
             if a != b:
                 bad += 1
@@ -702,6 +724,16 @@ def main():
     tick_scenario('tick_special_hit', (0x1000000, 0x2000000, 0x640000, 1057032, 0, 0, 10, 0),
                   (0x4000000, 0x4000000, 0),
                   [{'s': 400000, 'x': 200000}] + [{} for _ in range(4)], special_b=True)
+
+    tick_scenario('tick_final_x_gate', (-0x300000,0,0x640000,0x400000,0,0,10,0), (0,0,0), [{}])
+    tick_scenario('tick_final_y_gate', (0,-0x300000,0x640000,0,0x400000,0,10,0), (0,0,0), [{}])
+    tick_scenario('tick_impact_filter_read', (0,0,65536,131072,0,0,10,0), (0x4000000,0x4000000,0), [{'terrain':-65536,'action':1}])
+    tick_scenario('tick_impact_from_read', (0,0,65536,131072,0,0,10,0), (0x4000000,0x4000000,0), [{'terrain':-65536,'action':2}])
+    tick_scenario('tick_move_center_read', (-100,0,0x640000,1057032,0,0,10,0), (0x4000000,0x4000000,0), [{'action':3}])
+    tick_scenario('tick_query_position_read', (0,0,65536,131072,0,0,10,0), (0x4000000,0x4000000,0), [{'action':4}])
+    tick_scenario('tick_query_impact_position_read', (0,0,65536,131072,0,0,10,0), (0x4000000,0x4000000,0), [{'terrain':-65536,'action':4}])
+    tick_scenario('tick_wrap_gate', (-2147483648,0,0x640000,131072,0,0,10,0), (0,0,0), [{}])
+    tick_scenario('tick_wrap_position', (2147483600,0,0x640000,131072,0,0,10,0), (-2147483648,0,0), [{}])
 
     print('\nscenarios matched:', checker.report['cases_matched'])
     print('cases compared:', checker.report['cases_compared'])

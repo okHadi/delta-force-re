@@ -6,16 +6,16 @@ using namespace dfre;
 namespace {
 void check(bool value) {if(!value)throw std::runtime_error("Mission area live test failed");}
 MissionStageCall call(std::uint32_t address) {MissionStageCall result;result.address=address;return result;}
-void init(MissionTickState& state,std::size_t people=1,std::size_t objects=0) {
-    AiActorTables tables;tables.groups[3].resize(people);tables.groups[0].resize(objects);
-    for(auto group:{3u,0u})for(auto& actor:tables.groups[group]) {
+void init(MissionTickState& state,std::size_t people=1,std::size_t objects=0,std::size_t radial_objects=0) {
+    AiActorTables tables;tables.groups[3].resize(people);tables.groups[1].resize(objects);tables.groups[0].resize(radial_objects);
+    for(auto group:{3u,0u,1u})for(auto& actor:tables.groups[group]) {
         actor.active=true;actor.definition_index=group==3?1:2;actor.field_10=17;actor.field_110=0x1234;actor.field_70=1;
     }
     std::vector<AiItemDefinition> definitions(3);definitions[1].field_28=3;definitions[1].field_84=0x1234;
     definitions[2].field_28=0;definitions[2].field_84=0x1234;
     init_mission_tick(state,{},std::move(tables),AiItemDefinitionTable(definitions),{},123);
     state.globals.mission_67f528=1;
-    for(auto group:{3u,0u})for(std::size_t slot=0;slot<state.tables.groups[group].size();++slot)state.extra_for({std::uint8_t(group),slot}).field_74=100;
+    for(auto group:{3u,0u,1u})for(std::size_t slot=0;slot<state.tables.groups[group].size();++slot)state.extra_for({std::uint8_t(group),slot}).field_74=100;
 }
 MissionGeometry geometry(Model& model,std::int32_t height=0) {
     model.version=5;model.lods.resize(1);MissionGeometryModel binding;binding.handle=17;binding.model=&model;
@@ -87,12 +87,12 @@ void exceptions() {
 }
 void bounds_and_listener() {
     MissionTickState state;init(state,0,1);Model model;auto shape=geometry(model,0x40000);
-    state.tables.groups[0][0].position[2]=0x40000;MissionAreaLiveBindings b;
+    state.tables.groups[1][0].position[2]=0x40000;MissionAreaLiveBindings b;
     b.globals=[](const auto&){return MissionAreaLiveGlobals{};};unsigned updates=0;
     b.segment=[](auto&,const auto&,const auto&,const auto&){return 1;};
-    b.update=[&](auto&,const auto& ref,auto,auto){check(ref.group==0);++updates;};
+    b.update=[&](auto&,const auto& ref,auto,auto){check(ref.group==1);++updates;};
     state.pending_spawns.push_back({{0,0,0},1,0});mission_area_live_stage(state,shape,call(0x465bd0),b);
-    check(updates==1&&state.extra_for({0,0}).field_74==68);
+    check(updates==1&&state.extra_for({1,0}).field_74==68);
     MissionTickState listener;init(listener);listener.config.local_actor=0;listener.tables.groups[3][0].position[0]=88;
     unsigned listeners=0;b.listener=[&](MissionTickState& live,const auto& pose){check(pose.position.x==88);++listeners;live.tables.groups[3][0].position[0]=99;};
     mission_area_live_stage(listener,shape,call(0x45e050),b);
@@ -105,5 +105,18 @@ void bounds_and_listener() {
     listener.globals.mission_67f528=0;listener.pending_spawns.push_back({{0,0,0},1,0});
     check(mission_area_live_stage(listener,shape,call(0x465bd0),{})==0&&listener.pending_spawns.size()==1);
 }
+void original_table_order() {
+    MissionTickState state;init(state,0,1,1);Model model;auto shape=geometry(model,0x40000);
+    state.tables.groups[0][0].position[2]=0x40000;
+    state.tables.groups[1][0].position[2]=0x40000;
+    MissionAreaLiveBindings b;b.globals=[](const auto&){return MissionAreaLiveGlobals{};};
+    b.segment=[](auto&,const auto&,const auto&,const auto&){return 1;};
+    std::vector<std::uint32_t> addresses;
+    b.update=[&](auto&,const AiActorRef& ref,auto,auto){addresses.push_back(mission_actor_source_address(ref.group,ref.index));};
+    state.pending_spawns.push_back({{0,0,0},1,0});
+    mission_area_live_stage(state,shape,call(0x465bd0),b);
+    check(addresses==std::vector<std::uint32_t>({0x7dde80,0x867e80}));
+    check(state.extra_for({0,0}).field_74==84&&state.extra_for({1,0}).field_74==68);
 }
-int main(){try{live_callbacks();live_rules();exceptions();bounds_and_listener();}catch(...){return 1;}return 0;}
+}
+int main(){try{live_callbacks();live_rules();exceptions();bounds_and_listener();original_table_order();}catch(...){return 1;}return 0;}

@@ -90,6 +90,12 @@ int main() { try {
     require(entity.ttl == 100 && entity.field_7c == 70 && entity.field_80 == 30 && entity.field_84 == 100, "fields");
     require(entity.color == 0xB9A0A0FF && entity.item_main == 0, "no items for flags 2");
 
+    fields.flags=0x50;
+    const auto combined=dfre::spawn_projectile({}, {}, fields,{4001,4020},4660,0,0xB9FFA0A0,false);
+    require(combined.color==0xB9FFA0A0&&combined.item_main==4001&&combined.item_alt==4020,"bit10 keeps team color before bit40");
+    fields.flags=0x51;
+    require(dfre::spawn_projectile({}, {}, fields,{4001,4020},4660,0,0xB9FFA0A0,false).color==0xffffffff,"bit1 sets white before bit10");
+
     // 464EB0 motion: gravity and ttl per tick.
     dfre::ProjectileEntity flying;
     flying.position = {16777216, 0, 50331648};
@@ -128,6 +134,26 @@ int main() { try {
     dfre::tick_projectile(hitting, {0x4000000, 0x4000000, 0}, terrain_hit, events);
     require(hitting.position.x == 16860826 && hitting.ttl == -1 && hitting.item_main == 0, "terrain hit state");
     require(hitting.velocity.z == 822 && effects==2, "gravity uses the current effect state");
+
+    // Original final-coordinate gate accepts a ray that enters the near box.
+    dfre::ProjectileEntity entering;
+    entering.position={-0x300000,0,0x640000};entering.velocity={0x400000,0,0};entering.ttl=10;
+    events.clear();dfre::tick_projectile(entering,{},empty,events);
+    require(events.size()==2 && events[1].kind==dfre::ProjectileEventKind::world_edge,"final coordinate edge gate");
+    bool alternate=false;dfre::ProjectileQuery late=terrain_hit;
+    late.use_alternate_move_filter=[&]{return alternate;};
+    late.on_event=[&](auto& p,const auto& e){if(e.kind==dfre::ProjectileEventKind::impact){alternate=true;p.position={123,456,789};}};
+    auto late_entity=flying;late_entity.ttl=10;events.clear();
+    dfre::tick_projectile(late_entity,{0x4000000,0x4000000,0},late,events);
+    require(events.size()==1 && events[0].kind==dfre::ProjectileEventKind::impact,"move filter was read before impact");
+
+    dfre::ProjectileEntity changed;
+    changed.position={0,0,65536};changed.velocity={131072,0,0};changed.ttl=10;
+    dfre::ProjectileQuery changed_query;
+    changed_query.terrain=[&](const auto&,const auto&,auto,auto&){changed.position={123,456,789};changed.velocity={1000,2000,3000};return 1;};
+    events.clear();dfre::tick_projectile(changed,{0x4000000,0x4000000,0},changed_query,events);
+    require(changed.position.x==1123&&changed.position.y==2456&&changed.position.z==3789,"query writes were not read by the final position store");
+    require(changed.velocity.z==2822&&changed.ttl==9,"query writes were not read by gravity");
 
     std::cout << "projectile checks passed\n";
     return 0;

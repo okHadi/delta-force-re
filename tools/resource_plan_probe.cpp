@@ -13,6 +13,7 @@ const char* stage_name(dfre::ResourceStage stage) {
         case dfre::ResourceStage::group1: return "group1";
         case dfre::ResourceStage::group3: return "group3";
         case dfre::ResourceStage::group2: return "group2";
+        case dfre::ResourceStage::projectiles: return "projectiles";
     }
     return "?";
 }
@@ -126,9 +127,11 @@ int main(int argc, char** argv) {
         std::vector<dfre::WeaponItemIds> weapons;
         const dfre::ItemCatalog items = dfre::load_item_catalog(dfre::AssetStore(argv[1]));
         input.items = &items;
+        bool projectiles=false;
         for (int i = 3; i < argc; ++i) {
             const std::string option = argv[i];
             if (option == "--options" && i + 1 < argc) input.options = parse_options(argv[++i]);
+            else if(option=="--projectiles")projectiles=true;
             else if (option == "--weapons" && i + 1 < argc) weapons = read_weapons(argv[++i]);
             else throw dfre::AssetError("Unknown argument: " + option);
         }
@@ -140,7 +143,8 @@ int main(int argc, char** argv) {
         for (const auto& name : names) {
             const auto mission = dfre::load_mission(assets, name);
             input.mission = &mission;
-            const auto plan = dfre::build_resource_plan(input);
+            auto plan = dfre::build_resource_plan(input);
+            if(projectiles)dfre::append_projectile_resource_plan(plan,input);
             if (!first) std::cout << ',';
             first = false;
             print_plan(name, mission, plan);

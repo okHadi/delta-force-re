@@ -110,7 +110,7 @@ void mission_pending_area_stage(MissionProjectileStageState& s,const MissionProj
             if(!dispatch)throw std::invalid_argument("Mission area dispatch needs incoming EDI and callback");
             if(!dispatch->range)continue;
         }
-        for(auto group:{3u,1u,0u}) {
+        for(auto group:{3u,0u,1u}) {
             for(std::size_t slot=0;slot<need(b.count)(group);++slot) {
                 const MissionAreaActorRef ref{group,slot};const auto target=actor(ref,b);
                 const auto& a=image(target);if(!word(a,0))continue;
@@ -127,7 +127,7 @@ void mission_pending_area_stage(MissionProjectileStageState& s,const MissionProj
                 } else {
                     const auto graphic=word(a,0x10);if(!graphic)continue;
                     const auto bounds=need(b.bounds)(graphic);
-                    if(group==1) {
+                    if(group==0) {
                         range=add(range,bounds.radius_64);
                         delta={absolute(sub(r.position[0],p.x)),absolute(sub(r.position[1],p.y)),absolute(sub(r.position[2],p.z))};
                     } else {

@@ -1,5 +1,6 @@
 #include "dfre/resources.hpp"
 #include "dfre/scripts.hpp"
+#include <algorithm>
 namespace dfre {
 namespace {
 std::string lower(std::string_view value) {
@@ -48,16 +49,35 @@ MissionRuntimeResources MissionAssetCache::load_runtime(std::string_view name,co
     if(!appearances_.empty() || !models_.empty() || !characters_.empty() || !animations_.empty())
         throw AssetError("Runtime scene requires an empty asset cache");
     MissionRuntimeResources result;
+    result.options=options;
     result.mission=load_mission(assets_,name);
     ResourcePlanInput input;input.items=&items_;input.mission=&result.mission;input.options=options;
     result.plan=build_resource_plan(input);
-    for(const auto& step:result.plan.steps)if(step.first_load) {
+    load_runtime_steps(result,0);
+    return result;
+}
+void MissionAssetCache::load_projectile_runtime(MissionRuntimeResources& result){
+    if(result.models.size()!=models_.size())throw AssetError("Projectile resources need the matching runtime cache");
+    for(const auto& model:result.models)if(models_.find(model.name)==models_.end())
+        throw AssetError("Projectile resources need the matching runtime model registry");
+    const auto begin=result.plan.steps.size();
+    ResourcePlanInput input;input.items=&items_;input.mission=&result.mission;input.options=result.options;
+    append_projectile_resource_plan(result.plan,input);
+    load_runtime_steps(result,begin);
+}
+void MissionAssetCache::load_runtime_steps(MissionRuntimeResources& result,std::size_t begin){
+    for(std::size_t i=begin;i<result.plan.steps.size();++i){const auto& step=result.plan.steps[i];if(!step.first_load)continue;
         if(step.kind==ResourceKind::model || step.kind==ResourceKind::husk) {
             const auto key=filename(step.name,".3di");
             bool present=false;
             for(const auto& archive:assets_.archives())for(const auto& entry:archive.entries())
                 if(!entry.deleted && lower(entry.name)==key)present=true;
-            if(!present){result.missing_models.push_back(key);continue;}
+            if(!present){
+                if(std::find(result.missing_models.begin(),result.missing_models.end(),key)==result.missing_models.end())
+                    result.missing_models.push_back(key);
+                continue;
+            }
+            if(models_.find(key)!=models_.end())continue;
             auto decoded=decode_model(assets_.read(key).bytes);
             if(decoded.version!=5)throw AssetError("Runtime model requires 3DI version 5: "+key);
             for(auto& lod:decoded.lods)lod=localize_model_lod(lod);
@@ -70,7 +90,6 @@ MissionRuntimeResources MissionAssetCache::load_runtime(std::string_view name,co
             animations_.emplace(key,decode_game_script(assets_.read(key).bytes));
         }
     }
-    return result;
 }
 const Model& MissionAssetCache::model(std::string_view name) const{return required(models_,name);}
 const CharacterModel& MissionAssetCache::character(std::string_view name) const{return required(characters_,name);}

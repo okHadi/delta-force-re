@@ -117,6 +117,10 @@ void check_mouse() {
     const auto records = stage.take_due(30);
     require(records.size() == 1 && records[0].id == 0x9E && records[0].tick == 30, "Positive X is turn_right_abs");
     require(records[0].value == 0x4000, "Look value is axis * (scale << 14)");
+    look.x=0;look.y=(-2147483647-1);look.flip=false;
+    stage.push_mouse(look,0,30);
+    const auto wrapped=stage.take_due(30);
+    require(wrapped.size()==1 && wrapped[0].id==0x9c && wrapped[0].value==0,"INT_MIN Y wraps before look scaling");
 
     look.x = -2;
     look.y = -3;

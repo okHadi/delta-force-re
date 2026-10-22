@@ -194,6 +194,29 @@ void check_explicit_inputs() {
     check(plan.steps.size() == 4 && plan.steps[0].name == "pm16" && plan.steps[1].name == "m4" &&
           plan.steps[2].name == "m16" && plan.steps[3].name == "exp_b", "Stock table steps changed");
 }
+void check_projectile_pass(){
+    const dfre::ItemCatalog items(
+        "begin \"null\"\nid 100000\ntype marker\nend\n"
+        "begin \"first\"\nid 104001\ntype object\ngraphic shared\nend\n"
+        "begin \"second\"\nid 104033\ntype effect\ngraphic SHARED\nend\n"
+        "begin \"third\"\nid 104042\ntype object\ngraphic third\nhusk empty\nend\n");
+    auto input=make_input(items,nullptr);auto plan=dfre::build_resource_plan(input);
+    const auto calls=plan.calls.size(),steps=plan.steps.size();
+    dfre::append_projectile_resource_plan(plan,input);
+    check(plan.calls.size()==calls+3,"Projectile item call count");
+    for(std::size_t i=0;i<3;++i)check(plan.calls[calls+i].stage==dfre::ResourceStage::projectiles &&
+        plan.calls[calls+i].item_id==std::array<std::uint32_t,3>{0xfa1,0xfc1,0xfca}[i],"Projectile load order");
+    check(plan.steps.size()==steps+3,"Projectile registry reuse");
+    check(plan.steps[steps].name=="shared" && !plan.steps[steps].first_load && plan.steps[steps].bank==5,
+        "First projectile model bank");
+    check(plan.steps[steps+1].name=="third" && plan.steps[steps+2].name=="empty","Projectile graphic and husk order");
+    const auto settled=plan.steps.size();dfre::append_projectile_resource_plan(plan,input);
+    check(plan.steps.size()==settled && plan.calls.size()==calls+6,"Repeated projectile pass reloaded settled items");
+    const dfre::ItemCatalog missing("begin \"null\"\nid 100000\ntype marker\nend\n");
+    auto missing_input=make_input(missing,nullptr);dfre::ResourcePlan missing_plan;
+    dfre::append_projectile_resource_plan(missing_plan,missing_input);
+    check(missing_plan.null_lookups==3 && missing_plan.steps.empty(),"Missing projectile ids use index zero");
+}
 } // namespace
 
 int main() {
@@ -202,6 +225,7 @@ int main() {
         check_plan();
         check_theme_and_bank_modes();
         check_explicit_inputs();
+        check_projectile_pass();
         std::cout << "resource plan checks passed\n";
         return 0;
     } catch (const std::exception& error) {

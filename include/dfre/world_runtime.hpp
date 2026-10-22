@@ -47,6 +47,8 @@ inline constexpr std::uint32_t kActorHandleBase = 0x76000000u;      // person ow
 
 std::uint32_t person_handle(std::size_t slot) noexcept;
 std::uint32_t actor_handle(std::size_t group, std::size_t slot) noexcept;
+// Original PE table address for wire fields and source comparisons.
+std::uint32_t mission_actor_source_address(std::size_t group,std::size_t slot);
 
 // Original 0x407D54 filename: "dfcamp%02i.bin" with campaign_index + 1.
 std::string original_campaign_text_file(std::uint32_t campaign_index);

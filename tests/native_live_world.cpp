@@ -8,6 +8,8 @@ std::uint32_t word(const dfre::AiActorImage& image,std::size_t at){std::uint32_t
 }
 int main(){try{
     using namespace dfre;
+    CHECK(mission_actor_source_address(0,0)==0x7dde80 && mission_actor_source_address(1,0)==0x867e80);
+    CHECK(mission_actor_source_address(2,1)==0x8acf94 && mission_actor_source_address(3,1)==0x7ccb94);
     MissionRuntimeState state;state.people.resize(2);state.groups[3].resize(1);state.health[3]={37};
     auto& actor=state.groups[3][0];actor.active=true;actor.definition_index=1;actor.object_id=10;actor.person_slot=0;actor.position[0]=0xffffffffu;
     state.group3_count=3;state.actors.emplace(ActorDefinitionTable{},ActorFactoryConfig{});

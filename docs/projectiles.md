@@ -17,6 +17,11 @@ the final position, gravity, and TTL writes. Keep projectile storage stable
 during callbacks. The events vector records these calls for inspection.
 
 Run `check_projectiles_original.py GAME_FOLDER PROBE --report REPORT` with the
-local Python tools. It compares 370 cases with original x86 code, including
+local Python tools. It compares 395 cases with original x86 code, including
 the 2,561-entry sine table, matrices, muzzle poses, shot plans, packed records,
 spawn state, and motion. Collision and effect fixtures are explicit inputs.
+
+Bind `use_alternate_move_filter` and `current_world_center` to read live globals
+at their source call sites. Use current projectile fields after queries and
+impact effects. The edge gate accepts either endpoint on each horizontal axis.
+Keep signed 32-bit wrap behavior for positions, distances, gravity, and TTL.

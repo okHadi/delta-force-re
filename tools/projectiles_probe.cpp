@@ -235,6 +235,17 @@ int main(int argc, char** argv) {
                 current_input = &q;
                 std::string qop, terrain, a, b, s, x;
                 q >> qop >> terrain >> a >> b >> s >> x;
+                unsigned action=0;q>>action;
+                bool late_filter=query.alternate_move_filter;
+                query.use_alternate_move_filter=[&]{return late_filter;};
+                query.current_world_center=[&]{return world;};
+                query.on_event=[&](auto& p,const auto& e){
+                    if(e.kind==dfre::ProjectileEventKind::impact){
+                        if(action==1)late_filter=true;
+                        if(action==2)p.position={123,456,789};
+                    }
+                    if(e.kind==dfre::ProjectileEventKind::move && action==3){world={0,0,0};p.position={0,0,0};}
+                };
                 const auto parse = [](const std::string& token, std::int32_t&,
                                       bool& present) noexcept {
                     if (token == "none") { present = false; return std::int32_t(0); }
@@ -243,8 +254,11 @@ int main(int argc, char** argv) {
                 };
                 std::int32_t distance = 0; bool present = false;
                 const std::int32_t terrain_raw = std::int32_t(std::stoll(terrain, nullptr, 0));
-                query.terrain = [terrain_raw](const dfre::ProjectileEntity&, const dfre::Fixed3&,
-                                              std::int32_t, std::int32_t&) { return terrain_raw; };
+                query.terrain = [&,terrain_raw](const dfre::ProjectileEntity&, const dfre::Fixed3&,
+                                              std::int32_t, std::int32_t&) {
+                    if(action==4){entity.position={123,456,789};entity.velocity={1000,2000,3000};}
+                    return terrain_raw;
+                };
                 const std::int32_t araw = parse(a, distance, present);
                 query.actors_a = [araw, present](const dfre::ProjectileEntity&, const dfre::Fixed3&,
                                                            std::int32_t, std::int32_t& out) {

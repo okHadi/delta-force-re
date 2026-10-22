@@ -532,6 +532,9 @@ def main():
     # 5. Mouse axes and buttons.
     mouse_cases = [(1, 0, 1, 1, 0, 0, 30), (-2, -3, 0x80, 0, 0, 0, 31), (0x40, 0x20, 0x80, 1, 1, 0, 32),
                    (0, 0, 0x80, 1, 0, 3, 33), (5, -7, 0x40, 0, 1, 1, 34)]
+    for flip in [0, 1]:
+        for steady in [0, 1]:
+            mouse_cases.append((-2147483648, -2147483648, 1, flip, steady, 0, 35))
     for _ in range(args.cases):
         mouse_cases.append((rng.randrange(-0x20000, 0x20000), rng.randrange(-0x20000, 0x20000),
                             rng.randrange(0x4000), rng.randrange(2), rng.randrange(2), rng.randrange(8),

@@ -50,6 +50,14 @@ set(DFRE_RUNTIME_MODULES
     player_weapon_runtime
     mission_area_live
     mission_muzzle
+    actor_pickups
+    mission_player_live
+    mission_pickup_live
+    mission_projectile_live
+    mission_projectile_spawn
+    mission_frame_services
+    mission_audio_frame
+    input_bridge
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -169,12 +177,15 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(native_mission_combat_live tests/native_mission_combat_live.cpp)
+    target_link_libraries(native_mission_combat_live PRIVATE dfre_core)
+    add_test(NAME native_mission_combat_live COMMAND native_mission_combat_live)
     foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
         add_executable(native_${dfre_module} tests/native_${dfre_module}.cpp)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)
         add_test(NAME native_${dfre_module} COMMAND native_${dfre_module})
     endforeach()
-    foreach(dfre_view_test native_world_hits native_mission_geometry native_projectile_hits native_actor_collision native_mission_live native_mission_projectile_stage native_mission_area_live)
+    foreach(dfre_view_test native_world_hits native_mission_geometry native_projectile_hits native_actor_collision native_mission_live native_mission_projectile_stage native_mission_area_live native_mission_player_live native_mission_pickup_live native_mission_projectile_live)
         if(MSVC)
             target_compile_options(${dfre_view_test} PRIVATE /Zc:nrvo-)
         elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -190,6 +201,9 @@ if(BUILD_TESTING)
     add_executable(native_resource_plan tests/native_resource_plan.cpp)
     target_link_libraries(native_resource_plan PRIVATE dfre_core)
     add_test(NAME native_resource_plan COMMAND native_resource_plan)
+    add_executable(native_resources tests/native_resources.cpp)
+    target_link_libraries(native_resources PRIVATE dfre_core)
+    add_test(NAME native_resources COMMAND native_resources)
     add_executable(native_movement tests/native_movement.cpp)
     target_link_libraries(native_movement PRIVATE dfre_core)
     add_test(NAME native_movement COMMAND native_movement)

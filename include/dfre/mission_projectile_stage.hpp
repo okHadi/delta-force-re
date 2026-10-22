@@ -6,6 +6,7 @@
 
 namespace dfre {
 // Df.exe SHA-256 abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff.
+// Canonical mission groups: 0=7DDE80, 1=867E80, 3=7CCA80.
 struct MissionAreaActorRef { std::uint32_t group = 3; std::size_t index = 0; };
 struct MissionAreaActor { AiActorImage* image = nullptr; std::uint32_t identity = 0; };
 struct MissionAreaDefinition { std::uint32_t type = 0, id = 0; };

@@ -241,7 +241,7 @@ GlobalKeyResult InputStage::global_key(std::uint16_t key,const GlobalKeyState& s
 
 std::size_t InputStage::push_mouse(const InputMouseLook& look,std::uint32_t mouse_buttons,std::uint32_t tick) {
     std::size_t pushed=0;
-    const std::int32_t y=look.flip?look.y:-look.y;
+    const std::int32_t y=look.flip?look.y:std::int32_t(mask_negate(std::uint32_t(look.y)));
     const auto push_look=[&](std::uint32_t id,std::int32_t value){
         queue_.push({id,tick,std::uint32_t(value),0});
         ++pushed;
@@ -301,17 +301,28 @@ FrameOutput InputStage::begin_frame(const FrameInput& input) {
         for(std::size_t i=before;i<total;++i)out.queued.push_back(queue_.records()[i]);
     };
     push({0xA3,input.tick,0,0});
-    for(const auto& event:input.events){
+    std::size_t event_index=0;
+    const auto current=[&]{return input.current?input.current():input;};
+    for(;;){
+        InputKeyEvent event;
+        if(input.next_event)event=input.next_event();
+        else if(event_index<input.events.size())event=input.events[event_index++];
+        else break;
         // The ring at 0xd094b0 stores the event as one dword; an all-zero slot
         // reads back as 0 and 0x479380 treats it as an empty ring, so the drain
         // stops there and the remaining events wait for the next frame.
         if(event.key==0&&event.state==0&&event.flag==0&&event.modifiers==0)break;
-        if(input.input_mode!=0){
-            if(input.input_mode==1)out.chat_keys.push_back(event);
+        const auto source=current();
+        if(source.input_mode!=0){
+            if(source.input_mode==1){
+                if(input.on_chat_key)input.on_chat_key(event);
+                out.chat_keys.push_back(event);
+            }
             continue;
         }
-        const auto filtered=global_key(event.key,input.global);
+        const auto filtered=global_key(event.key,source.global);
         if(filtered.handled){
+            if(input.on_global_key)input.on_global_key(filtered);
             out.effects.push_back(filtered.effect);
             if(filtered.pushed_record)push(filtered.pushed);
             if(filtered.dispatched)out.immediate.push_back({filtered.dispatched_id,0,0,0});
@@ -327,14 +338,17 @@ FrameOutput InputStage::begin_frame(const FrameInput& input) {
             collect(before);
         }
     }
-    if(input.live_input&&input.mouse_enabled){
+    const auto mouse=current();
+    if(mouse.live_input&&mouse.mouse_enabled){
         const std::size_t before=queue_.size();
-        (void)push_mouse(input.look,input.mouse_buttons,input.tick);
+        (void)push_mouse(mouse.look,mouse.mouse_buttons,input.tick);
+        if(input.on_mouse_sampled)input.on_mouse_sampled();
         collect(before);
     }
-    if(input.input_mode==0){
+    const auto held=current();
+    if(held.input_mode==0){
         const std::size_t before=queue_.size();
-        (void)push_held_keys(input.keys,input.tick,input.priority_key);
+        (void)push_held_keys(held.keys,input.tick,held.priority_key);
         collect(before);
     }
     return out;

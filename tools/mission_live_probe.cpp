@@ -8,7 +8,8 @@ int main(int argc,char** argv){try{
     using namespace dfre;
     if(argc!=3)throw std::invalid_argument("Use: mission_live_probe GAME_FOLDER MISSION");
     const AssetStore store(argv[1]);MissionAssetCache cache(store);
-    const auto resources=cache.load_runtime(argv[2]);const auto terrain=load_terrain_runtime(store,argv[2],32);
+    auto resources=cache.load_runtime(argv[2]);cache.load_projectile_runtime(resources);
+    const auto terrain=load_terrain_runtime(store,argv[2],32);
     const auto start=initial_player(resources.mission,terrain.geometry);
     if(!start)throw std::runtime_error("Mission has no single-player start");
     MissionInitConfig config;config.mode=mission_theme(resources.mission);config.night=mission_night(resources.mission);

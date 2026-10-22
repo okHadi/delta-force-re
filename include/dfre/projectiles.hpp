@@ -124,6 +124,9 @@ struct ProjectileQuery {
     bool alternate_move_filter = false; // [0x67F549] & 0x10 selects mask 0x60 over 0x90
     // Execute each reached effect before later projectile state writes.
     std::function<void(ProjectileEntity&,const ProjectileEvent&)> on_event;
+    // Read after impact effects, at the original move/edge call sites.
+    std::function<bool()> use_alternate_move_filter;
+    std::function<Fixed3()> current_world_center;
 };
 enum class ProjectileEventKind : std::uint8_t {
     move,       // 463350 position record (message/demo), flags filtered

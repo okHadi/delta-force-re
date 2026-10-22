@@ -12,7 +12,7 @@ std::int32_t integer(std::istream& in) {return std::int32_t(next(in));}
 void put(AiActorImage& a,unsigned at,std::uint32_t n) {for(unsigned i=0;i<4;++i)a[at+i]=std::uint8_t(n>>(i*8));}
 std::string hex(const AiActorImage& a) {std::ostringstream out;out<<std::hex<<std::setfill('0');for(auto n:a)out<<std::setw(2)<<unsigned(n);return out.str();}
 AiActorImage readimage(std::istream& in) {std::string raw;in>>raw;if(raw.size()!=0x228)throw std::invalid_argument("Bad actor image");AiActorImage a{};for(unsigned i=0;i<a.size();++i)a[i]=std::uint8_t(std::stoul(raw.substr(i*2,2),nullptr,16));return a;}
-std::uint32_t base(std::uint32_t group) {return group==3?0x7cca80:group==1?0x7dde80:0x867e80;}
+std::uint32_t base(std::uint32_t group) {return mission_actor_source_address(group,0);}
 }
 int main(int argc,char** argv) {
     if(argc!=2)return 2;

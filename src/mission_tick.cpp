@@ -29,10 +29,6 @@ std::int32_t product_shift(std::int32_t left, std::int32_t right, unsigned shift
 }
 
 // Original table bases used by the message payload index (pointer - base)/0x114.
-constexpr std::uint32_t kGroup0Base = 0x7DDE80;
-constexpr std::uint32_t kGroup1Base = 0x867E80;
-constexpr std::uint32_t kGroup2Base = 0x8ACE80;
-constexpr std::uint32_t kGroup3Base = 0x7CCA80;
 constexpr std::uint32_t kExtraBase = 0x822E80;
 constexpr std::uint32_t kActorStride = 0x114;
 
@@ -82,13 +78,8 @@ constexpr std::uint32_t kOrg1Callback = 0x45B5B0;
 constexpr std::uint32_t kPlyrCallback = 0x45BDF0;
 
 std::uint32_t raw_pointer(const AiActorRef& ref) {
-    switch (ref.group) {
-        case 0: return kGroup0Base + static_cast<std::uint32_t>(ref.index) * kActorStride;
-        case 1: return kGroup1Base + static_cast<std::uint32_t>(ref.index) * kActorStride;
-        case 2: return kGroup2Base + static_cast<std::uint32_t>(ref.index) * kActorStride;
-        case 3: return kGroup3Base + static_cast<std::uint32_t>(ref.index) * kActorStride;
-        default: return kExtraBase + static_cast<std::uint32_t>(ref.index) * kActorStride;
-    }
+    if(ref.group<4)return mission_actor_source_address(ref.group,ref.index);
+    return kExtraBase + static_cast<std::uint32_t>(ref.index) * kActorStride;
 }
 
 void trace(MissionTickReport& report, MissionTraceKind kind, std::uint32_t address,
@@ -203,10 +194,7 @@ public:
         };
         else state.weapons.trigger_query=previous_query_;
         state.weapons.on_event=[&state](const WeaponEvent& event){
-            if(state.current_report)trace_plain(*state.current_report,MissionTraceKind::weapon_event,
-                static_cast<std::uint32_t>(event.kind),unsigned_bits(event.value));
-            if(!state.world.weapon_effect || !state.world.weapon_effect(state,event))
-                throw MissionTickError("mission tick: weapon effect binding missing");
+            mission_weapon_effect(state,event);
         };
     }
     ~WeaponEffectScope(){state_.weapons.on_event=std::move(previous_);state_.weapons.trigger_query=std::move(previous_query_);state_.current_report=previous_report_;}
@@ -278,6 +266,13 @@ void run_behavior_callback(MissionTickState& state,const AiActorRef& ref,Mission
 }
 
 } // namespace
+
+void mission_weapon_effect(MissionTickState& state,const WeaponEvent& event){
+    if(state.current_report)trace_plain(*state.current_report,MissionTraceKind::weapon_event,
+        static_cast<std::uint32_t>(event.kind),unsigned_bits(event.value));
+    if(!state.world.weapon_effect || !state.world.weapon_effect(state,event))
+        throw MissionTickError("mission tick: weapon effect binding missing");
+}
 
 // ---------------------------------------------------------------------------
 // State accessors

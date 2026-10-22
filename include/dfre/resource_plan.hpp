@@ -28,7 +28,7 @@ struct WeaponItemIds {
 const std::array<WeaponItemIds, 39>& original_weapon_items() noexcept;
 
 enum class ResourceKind : std::uint8_t { model, husk, character, animation };
-enum class ResourceStage : std::uint8_t { soldier, weapons, effects, group0, group1, group3, group2 };
+enum class ResourceStage : std::uint8_t { soldier, weapons, effects, group0, group1, group3, group2, projectiles };
 inline constexpr std::size_t no_slot = static_cast<std::size_t>(-1);
 
 // One file request in original call order.
@@ -102,5 +102,7 @@ bool mission_night(const MissionData& mission) noexcept;
 
 // Ordered single-player resource plan for original 0x402EC0.
 ResourcePlan build_resource_plan(const ResourcePlanInput& input);
+// Append the separate 4633F0 item-load pass after 402EC0. Reuse its registries.
+void append_projectile_resource_plan(ResourcePlan&,const ResourcePlanInput&);
 
 } // namespace dfre

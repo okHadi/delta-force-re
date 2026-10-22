@@ -8,8 +8,8 @@ from pathlib import Path
 from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ESP
 from check_projectile_hits_original import Replay, HASH, match, pack
 
-BASES = {3: 0x7cca80, 1: 0x7dde80, 0: 0x867e80}
-COUNTS = {3: 0x8cfa18, 1: 0x8cfa1c, 0: 0x8cf904}
+BASES = {3: 0x7cca80, 0: 0x7dde80, 1: 0x867e80}
+COUNTS = {3: 0x8cfa18, 0: 0x8cfa1c, 1: 0x8cf904}
 LOCAL, OWNER, UPDATE, PENDING, PENDING_COUNT = 0x2201000, 0x2202000, 0x2203000, 0x9e2e40, 0xa15898
 
 
