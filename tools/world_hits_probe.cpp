@@ -290,6 +290,17 @@ int main(int argc, char** argv) {
                 const auto third = to_int(read_int(input, "Expected three values"), "Value outside 32 bits");
                 std::cout << dfre::collision_approximate_length(first, second, third) << '\n';
             }
+        } else if (command == "point" || command == "direction") {
+            std::string line;
+            while (std::getline(std::cin, line)) {
+                std::istringstream input(line);
+                dfre::ModelMatrix matrix{};
+                std::array<std::int32_t,3> value{};
+                for(auto& field:matrix)field=to_int(read_int(input,"Expected matrix"),"Matrix outside 32 bits");
+                for(auto& field:value)field=to_int(read_int(input,"Expected vector"),"Vector outside 32 bits");
+                const auto result=command=="point"?dfre::world_hit_local_point(matrix,value):dfre::world_hit_local_direction(matrix,value);
+                std::cout<<result[0]<<' '<<result[1]<<' '<<result[2]<<'\n';
+            }
         } else if (command == "scenario") {
             const auto scenarios = parse_scenarios();
             for (const auto& scenario : scenarios) {

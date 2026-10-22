@@ -19,6 +19,9 @@ std::int32_t wrap_add(std::int32_t left, std::int32_t right) {
 std::int32_t wrap_negate(std::int32_t value) {
     return static_cast<std::int32_t>(0u - static_cast<std::uint32_t>(value));
 }
+std::int32_t wrap_absolute(std::int32_t value) {
+    return value<0?wrap_negate(value):value;
+}
 
 std::int32_t wrap_multiply(std::int32_t left, std::int32_t right) {
     return static_cast<std::int32_t>(static_cast<std::uint32_t>(left) * static_cast<std::uint32_t>(right));
@@ -78,7 +81,7 @@ std::array<std::int32_t, 3> world_hit_local_point(const ModelMatrix& matrix, con
     for (std::size_t row = 0; row < 3; ++row) {
         std::int32_t total = 0;
         for (std::size_t axis = 0; axis < 3; ++axis) {
-            const auto translated = wrap_add(point[axis], matrix[row * 4 + 3]);
+            const auto translated = wrap_add(point[axis], matrix[axis * 4 + 3]);
             total = wrap_add(total, shifted_product(matrix[row * 4 + axis], translated, 22));
         }
         result[row] = total;
@@ -125,12 +128,14 @@ std::int32_t world_model_list_hit(const std::vector<WorldHitRecord>& records, co
             closest[axis] = wrap_add(query.origin[axis], shifted_product(along, query.direction[axis], 16));
         }
         const auto distance = collision_approximate_length(
-            wrap_add(closest[0], wrap_negate(record.position[0])),
-            wrap_add(closest[1], wrap_negate(record.position[1])),
-            wrap_add(closest[2], wrap_negate(record.position[2])));
+            wrap_absolute(wrap_add(closest[0], wrap_negate(record.position[0]))),
+            wrap_absolute(wrap_add(closest[1], wrap_negate(record.position[1]))),
+            wrap_absolute(wrap_add(closest[2], wrap_negate(record.position[2]))));
         if (distance > radius) continue;
-        for (std::size_t mesh_index = 0; mesh_index < record.meshes.size(); ++mesh_index) {
-            const auto& mesh = record.meshes[mesh_index];
+        const auto resolved=record.mesh_source?record.mesh_source():std::vector<WorldHitMesh>{};
+        const auto& meshes=record.mesh_source?resolved:record.meshes;
+        for (std::size_t mesh_index = 0; mesh_index < meshes.size(); ++mesh_index) {
+            const auto& mesh = meshes[mesh_index];
             if (mesh.state_flags & 1) continue;
             const auto& faces = require_faces(mesh);
             const auto local_origin = world_hit_local_point(mesh.matrix, query.origin);

@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <string_view>
 #include <vector>
 namespace dfre {
@@ -109,8 +110,13 @@ public:
     std::int32_t burst_counter() const noexcept { return burst_counter_; } // actor item def +0x6C
     std::int32_t raise_counter() const noexcept { return raise_counter_; } // C23A3C
     std::vector<WeaponEvent> take_events();
+    // Execute effects at their source call sites, before later weapon writes.
+    std::function<void(const WeaponEvent&)> on_event;
+    // Original 47A290(0x8C) query at gun expiry. Empty uses tick's fixture input.
+    std::function<bool()> trigger_query;
 
 private:
+    void emit(WeaponEvent event);
     const WeaponClassDefinition& class_of(const WeaponDefinition&) const noexcept;
     void fan_dispatch();          // 483B10 by use class
     void expire_action();         // 483B70 by use class

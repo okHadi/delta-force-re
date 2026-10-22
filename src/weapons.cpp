@@ -150,7 +150,7 @@ void WeaponState::emit_shot() {
         if (burst_counter_ == 0) burst_counter_ = 2;
         else burst_counter_ -= 1;
     }
-    events_.push_back({WeaponEventKind::shot, std::int32_t(index)});
+    emit({WeaponEventKind::shot, std::int32_t(index)});
 }
 
 void WeaponState::finish_action(int silent) {
@@ -160,7 +160,7 @@ void WeaponState::finish_action(int silent) {
     if (fire_timer_ > 0) return;
     fire_timer_ = current_definition().fire_delay;
     if (silent == 0)
-        events_.push_back({WeaponEventKind::sound, std::int32_t(class_of(current_definition()).action_sound)});
+        emit({WeaponEventKind::sound, std::int32_t(class_of(current_definition()).action_sound)});
 }
 
 void WeaponState::start_reload() { // 4832F0
@@ -169,7 +169,7 @@ void WeaponState::start_reload() { // 4832F0
     const auto weapon_class = definition.weapon_class;
     if (reserve_[weapon_class] == 0) return;
     if (magazine_[weapon_class] == std::int32_t(kClasses[weapon_class].magazine_size)) return;
-    events_.push_back({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].reload_sound)});
+    emit({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].reload_sound)});
     magazine_[weapon_class] = 0;
     reload_timer_ = kReloadTicks;
 }
@@ -191,7 +191,8 @@ void WeaponState::expire_gun() { // 483240
         magazine_[weapon_class] -= 1;
         if (magazine_[weapon_class] == 0) { start_reload(); return; }
     }
-    if (gun_flags_refire(definition.flags) != 0 && trigger_held_ && aim_block_ == 0) fan_dispatch();
+    if (gun_flags_refire(definition.flags) != 0 &&
+        (trigger_query?trigger_query():trigger_held_) && aim_block_ == 0) fan_dispatch();
 }
 
 void WeaponState::expire_launcher() { // 483610
@@ -206,7 +207,7 @@ void WeaponState::expire_charge() { // 483860 (use classes 7, 9, 11)
 }
 
 void WeaponState::expire_laser() { // 483AA0
-    events_.push_back({WeaponEventKind::queue, 0x2C});
+    emit({WeaponEventKind::queue, 0x2C});
     pending_[current_definition().weapon_class] = 1;
 }
 
@@ -234,7 +235,7 @@ void WeaponState::fire_gun() { // 482F90
     const auto& definition = current_definition();
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) {
-        events_.push_back({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
+        emit({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
         burst_counter_ = 0;
         finish_action(1);
         return;
@@ -249,7 +250,7 @@ void WeaponState::fire_launcher() { // 483410
     const auto& definition = current_definition();
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) {
-        events_.push_back({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
+        emit({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
         burst_counter_ = 0;
         return; // 4834E9 leaves the action timer untouched
     }
@@ -272,13 +273,13 @@ void WeaponState::fire_claymore() { // 4840B0
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) return;
     const auto index = current_weapon();
-    events_.push_back({WeaponEventKind::place, index == 0x25 ? 0xFAE : 0xFC8});
+    emit({WeaponEventKind::place, index == 0x25 ? 0xFAE : 0xFC8});
     pending_[weapon_class] = 0;
     finish_action(0);
 }
 
 void WeaponState::fire_detonator() { // 470F40
-    events_.push_back({WeaponEventKind::queue, 0x28});
+    emit({WeaponEventKind::queue, 0x28});
 }
 
 void WeaponState::fire_satchel() { // 4841F0
@@ -286,15 +287,15 @@ void WeaponState::fire_satchel() { // 4841F0
     const auto& definition = current_definition();
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) return;
-    events_.push_back({WeaponEventKind::place, 0xFB4});
+    emit({WeaponEventKind::place, 0xFB4});
     pending_[weapon_class] = 0;
     finish_action(0);
 }
 
 void WeaponState::fire_laser() { // 483A30
     if (fire_timer_ > 0) return;
-    events_.push_back({WeaponEventKind::sound2, 0x1AE});
-    events_.push_back({WeaponEventKind::message, 0});
+    emit({WeaponEventKind::sound2, 0x1AE});
+    emit({WeaponEventKind::message, 0});
     fire_timer_ = current_definition().fire_delay;
 }
 
@@ -303,7 +304,7 @@ void WeaponState::fire_grenade() { // 483670
     const auto& definition = current_definition();
     const auto weapon_class = definition.weapon_class;
     if (pending_[weapon_class] == 0) {
-        events_.push_back({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
+        emit({WeaponEventKind::sound, std::int32_t(kClasses[weapon_class].empty_sound)});
         burst_counter_ = 0;
         return;
     }
@@ -424,6 +425,12 @@ void WeaponState::resupply(bool double_primary_slots) { // 4848C0
             const auto weapon_class = kWeapons[slot_map_[std::size_t(slot)]].weapon_class;
             reserve_[weapon_class] = std::int32_t(kClasses[weapon_class].magazine_count) * 2 - 1;
         }
+}
+
+void WeaponState::emit(WeaponEvent event) {
+    events_.push_back(event);
+    const auto sink=on_event;
+    if(sink)sink(event);
 }
 
 std::vector<WeaponEvent> WeaponState::take_events() {

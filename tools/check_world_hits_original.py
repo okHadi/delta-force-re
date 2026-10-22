@@ -330,6 +330,28 @@ def compare_math():
     return dict(square_root_cases=len(values), length_cases=len(triples), mismatches=mismatches)
 
 
+def compare_transforms():
+    rng = random.Random(0x45CE60)
+    cases = [([0,-MATRIX_ONE,0,0x1000,MATRIX_ONE,0,0,0x200,0,0,MATRIX_ONE,0x300],
+              [0x40000,0x500,0x600])]
+    for _ in range(args.math_cases):
+        cases.append(([rng.randrange(-2**31,2**31) for _ in range(12)],
+                      [rng.randrange(-2**31,2**31) for _ in range(3)]))
+    counts = {}
+    for command,address in [('point',0x45CE60),('direction',0x45CF30)]:
+        native = probe_lines(command,[' '.join(map(str,matrix+value)) for matrix,value in cases])
+        for index,(matrix,value) in enumerate(cases):
+            write_i32(SCRATCH,matrix)
+            write_i32(SCRATCH+0x40,value)
+            call_original(address,SCRATCH,SCRATCH+0x40,SCRATCH+0x50,count=2000)
+            expected = list(struct.unpack('<3i',u.mem_read(SCRATCH+0x50,12)))
+            actual = list(map(int,native[index].split()))
+            if actual != expected:
+                raise SystemExit(f'{command} case {index}: port {actual}, original {expected}')
+        counts[command+'_cases'] = len(cases)
+    return dict(**counts,mismatches=[])
+
+
 def compare_model_hits():
     rng = random.Random(0x42DB80)
     cases = []
@@ -362,6 +384,9 @@ def compare_model_hits():
                 material = rng.choice([0, 2])
             records = craft_records(rng, origin, delta, 0x40000, local_origin, material,
                                     second_lists=case_index % 8 == 5)
+        if case_index % 16 == 0:
+            records[0]['radius'] = 0x20000
+            records[0]['position'] = [origin[0], origin[1]+0x20000, origin[2]+0x20000]
         cases.append(dict(origin=origin, end=end, direction=direction, length=length, bounds=bounds,
                           skip=[0, 0], records=records))
     lines = []
@@ -516,6 +541,8 @@ def compare_queries():
     return dict(cases=len(cases), kinds=kinds, mismatches=mismatches)
 
 
+transform_report = compare_transforms()
+print('transforms',transform_report)
 math_report = compare_math()
 print('math', {k: v for k, v in math_report.items() if k != 'mismatches'})
 if math_report['mismatches']:
@@ -531,7 +558,7 @@ print('queries', {k: v for k, v in query_report.items() if k != 'mismatches'})
 if query_report['mismatches']:
     print('MISMATCH', json.dumps(query_report['mismatches'][:3], default=str))
     raise SystemExit(1)
-report = dict(source_sha256=SOURCE_HASH, unicorn_version=unicorn.__version__, math=math_report,
+report = dict(source_sha256=SOURCE_HASH, unicorn_version=unicorn.__version__, transforms=transform_report, math=math_report,
               model_hits=hit_report, queries=query_report)
 destination = args.report or Path('.local/reports/world-hits-original-check.json')
 destination.write_text(json.dumps(report, indent=2) + '\n')

@@ -15,6 +15,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace dfre {
@@ -58,6 +59,8 @@ struct WorldHitRecord {
     std::array<std::int32_t, 3> position{}; // +0x24
     std::int32_t radius = 0;               // model +0x60
     std::vector<WorldHitMesh> meshes;      // runtime slot mesh order
+    // Original model callback runs only after the record bounds/sphere gates.
+    std::function<std::vector<WorldHitMesh>()> mesh_source;
 };
 
 // Original query context. Origin/end/length and the bounds use the caller's

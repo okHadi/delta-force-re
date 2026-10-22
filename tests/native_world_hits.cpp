@@ -71,6 +71,10 @@ void math_helpers() {
     const dfre::ModelMatrix identity{0x400000, 0, 0, 0x1000, 0, 0x400000, 0, 0x200, 0, 0, 0x400000, 0x300};
     const auto local = dfre::world_hit_local_point(identity, {0x40000, 0x500, 0x600});
     require(local[0] == 0x41000 && local[1] == 0x700 && local[2] == 0x900, "Local point differs");
+    const dfre::ModelMatrix rotated{0, -0x400000, 0, 0x1000, 0x400000, 0, 0, 0x200, 0, 0, 0x400000, 0x300};
+    const auto rotated_point = dfre::world_hit_local_point(rotated, {0x40000, 0x500, 0x600});
+    require(rotated_point[0] == -0x700 && rotated_point[1] == 0x41000 && rotated_point[2] == 0x900,
+        "Rotated local point uses the translation of each input axis");
     const auto direction = dfre::world_hit_local_direction(identity, {0x10000, 0x2000, 0x3000});
     require(direction[0] == 0x10000 && direction[1] == 0x2000 && direction[2] == 0x3000,
         "Local direction differs");
@@ -135,6 +139,19 @@ dfre::WorldHitQuery crafted_query() {
 void model_list_hits() {
     const std::array<std::int32_t, 3> translation{0x1000, 0x200, 0x300};
     dfre::WorldModelHit hit;
+    {
+        CraftedRecord fixture;
+        crafted(fixture, 0, 0x11, {0, 0, 0}, translation);
+        fixture.record.position={0,0x20000,0x20000};fixture.record.radius=0x20000;
+        unsigned callbacks=0;
+        fixture.record.mesh_source=[&]{++callbacks;return fixture.record.meshes;};
+        require(dfre::world_model_list_hit({fixture.record},crafted_query(),hit)==1 && !hit.hit,
+            "Sphere rejection uses absolute distance components");
+        require(callbacks==0,"Rejected sphere ran the model callback");
+        fixture.record.position={0,0,0};
+        require(dfre::world_model_list_hit({fixture.record},crafted_query(),hit)==0 && callbacks==1,
+            "Accepted sphere runs the model callback at the query site");
+    }
     {
         CraftedRecord fixture;
         crafted(fixture, 0, 0x11, {0, 0, 0}, translation);

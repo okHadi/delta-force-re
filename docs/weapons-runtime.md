@@ -82,6 +82,10 @@ documented in `.local/opencode/weapons-needs.md`.
 
 ## Mission loadout
 
+Bind `WeaponState::on_event` to run effects at each source call site. The
+callback runs before later pending, ammo, and timer writes. Use `take_events`
+to clear the recorded events after processing.
+
 Call `WeaponState::loadout` with sidearm, primary, and secondary recipe ids. It builds the ten slots from the 28-row table at `4F9704` and applies `4848C0` resupply. Secondary id 1 doubles primary reserve. Select slot 3 after mission initialization, as `4829F0` does.
 
 ```sh

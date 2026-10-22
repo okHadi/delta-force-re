@@ -27,6 +27,20 @@ int main() { try {
     require(classes[7].magazine_size == 30 && classes[14].magazine_size == 200, "magazine sizes");
 
     {
+        auto live=make(kMainMap);live.select_slot(2);live.take_events();
+        unsigned shots=0;
+        live.on_event=[&](const dfre::WeaponEvent& event){
+            require(event.kind==dfre::WeaponEventKind::shot && live.pending(7)==1 && live.fire_timer()==0,
+                "shot effect runs before pending and timer writes");
+            ++shots;live.set_unlimited_ammo(true);
+        };
+        require(live.fire() && shots==1 && live.pending(7)==0 && live.fire_timer()==6,"live shot callback");
+        live.on_event={};
+        for(unsigned tick=0;tick<6;++tick)live.tick(false);
+        require(live.magazine(7)==30,"later weapon logic reads effect state");
+    }
+
+    {
         dfre::WeaponState selected;
         selected.loadout({6,9,21});
         require(selected.slot_map()==std::array<std::uint8_t,10>{27,1,5,6,10,7,29,30,0,33},
@@ -34,9 +48,9 @@ int main() { try {
         selected.select_slot(3);
         require(selected.current_weapon()==6,"loadout selected weapon");
         selected.loadout({6,9,1});
-        require(selected.reserve(7)==classes[7].magazine_count*2-1,"ammo box doubles primary reserve");
+        require(selected.reserve(7)==std::int32_t(classes[7].magazine_count)*2-1,"ammo box doubles primary reserve");
         selected.loadout({6,9,2});
-        require(selected.reserve(7)==classes[7].magazine_count-1,"secondary id must equal one to double reserve");
+        require(selected.reserve(7)==std::int32_t(classes[7].magazine_count)-1,"secondary id must equal one to double reserve");
         try { selected.loadout({6,28,1});require(false,"invalid loadout id accepted"); }
         catch(const std::out_of_range&) {}
     }
@@ -84,6 +98,16 @@ int main() { try {
     require(events.size() == 1 && events[0].kind == dfre::WeaponEventKind::shot, "M249 refire event");
     for (int i = 0; i < 6; ++i) state.tick(false);
     require(state.magazine(14) == 198 && state.fire_timer() == 0, "M249 released stops");
+
+    {
+        auto live=make(kMainMap);live.select_slot(4);live.fire();live.take_events();
+        unsigned queries=0;
+        live.trigger_query=[&]{++queries;live.toggle_aim_block();return true;};
+        for(unsigned tick=0;tick<6;++tick)live.tick(true);
+        require(queries==1 && live.aim_blocked() && live.fire_timer()==0,
+            "gun expiry reads current aim state after its input query");
+        require(live.take_events().empty(),"input query blocked the automatic shot");
+    }
 
     // 4832F0 / 483390 reload: 120 ticks, one spare magazine, action sound.
     state = make(kSingleMap);

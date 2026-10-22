@@ -11,5 +11,6 @@ code from `WorldSegmentResult`; the extra fields identify the selected face.
 Material mask `868C` counts transparent surfaces. A solid hit returns its
 negative distance.
 
-Run `check_world_hits_original.py GAME PROBE` to compare math helpers,
+Run `check_world_hits_original.py GAME PROBE` to compare point and direction
+transforms, math helpers,
 model-list scans, and segment queries with original instructions.

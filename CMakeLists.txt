@@ -34,6 +34,18 @@ set(DFRE_RUNTIME_MODULES
     actor_behavior
     actor_queries
     live_world
+    animation
+    animation_driver
+    mission_animation
+    gameplay_dispatch
+    motion_clearance
+    projectiles
+    mission_tick
+    mission_geometry
+    mission_live
+    projectile_hits
+    player_step
+    actor_collision
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -158,11 +170,13 @@ if(BUILD_TESTING)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)
         add_test(NAME native_${dfre_module} COMMAND native_${dfre_module})
     endforeach()
-    if(MSVC)
-        target_compile_options(native_world_hits PRIVATE /Zc:nrvo-)
-    elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-        target_compile_options(native_world_hits PRIVATE -fno-elide-constructors)
-    endif()
+    foreach(dfre_view_test native_world_hits native_mission_geometry native_projectile_hits native_actor_collision)
+        if(MSVC)
+            target_compile_options(${dfre_view_test} PRIVATE /Zc:nrvo-)
+        elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(${dfre_view_test} PRIVATE -fno-elide-constructors)
+        endif()
+    endforeach()
     add_executable(native_palette_quantizer tests/native_palette_quantizer.cpp)
     target_link_libraries(native_palette_quantizer PRIVATE dfre_core)
     add_test(NAME native_palette_quantizer COMMAND native_palette_quantizer)
