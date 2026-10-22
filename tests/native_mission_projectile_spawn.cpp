@@ -27,8 +27,13 @@ void request_and_receive(){
     b.ground=[&](auto&,auto,auto){calls.push_back(1);saved[8]=1;saved[10]=0x34;saved[11]=0x12;return 0;};
     b.queue=[&](auto&,auto id,const auto& bytes){check(id==0x17&&bytes==std::vector<std::uint8_t>({1,0}));calls.push_back(2);saved[14]=4;};
     cells.classes[4].field_30=0x80;cells.classes[4].field_18=7;cells.classes[4].field_20=0;
-    MissionProjectileSpawn received(state,cells,items,b);received.receive(saved);
+    MissionProjectileSpawn received(state,cells,items,b);received.receive(saved.data(),saved.size());
     check(calls==std::vector<unsigned>({1,2,3})&&state.projectiles[2].owner_slot==0&&state.projectiles[2].aim_yaw==0x12340000&&state.projectiles[2].ttl==7);
+    const auto ring=cells.ring_index;
+    bool rejected=false;try{received.receive(saved.data(),14);}catch(const MissionTickError&){rejected=true;}
+    check(rejected&&cells.ring_index==ring);
+    rejected=false;try{received.receive(nullptr,15);}catch(const MissionTickError&){rejected=true;}
+    check(rejected&&cells.ring_index==ring);
 }
 void effects_and_errors(){
     MissionTickState state;init(state);auto items=definitions();items[3].ambient_handles[0]=11;items[3].ambient_sound[0]=12;MissionProjectileSpawnCells cells;

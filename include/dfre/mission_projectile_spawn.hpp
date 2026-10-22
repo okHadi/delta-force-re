@@ -26,6 +26,8 @@ public:
         const std::vector<RuntimeItemDefinition>&,MissionProjectileSpawnBindings);
     void request(std::uint32_t owner,std::uint32_t kind,MuzzleResult&); // 46FB40
     void receive(MissionSpawnPacket&); // 46EA40 dispatcher body
+    // Keep the mutable 15-byte receive buffer alive through its callbacks.
+    void receive(std::uint8_t* bytes,std::size_t length);
     std::uint32_t spawn(std::uint32_t owner,std::uint32_t kind,MuzzleResult&); // 462F20
 private:
     MissionTickState& state_;

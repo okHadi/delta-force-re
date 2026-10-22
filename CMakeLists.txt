@@ -58,12 +58,21 @@ set(DFRE_RUNTIME_MODULES
     mission_frame_services
     mission_audio_frame
     input_bridge
+    mission_script_runtime
+    mission_results
+    events
+    game_messages
+    mission_logic
+    mission_actor_lifecycle
+    mission_host_pump
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
     add_executable(${dfre_module}_probe tools/${dfre_module}_probe.cpp)
     target_link_libraries(${dfre_module}_probe PRIVATE dfre_core)
 endforeach()
+add_executable(mission_profile_probe tools/mission_profile_probe.cpp)
+target_link_libraries(mission_profile_probe PRIVATE dfre_core)
 target_include_directories(dfre_core PUBLIC include)
 target_compile_features(dfre_core PUBLIC cxx_std_17)
 set_target_properties(dfre_core PROPERTIES CXX_EXTENSIONS OFF)
@@ -180,6 +189,9 @@ if(BUILD_TESTING)
     add_executable(native_mission_combat_live tests/native_mission_combat_live.cpp)
     target_link_libraries(native_mission_combat_live PRIVATE dfre_core)
     add_test(NAME native_mission_combat_live COMMAND native_mission_combat_live)
+    add_executable(native_mission_messages_live tests/native_mission_messages_live.cpp)
+    target_link_libraries(native_mission_messages_live PRIVATE dfre_core)
+    add_test(NAME native_mission_messages_live COMMAND native_mission_messages_live)
     foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
         add_executable(native_${dfre_module} tests/native_${dfre_module}.cpp)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)

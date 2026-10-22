@@ -1,5 +1,8 @@
 # Live projectile spawn
 
+Use `receive(bytes,length)` with a mutable 15-byte message buffer. Keep its
+storage stable during terrain and queue callbacks.
+
 Create `MissionProjectileSpawn` with the current mission, shared spawn cells, loaded item definitions, and reached effect providers. Keep these objects alive. Initialize `MissionTickState::projectiles` with 512 empty records. The ring index starts at the original `A158A4` value, 0.
 
 The loaded definitions include IDs `FA1`, `FC1`, and `FCA`, as selected by `4633F0`. Load all three items through the resource loader before binding the game. Their current model and sound fields supply the projectile resources. Main and alternate item fields use loaded definition indexes. Owner fields use group-three slot indexes; `-1` means no owner and slot 0 is valid.

@@ -46,4 +46,8 @@ const std::vector<CharacterBonePose>* MissionAnimations::pose(std::uint32_t inst
     const auto found=instances_.find(instance);
     return found==instances_.end()?nullptr:&found->second.controller->pose();
 }
+void MissionAnimations::release(std::uint32_t instance) {
+    if(!instance)return;
+    if(instances_.erase(instance)!=1)throw std::out_of_range("Character release needs a current instance");
+}
 } // namespace dfre

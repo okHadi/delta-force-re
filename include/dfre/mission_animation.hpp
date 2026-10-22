@@ -23,6 +23,7 @@ public:
     const AnimationController& controller(std::uint32_t instance) const;
     const std::vector<AnimationDriverAction>& actions(std::uint32_t instance) const;
     const std::vector<CharacterBonePose>* pose(std::uint32_t instance) const noexcept;
+    void release(std::uint32_t instance); // 42CD30/439C40; zero returns
     std::size_t size() const noexcept { return instances_.size(); }
 private:
     struct Instance {

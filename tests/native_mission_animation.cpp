@@ -15,5 +15,8 @@ int main(){try{
     bool duplicate=false;try{MissionAnimations invalid({{base,&character,{}},{base,&character,{}}});}
     catch(const std::invalid_argument&){duplicate=true;}CHECK(duplicate);
     bool missing=false;try{world.controller(base+2);}catch(const std::out_of_range&){missing=true;}CHECK(missing);
+    world.release(0);CHECK(world.size()==2);
+    world.release(base);CHECK(world.size()==1&&world.pose(base)==nullptr&&world.pose(base+1)!=nullptr);
+    missing=false;try{world.release(base);}catch(const std::out_of_range&){missing=true;}CHECK(missing);
     std::cout<<"mission animation checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

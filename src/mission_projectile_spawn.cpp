@@ -6,10 +6,10 @@ namespace {
 template<class F> const F& need(const F& fn,const char* message){if(!fn)throw MissionTickError(message);return fn;}
 std::uint32_t bits(std::int32_t n){return std::uint32_t(n);}
 std::int32_t signed_bits(std::uint32_t n){return n<=0x7fffffffu?std::int32_t(n):std::int32_t(std::int64_t(n)-0x100000000LL);}
-std::uint32_t read(const MissionSpawnPacket& p,unsigned at,unsigned width){std::uint32_t n=0;for(unsigned i=0;i<width;++i)n|=std::uint32_t(p[at+i])<<(8*i);return n;}
+std::uint32_t read(const std::uint8_t* p,unsigned at,unsigned width){std::uint32_t n=0;for(unsigned i=0;i<width;++i)n|=std::uint32_t(p[at+i])<<(8*i);return n;}
 void put(MissionSpawnPacket& p,unsigned at,std::uint32_t n,unsigned width){for(unsigned i=0;i<width;++i)p[at+i]=std::uint8_t(n>>(8*i));}
 MissionSpawnPacket packet(const SpawnRecord& r){MissionSpawnPacket p{};put(p,0,r.packed_x,4);put(p,4,r.packed_y,4);put(p,8,r.actor_slot,2);put(p,10,r.aim_yaw_word,2);put(p,12,r.aim_pitch_word,2);p[14]=r.kind;return p;}
-SpawnRecord record(const MissionSpawnPacket& p){return {read(p,0,4),read(p,4,4),std::uint16_t(read(p,8,2)),std::uint16_t(read(p,10,2)),std::uint16_t(read(p,12,2)),p[14]};}
+SpawnRecord record(const std::uint8_t* p){return {read(p,0,4),read(p,4,4),std::uint16_t(read(p,8,2)),std::uint16_t(read(p,10,2)),std::uint16_t(read(p,12,2)),p[14]};}
 }
 MissionProjectileSpawn::MissionProjectileSpawn(MissionTickState& state,MissionProjectileSpawnCells& cells,
     const std::vector<RuntimeItemDefinition>& definitions,MissionProjectileSpawnBindings bindings)
@@ -44,6 +44,10 @@ void MissionProjectileSpawn::request(std::uint32_t owner,std::uint32_t kind,Muzz
     spawn(owner,kind,muzzle);
 }
 void MissionProjectileSpawn::receive(MissionSpawnPacket& bytes){
+    receive(bytes.data(),bytes.size());
+}
+void MissionProjectileSpawn::receive(std::uint8_t* bytes,std::size_t length){
+    if(!bytes||length!=15)throw MissionTickError("Projectile receive needs fifteen mutable bytes");
     const auto input=record(bytes);
     const auto signed_slot=input.actor_slot<0x8000u?std::int32_t(input.actor_slot):std::int32_t(input.actor_slot)-0x10000;
     // The dispatcher saves the owner before terrain. Aim and kind remain live.
