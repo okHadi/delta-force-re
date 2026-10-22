@@ -20,7 +20,8 @@ Use `debrief_text_request` for the campaign table, briefing group, and Win/Lose 
 Run `native_mission_results` for rules and bounds. Run
 `native_mission_results_live` for the result builder, round services, client
 outbox, local echo, live decoder, end-event pass, and profile-save path with
-shared state. That test supplies actor/name data and a muted sound provider.
+shared state. It also runs the sound-bank and voice code with a preloaded sample.
+Actor/name data and sample bytes are test inputs. Device output stays muted.
 Run `check_mission_results_original.py GAME --core CORE --report FILE` for
 campaign and text checks. Run `check_mission_profile_original.py GAME PROBE
 --report FILE` for full profile images, ordered stores, and original x87 checks.

@@ -67,6 +67,11 @@ set(DFRE_RUNTIME_MODULES
     mission_host_pump
     mission_client_outbox
     mission_round_services
+    audio_mixer
+    mission_sound_assets
+    mission_audio_cache
+    mission_sound_bank
+    mission_audio_playback
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -75,6 +80,8 @@ foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
 endforeach()
 add_executable(mission_profile_probe tools/mission_profile_probe.cpp)
 target_link_libraries(mission_profile_probe PRIVATE dfre_core)
+add_executable(mission_sound_stock_probe tools/mission_sound_stock_probe.cpp)
+target_link_libraries(mission_sound_stock_probe PRIVATE dfre_core)
 target_include_directories(dfre_core PUBLIC include)
 target_compile_features(dfre_core PUBLIC cxx_std_17)
 set_target_properties(dfre_core PROPERTIES CXX_EXTENSIONS OFF)

@@ -3,6 +3,8 @@
 #include "dfre/mission_logic.hpp"
 #include "dfre/mission_results.hpp"
 #include "dfre/mission_round_services.hpp"
+#include "dfre/mission_sound_bank.hpp"
+#include "dfre/mission_audio_playback.hpp"
 #include <iostream>
 #include <map>
 #include <stdexcept>
@@ -16,6 +18,20 @@ void run(){
     std::map<std::uint32_t,std::uint8_t> memory;
     const auto read=[&](std::uint32_t at,unsigned width=4){if(at==0x67dbec&&width==4)return events.flags_67dbec();std::uint32_t n=0;for(unsigned i=0;i<width;++i)n|=std::uint32_t(memory[at+i])<<(8*i);return n;};
     const auto write=[&](std::uint32_t at,unsigned width,std::uint32_t n){if(at==0x67dbec&&width==4){events.flags_67dbec()=n;return;}for(unsigned i=0;i<width;++i)memory[at+i]=std::uint8_t(n>>(8*i));};
+    // One preloaded sample fixture. Sound selection and voice state use real bodies.
+    const std::uint32_t bank=0x30000000,layer=bank+0x100,member=bank+0x200,asset=bank+0x300,sample=bank+0x400;
+    write(0x4f2ea8+499*0x28,4,bank);write(bank+0x1c,4,0x10000);write(bank+0x24,4,1);write(bank+0x28,4,layer);
+    write(layer,2,1);write(layer+8,4,2);write(0x501500,4,2);write(layer+0x10,4,member);write(member,4,asset);write(member+4,4,0x10000);
+    write(asset+0x23,1,1);write(asset+0x24,4,sample);
+    AssetBytes pcm(20);pcm[0]='S';pcm[1]='A';pcm[2]='M';pcm[3]='P';pcm[4]=4;pcm[11]=0x10;pcm[13]=1;
+    pcm[16]=128;pcm[17]=130;pcm[18]=126;pcm[19]=128;
+    std::uint32_t audio_enabled=1,voice=0;MissionAudioPlaybackCells voice_cells{audio_enabled};MissionAudioPlaybackBindings audio;
+    audio.sample=[&](auto address){check(address==sample,"Result selected another sample");return MissionAudioSampleView{pcm.data(),pcm.size(),sample};};
+    audio.pcm_byte=[&](auto address){check(address>=sample&&address-sample<pcm.size(),"Result sound read outside sample");return pcm.at(address-sample);};
+    MissionAudioPlayback playback(voice_cells,audio);playback.initialize();
+    MissionSoundBankBindings sound;
+    sound.read=read;sound.write=write;
+    sound.call=[&](auto site,const auto& args){check(site==0x494dd0,"Unexpected result sound service");voice=playback.play(args.at(0),args.at(1),args.at(2),args.at(3));return voice;};
     std::vector<AssetBytes> clients(17,AssetBytes(mission_client_record_size));
     const auto client=[&](std::size_t slot,std::uint32_t at,unsigned width){std::uint32_t n=0;for(unsigned i=0;i<width;++i)n|=std::uint32_t(clients.at(slot).at(at+i))<<(8*i);return n;};
     const auto client_put=[&](std::size_t slot,std::uint32_t at,unsigned width,std::uint32_t n){for(unsigned i=0;i<width;++i)clients.at(slot).at(at+i)=std::uint8_t(n>>(8*i));};
@@ -44,8 +60,7 @@ void run(){
         case 0x448d20:mission_round_log(round,args.at(0));break;
         case 0x446da0:mission_round_collect_squads(round);break;
         case 0x448130:return std::uint32_t(mission_round_compare_clients(round,args.at(0),args.at(1)));
-        // Explicit muted sound fixture; the scheduler body has its own host.
-        case 0x43e720:check(args==std::vector<std::uint32_t>{499},"Result sound changed");++sounds;break;
+        case 0x43e720:check(args==std::vector<std::uint32_t>{499},"Result sound changed");mission_sound_global_request(sound,499,bank+0x500);++sounds;break;
         default:throw std::runtime_error("Unexpected result service");
         }
         return 0u;
@@ -69,6 +84,8 @@ void run(){
     check(messages.check_receive(),"Client result echo was not received");
     check(messages.dispatch_received().empty(),"Live result produced inspection actions");
     check(delivered==1&&sounds==1&&read(0x67f718)==1&&read(0x67f71c)==1&&read(0x67f73c)==2&&read(0x67f740)==3,"Result display lost current client statistics");
+    check(voice!=0&&playback.playing(voice),"Live result sound did not enter the voice queue");
+    playback.publish();playback.advance_frames(200);check(!playback.playing(voice),"Live result sound did not finish");
     AssetBytes profile(0xa90);profile[0x28]=1;
     MissionProfileBindings save;save.cell=[&](auto at){return read(at);};save.store=[&](auto at,auto n){write(at,4,n);};
     save.profile=[&]()->AssetBytes&{return profile;};
