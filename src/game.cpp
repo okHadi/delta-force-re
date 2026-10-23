@@ -88,6 +88,7 @@ public:
         auto& world = states_[GameScreen::game];
         world.enter = [this] {
             if (!mission_selection_) throw std::runtime_error("Mission selection is missing");
+            mission_result_retained_=false;
             mission_assets_ = std::make_unique<MissionAssetCache>(assets_);
             mission_resources_ = mission_assets_->load_runtime(mission_selection_->filename);
             mission_assets_->load_projectile_runtime(*mission_resources_);
@@ -244,7 +245,7 @@ public:
                 *mission_animations_,*mission_geometry_,*mission_muzzle_,*mission_input_,*mission_sound_,
                 *mission_scripts_,*mission_audio_frame_,mission_script_queue_,mission_crt_thread_,*mission_clients_,
                 mission_extra_memory_,mission_rules_67f548_,mission_requested_8ee1d4_,mission_camera_position_6ba3d0_
-            },std::move(session_host));
+            },std::move(session_host),mission_result_);
             mission_session_->install();
             mission_scene_ = std::make_unique<MissionScene32>(*mission_runtime_, *mission_assets_, *world_, gamma);
             draw_mission(true);
@@ -259,6 +260,7 @@ public:
             if (options_.frame_limit && ++frames_ >= options_.frame_limit) close_ = true;
         };
         world.leave = [this] {
+            mission_result_retained_=bool(mission_session_);
             mission_session_.reset();
             mission_scene_.reset();
             mission_input_.reset();
@@ -330,6 +332,14 @@ public:
         if(at<0x8cfa14||end>0x8cfa18)throw MissionTickError("Extra actor count access crosses its field");
         return true;
     }
+    bool retained_result_claim(std::uint32_t at,std::uint32_t width) const {
+        if(mission_session_||!mission_result_retained_)return false;
+        const auto end=std::uint64_t(at)+width;
+        if(at>=result_state_block+result_state_bytes||end<=result_state_block)return false;
+        if((width!=1&&width!=2&&width!=4)||at<result_state_block||end>result_state_block+result_state_bytes)
+            throw MissionTickError("Retained result access crosses its owner");
+        return true;
+    }
     void prepare_mission_sound() {
         mission_tick_=std::make_unique<MissionTickState>();
         mission_clients_=std::make_unique<MissionClientLive>();
@@ -363,6 +373,7 @@ public:
         };
         bindings.record_base=[this,record_base](std::uint32_t at,std::uint32_t width)->std::optional<std::uint32_t>{
             if(const auto base=profile_memory_.record_base(at,width))return base;
+            if(retained_result_claim(at,width))return at;
             if(mission_primary_&&mission_primary_->claims(at,width)){
                 if(const auto base=mission_primary_->record_base(at,width))return base;
                 return at;
@@ -378,6 +389,7 @@ public:
         bindings.record_read=[this,record_read](std::uint32_t base,std::uint32_t offset,std::uint32_t width){
             const auto at=base+offset;
             if(profile_memory_.claims(at,width))return profile_memory_.read(at,width);
+            if(retained_result_claim(at,width)){std::uint32_t n=0;for(std::uint32_t i=0;i<width;++i)n|=std::uint32_t(mission_result_.at(at-result_state_block+i))<<(8*i);return n;}
             if(mission_primary_&&mission_primary_->claims(at,width)){
                 if(const auto record=mission_primary_->record_base(at,width))
                     if(*record!=base)throw MissionTickError("Primary sound record base is not aligned");
@@ -394,6 +406,7 @@ public:
         bindings.record_store=[this,record_store](std::uint32_t base,std::uint32_t offset,std::uint32_t width,std::uint32_t value){
             const auto at=base+offset;
             if(profile_memory_.claims(at,width)){profile_memory_.write(at,width,value);return;}
+            if(retained_result_claim(at,width)){for(std::uint32_t i=0;i<width;++i)mission_result_.at(at-result_state_block+i)=std::uint8_t(value>>(8*i));return;}
             if(mission_primary_&&mission_primary_->claims(at,width)){
                 if(const auto record=mission_primary_->record_base(at,width))
                     if(*record!=base)throw MissionTickError("Primary sound record base is not aligned");
@@ -626,6 +639,8 @@ private:
     std::uint32_t mission_requested_8ee1d4_=0;
     std::uint32_t mission_camera_mode_6ba3ec_=0;
     Fixed3 mission_camera_position_6ba3d0_{};
+    MissionResultImage mission_result_{};
+    bool mission_result_retained_=false;
     std::unique_ptr<MissionSession> mission_session_;
     StateLoop loop_;
     std::map<GameScreen, GameState> states_;

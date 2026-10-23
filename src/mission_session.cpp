@@ -146,7 +146,8 @@ struct MissionSession::Impl {
     MissionLogicFrameBindings logic;
     MissionLogicResultBindings result_bindings;
     MissionLogicResultPacket result_caller_packet{};
-    std::array<std::uint8_t,0x514> result_image{};
+    std::unique_ptr<MissionResultImage> owned_result_image;
+    MissionResultImage& result_image;
     MissionBehaviorZones zone_owner;MissionBehaviorZoneBindings zone_binding;
     MissionProjectileSpawnCells spawn_cells;std::unique_ptr<MissionProjectileSpawn> spawn;
     std::array<U,900> shot_ledger{};MissionPeerRequestBindings shots;
@@ -271,7 +272,7 @@ struct MissionSession::Impl {
         mission_scoreboard_receive(b,score_frame);
     }
 
-    explicit Impl(MissionSessionContext context,MissionSessionHost host):c(context),h(std::move(host)),camera{c.camera_position_6ba3d0,{},0,0}{
+    explicit Impl(MissionSessionContext context,MissionSessionHost host,MissionResultImage* result=nullptr):c(context),h(std::move(host)),camera{c.camera_position_6ba3d0,{},0,0},owned_result_image(result?nullptr:std::make_unique<MissionResultImage>()),result_image(result?*result:*owned_result_image){
         const auto& memory=c.sound.asset_bindings();
         for(std::size_t i=0;i<hud_history.size();++i)hud_history[i]=std::uint8_t(memory.read(0xbd34b0+U(i),1));
         hud_counter_bd4810=memory.read(0xbd4810,4);cells.emplace(0x67db54,memory.read(0x67db54,4));
@@ -839,6 +840,7 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     }
 };
 MissionSession::MissionSession(MissionSessionContext c,MissionSessionHost h):impl_(std::make_unique<Impl>(c,std::move(h))){}
+MissionSession::MissionSession(MissionSessionContext c,MissionSessionHost h,MissionResultImage& result):impl_(std::make_unique<Impl>(c,std::move(h),&result)){}
 MissionSession::~MissionSession(){uninstall();}
 void MissionSession::install(){auto& p=*impl_;if(p.active)throw MissionTickError("Mission session is already installed");p.prior_world=p.c.state.world;p.prior_updates=p.c.state.update_callbacks;p.prior_secondary=p.c.state.secondary_callbacks;p.active=true;const auto remember=[&]{for(std::size_t i=0;i<p.update_ids.size();++i)p.installed_updates[i]=!p.prior_updates.count(p.update_ids[i])&&p.c.state.update_callbacks.count(p.update_ids[i]);for(std::size_t i=0;i<p.secondary_ids.size();++i)p.installed_secondary[i]=!p.prior_secondary.count(p.secondary_ids[i])&&p.c.state.secondary_callbacks.count(p.secondary_ids[i]);};try{p.setup();remember();}catch(...){remember();uninstall();throw;}}
 void MissionSession::uninstall() noexcept {auto& p=*impl_;if(!p.active)return;if(p.player)p.player->uninstall();using std::swap;swap(p.c.state.world,p.prior_world);for(std::size_t i=0;i<p.update_ids.size();++i)if(p.installed_updates[i])p.c.state.update_callbacks.erase(p.update_ids[i]);for(std::size_t i=0;i<p.secondary_ids.size();++i)if(p.installed_secondary[i])p.c.state.secondary_callbacks.erase(p.secondary_ids[i]);p.installed_updates.fill(false);p.installed_secondary.fill(false);p.active=false;}

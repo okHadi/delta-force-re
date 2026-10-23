@@ -10,6 +10,7 @@
 #include "dfre/events.hpp"
 #include "dfre/terrain.hpp"
 #include "dfre/mission_logic.hpp"
+#include "dfre/mission_results.hpp"
 #include <memory>
 
 namespace dfre {
@@ -52,6 +53,8 @@ struct MissionSessionHost {
 class MissionSession {
 public:
     MissionSession(MissionSessionContext,MissionSessionHost);
+    // Keep these global result bytes alive after the session for Post/Debrief.
+    MissionSession(MissionSessionContext,MissionSessionHost,MissionResultImage&);
     ~MissionSession();
     MissionSession(const MissionSession&)=delete;
     MissionSession& operator=(const MissionSession&)=delete;

@@ -173,7 +173,9 @@ int main(int argc,char** argv){try{
     std::uint32_t requested=0;Fixed3 camera_position{};
     MissionSessionHost host;host.pump_490880=[](){return true;};host.rdtsc=[](){return std::uint64_t(std::chrono::steady_clock::now().time_since_epoch().count());};host.elapsed_audio_frames=[](){return 1u;};host.camera_actor_6ba3f0=[&](){return actor_handle(3,*state.config.local_actor);};host.camera_mode_6ba3ec=[](){return 0u;};
     std::size_t repaired=0;host.event_references=event_reference_repair?EventReferencePolicy::missing_not_fired:EventReferencePolicy::strict;host.event_diagnostic=[&](auto requested_index,auto loaded){if(requested_index!=74||loaded!=74)throw MissionTickError("Unexpected event repair");++repaired;};
-    MissionSession session({state,initial,resources.mission,cache,terrain,animations,geometry,muzzle,bridge,sound,*registry,audio,scripts,crt_cells,clients,*extra_memory,rules_word,requested,camera_position},host);
+    MissionResultImage retained_result{};
+    auto session_owner=std::make_unique<MissionSession>(MissionSessionContext{state,initial,resources.mission,cache,terrain,animations,geometry,muzzle,bridge,sound,*registry,audio,scripts,crt_cells,clients,*extra_memory,rules_word,requested,camera_position},host,retained_result);
+    auto& session=*session_owner;
     if(sockets->claims(0x18000000,4)||sockets->claims(0x19000000,4)||sockets->claims(0x1b000000,4)||sockets->claims(0x1c000000,4)||clients.claims(0x19000000,4)||session.claims(0x18000000,4)||session.claims(0x19000000,4)||session.claims(0x1b000000,4)||!session.claims(0x1c000000,1))throw MissionTickError("Virtual source owners overlap");
     std::uint32_t first_definition_word;std::memcpy(&first_definition_word,initial.definitions.data(),4);
     if(sound_memory.read(0x1900000c,4)!=crt_cells.seed||sound_memory.read(0x18000000,4)!=first_definition_word)throw MissionTickError("Canonical CRT or definition route differs");
@@ -214,5 +216,8 @@ int main(int argc,char** argv){try{
     std::cout<<"session_result mode1 rows "<<session.read(0x67f71c,4)<<" source_projectile_ring "<<shots_before_result<<std::endl;
     state.update_callbacks.emplace(0x0badf00e,[](auto&,const auto&,const auto&){});
     session.uninstall();current_session=nullptr;if(state.update_callbacks.size()!=prior_updates+1||state.secondary_callbacks.size()!=prior_secondary||!state.update_callbacks.count(0x0badf00d)||!state.update_callbacks.count(0x0badf00e))throw MissionTickError("Session removed another callback owner");if(session.installed())throw MissionTickError("Session did not uninstall");
-    std::cout<<"session_pass"<<frame_count<<" ammo27 namedrepair device0\n";return 0;
+    MissionResultImage expected_result{};for(std::size_t i=0;i<expected_result.size();++i)expected_result[i]=std::uint8_t(session.read(result_state_block+std::uint32_t(i),1));
+    if(retained_result!=expected_result)throw MissionTickError("Session result has a second byte owner");
+    session_owner.reset();if(retained_result!=expected_result||retained_result[4]!=1)throw MissionTickError("Mission result did not survive Session teardown");
+    std::cout<<"session_pass"<<frame_count<<" ammo27 namedrepair retainedresult device0\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

@@ -10,6 +10,8 @@ Bind the input row provider to `mission_session_input_query_row(sound, row)`. Su
 
 Keep scoreboard, squad, result and peer-buffer cells under the session memory route. Periodic services use the same clients and outbox as message receive. Call `request_result(mode, caller_packet)` with current packet storage. The result returns through the shared message queue. Its row count follows the current client filter.
 
+Pass a `MissionResultImage` as the third constructor argument when the host keeps results across states. The session uses these same bytes. Keep them alive through Session teardown and the Post/Debrief states. The two-argument constructor keeps its result storage inside Session.
+
 Keep source x87 control in the session. Startup `490EEF` calls the CPU initializer, whose `4A1217` reset sets `037F`. Person-rate events use this value through the current control provider.
 
 Helicopter conditions use current people, marker lists, type speeds and event flags. Keep their sixteen-byte caller frame separate from the helicopter update frame. Current actor pointers select targets by their source address and identity.
