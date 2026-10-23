@@ -45,9 +45,15 @@ dfre::AssetBytes fixture() {
 
 int main() {
     try {
-        const auto data = fixture();
+        auto data = fixture();
+        std::copy_n("dfdlg05.dbf",11,data.begin()+0x64);
         const auto mission = dfre::decode_mission(data);
         require(mission.terrain == "TEST.TRN", "Terrain filename failed");
+        require(dfre::mission_dialogue_archive(mission)=="dfdlg05.dbf", "Dialogue header field failed");
+        auto dialogue=mission;std::fill_n(dialogue.header.begin()+0x64,16,0);
+        require(dfre::mission_dialogue_archive(dialogue).empty(), "Empty dialogue header field failed");
+        std::fill_n(dialogue.header.begin()+0x64,16,'X');
+        rejects([&]{dfre::mission_dialogue_archive(dialogue);});
         require(mission.object_groups[0].size() == 1 && mission.object_groups[2].size() == 1, "Object groups failed");
         const auto& object = mission.object_groups[0][0];
         require(object.type_id == 2013 && object.object_id == 10 && object.name_id == 7 && object.flags == 0x1040,

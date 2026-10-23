@@ -122,6 +122,7 @@ struct MissionSoundRuntime::Impl {
     U call(U site,const std::vector<U>& a){
         switch(site){
         case 0x497f60:return memory.allocate(a.at(0));
+        case 0x4980d0:if(!a.at(0))return 0xffffffffu;memory.release(a.at(0));return 0;
         case 0x499040:return exists(a.at(0));
         case 0x499120:return mission_sound_file_open(assets,a.at(0));
         case 0x4992d0:return mission_audio_cache_seek(cache,a.at(0),a.at(1));

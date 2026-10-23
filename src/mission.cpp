@@ -5,6 +5,12 @@
 #include <set>
 
 namespace dfre {
+std::string mission_dialogue_archive(const MissionData& mission) {
+    const auto first=mission.header.begin()+0x64,last=first+16;
+    const auto end=std::find(first,last,0);
+    if(end==last)throw AssetError("Unterminated mission dialogue archive");
+    return std::string(first,end);
+}
 namespace {
 std::uint32_t word(const AssetBytes& data, std::size_t at) {
     return static_cast<std::uint32_t>(data[at]) |

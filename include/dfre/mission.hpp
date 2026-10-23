@@ -46,5 +46,7 @@ struct MissionData {
 
 MissionData decode_mission(const AssetBytes& data);
 MissionData load_mission(const AssetStore& assets, std::string_view name);
+//449C70 loads this header field at8CF96C;43E4A0 uses its dialogue archive.
+std::string mission_dialogue_archive(const MissionData&);
 
 } // namespace dfre

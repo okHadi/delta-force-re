@@ -104,8 +104,24 @@ set(DFRE_RUNTIME_MODULES
     mission_object_destruction
     mission_round_checks
     mission_event_person
+    crt_random
+    mission_projectile_trails
+    mission_terrain_mark
+    mission_script_start
+    mission_client_startup
+    mission_df_socket
+    mission_localization
+    mission_rtxt
+    mission_line_file
+    mission_banned_record
+    mission_script_registry
 )
-target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp src/mission_sound_live.cpp)
+target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp src/mission_sound_live.cpp src/mission_crt_thread.cpp src/mission_df_socket_runtime.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(dfre_core PRIVATE Threads::Threads)
+if(WIN32)
+    target_link_libraries(dfre_core PRIVATE ws2_32)
+endif()
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
     add_executable(${dfre_module}_probe tools/${dfre_module}_probe.cpp)
@@ -234,6 +250,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(native_mission_df_socket_runtime tests/native_mission_df_socket_runtime.cpp)
+    target_link_libraries(native_mission_df_socket_runtime PRIVATE dfre_core)
+    add_test(NAME native_mission_df_socket_runtime COMMAND native_mission_df_socket_runtime)
+    add_executable(native_mission_crt_thread tests/native_mission_crt_thread.cpp)
+    target_link_libraries(native_mission_crt_thread PRIVATE dfre_core)
+    add_test(NAME native_mission_crt_thread COMMAND native_mission_crt_thread)
     add_executable(native_mission_sound_live tests/native_mission_sound_live.cpp)
     target_link_libraries(native_mission_sound_live PRIVATE dfre_core)
     add_test(NAME native_mission_sound_live COMMAND native_mission_sound_live)
@@ -268,7 +290,8 @@ if(BUILD_TESTING)
         native_mission_sound_runtime native_mission_object_sound native_mission_event_actor_flags
         native_mission_object_update native_mission_object_wood_small native_mission_object_generic
         native_mission_object_wood_large native_mission_type_counts native_mission_object_destruction
-        native_mission_round_checks native_mission_event_person)
+        native_mission_round_checks native_mission_event_person
+        native_crt_random native_mission_projectile_trails native_mission_terrain_mark native_mission_script_start native_mission_client_startup native_mission_df_socket native_mission_localization native_mission_rtxt native_mission_line_file native_mission_banned_record native_mission_script_registry native_mission_df_socket_runtime)
         if(MSVC)
             target_compile_options(${dfre_peer_test} PRIVATE /UNDEBUG)
         else()

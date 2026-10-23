@@ -1,8 +1,9 @@
 # Mission frame services
 
 Keep the supplied cells and providers alive during each call. Bind camera
-position `6BA3D0/4/8` to `MissionTickState::world.world_center`. Set camera
-actor `6BA3F0` from the current camera source.
+position `6BA3D0/4/8` to its current camera cells. Set camera actor `6BA3F0`
+from the current camera source. Bind projectile edge cells `6E4708/04/00`
+from the listener updates to `MissionTickState::world.world_center`.
 
 Send stage calls to `MissionFrameServices::stage()`. Chain `nullopt` to the
 next provider. Owned stages are `461350`, `461340`, `456E30`, `479ED0`,

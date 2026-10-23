@@ -119,7 +119,7 @@ struct BehaviorQueryProvider {
 struct MissionTickWorld {
     const TerrainGeometry* terrain = nullptr;  // 0xBD5284 map
     std::int32_t water_level = 0;              // 0xBD5248
-    Fixed3 world_center{};                     // 0x464EB0 edge reference
+    Fixed3 world_center{};                     // 0x464EB0 edge reference: 6E4708/04/00
     AiBoundsSource bounds;                     // 0x487C50 object fields +0x64/+0x60
     // 0x486FD0 candidate for one target actor (object +0x10 or husk +0x14
     // selected by the target's +0x6C bit 8, like the original loop).

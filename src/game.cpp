@@ -17,6 +17,9 @@
 #include "dfre/mission_live.hpp"
 #include "dfre/mission_muzzle.hpp"
 #include "dfre/mission_sound_live.hpp"
+#include "dfre/mission_crt_thread.hpp"
+#include "dfre/mission_script_registry.hpp"
+#include "dfre/mission_rtxt.hpp"
 
 #include <array>
 #include <cstring>
@@ -87,6 +90,7 @@ public:
                 load_game_config_text(settings,text);
             }
             mission_rules_67f548_=std::uint32_t(settings.attributes); //407A90 copies4CEE8C.
+            mission_voice_volume_67f51c_=std::uint32_t(settings.dialog_volume);
             config.scale_health=(mission_rules_67f548_&0x100)!=0;
             config.squad_pass=(mission_rules_67f548_&0x400)!=0;
             config.powerup_pass=(mission_rules_67f548_&0x800)==0;
@@ -150,6 +154,9 @@ public:
         world.leave = [this] {
             mission_scene_.reset();
             mission_input_.reset();
+            if(mission_scripts_)mission_scripts_->service(0x455ea0,{});
+            mission_scripts_.reset();
+            mission_script_cells_.reset();
             mission_sound_.reset();
             mission_audio_frame_.reset();
             mission_sound_terrain_=nullptr;
@@ -185,14 +192,49 @@ public:
         if(!executable_file)throw std::runtime_error("Original Df.exe is missing");
         const AssetBytes executable((std::istreambuf_iterator<char>(executable_file)),{});
         auto bindings=mission_sound_live_bindings(*mission_tick_,[this]{return mission_script_key_503228_;});
+        bindings=mission_crt_thread_bindings(std::move(bindings),mission_crt_thread_,0x19000000);
+        const auto record_base=bindings.record_base;
+        const auto record_read=bindings.record_read;
+        const auto record_store=bindings.record_store;
+        bindings.record_base=[this,record_base](std::uint32_t at,std::uint32_t width)->std::optional<std::uint32_t>{
+            if(mission_scripts_&&mission_scripts_->owns(at,width))return at;
+            return record_base(at,width);
+        };
+        bindings.record_read=[this,record_read](std::uint32_t base,std::uint32_t offset,std::uint32_t width){
+            const auto at=base+offset;
+            if(mission_scripts_&&mission_scripts_->owns(at,width))return mission_scripts_->memory().read(at,width);
+            return record_read(base,offset,width);
+        };
+        bindings.record_store=[this,record_store](std::uint32_t base,std::uint32_t offset,std::uint32_t width,std::uint32_t value){
+            const auto at=base+offset;
+            if(mission_scripts_&&mission_scripts_->owns(at,width)){mission_scripts_->memory().write(at,width,value);return;}
+            record_store(base,offset,width,value);
+        };
+        bindings.service=[this](std::uint32_t site,const std::vector<std::uint32_t>& args){
+            if(mission_scripts_){const auto result=mission_scripts_->service(site,args);if(result)return *result;}
+            const auto& memory=mission_sound_->asset_bindings();
+            if(site==0x499f1f)return mission_rtxt_load(memory,args.at(0));
+            if(site==0x49a092)return mission_rtxt_lookup(memory,args.at(0),args.at(1),args.at(2));
+            if(site==0x49a076)return mission_rtxt_entry(memory,args.at(0),args.at(1));
+            throw MissionSoundAssetError("Mission sound service is not bound "+std::to_string(site));
+        };
         mission_sound_=std::make_unique<MissionSoundRuntime>(assets_,executable,
             *mission_audio_frame_,mission_sound_terrain_,std::move(bindings));
-        mission_sound_->initialize_definitions("LOOP.DEF");
-        const auto& path=mission_selection_->filename;
-        if(path.size()>=80)throw std::runtime_error("Mission sound path exceeds its source buffer");
+        mission_script_queue_={};
+        mission_script_cells_=std::make_unique<MissionScriptRuntimeCells>(
+            MissionScriptRuntimeCells{mission_script_queue_,mission_tick_->globals.mission_67f528});
+        const auto scratch=mission_sound_->asset_bindings().call(0x497f60,{0x4000,4,0,0});
+        MissionScriptRegistryBindings script_host;
+        script_host.crt_thread=[](){return 0x19000000u;};
+        script_host.voice_volume=[this](){return mission_voice_volume_67f51c_;};
+        mission_scripts_=std::make_unique<MissionScriptRegistry>(*mission_script_cells_,
+            mission_sound_->bank_bindings(),scratch,0x4000,std::move(script_host));
+        const auto& mission=mission_resources_->mission;
+        (void)mission_dialogue_archive(mission);
         const auto& memory=mission_sound_->asset_bindings();
-        for(std::size_t i=0;i<=path.size();++i)
-            memory.write(0x8cf96c+std::uint32_t(i),1,i<path.size()?std::uint8_t(path[i]):0);
+        for(std::size_t i=0;i<mission.header.size();++i)
+            memory.write(0x8cf908+std::uint32_t(i),1,mission.header[i]);
+        mission_sound_->initialize_definitions("LOOP.DEF");
         mission_sound_->resolve_definitions("SNIPER.PWF","NEW.PWF");
     }
     void draw_mission(bool report_gaps) {
@@ -322,9 +364,14 @@ private:
     Fixed3 mission_listener_{};
     std::uint32_t mission_listener_yaw_=0;
     std::uint32_t mission_script_key_503228_=0x04960552;
+    MissionCrtThreadCells mission_crt_thread_;
+    std::uint32_t mission_voice_volume_67f51c_=0;
     const TerrainGeometry* mission_sound_terrain_=nullptr;
     std::unique_ptr<MissionAudioFrameCells> mission_audio_frame_;
     std::unique_ptr<MissionSoundRuntime> mission_sound_;
+    MissionScriptQueueCells mission_script_queue_{};
+    std::unique_ptr<MissionScriptRuntimeCells> mission_script_cells_;
+    std::unique_ptr<MissionScriptRegistry> mission_scripts_;
     StateLoop loop_;
     std::map<GameScreen, GameState> states_;
     GameScreen screen_ = GameScreen::main_menu;

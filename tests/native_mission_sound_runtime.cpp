@@ -1,5 +1,6 @@
 #include "dfre/mission_sound_runtime.hpp"
 #include "dfre/item_callbacks.hpp"
+#include "dfre/mission.hpp"
 #include <chrono>
 #include <fstream>
 #include <iterator>
@@ -38,7 +39,7 @@ int main(int argc,char** argv){try{
  U key_reads=0;bindings.script_key=[&](){++key_reads;return 0x04960552u;};
  dfre::MissionSoundRuntime current(assets,executable,frame,terrain,bindings);const auto& c=current.asset_bindings();c.write(0x7cca9c,4,0x12345678);check(record[0x1c]==0x78&&c.read(0x7cca9d,1)==0x56,"Current record aliases are not shared");
  fails([&]{c.read(0x7cca80+0x113,4);});
- current.initialize_definitions("LOOP.DEF");check(key_reads==2,"Ambient passes do not read the current key separately");const std::string mission="C05M07.BMS";for(U i=0;i<=mission.size();++i)c.write(0x8cf96c+i,1,i<mission.size()?std::uint8_t(mission[i]):0);current.resolve_definitions("SNIPER.PWF","NEW.PWF");U ambient=0;
+ const auto mission=dfre::load_mission(assets,"C08M47.BMS");check(dfre::mission_dialogue_archive(mission).empty(),"Ambient fixture needs an empty dialogue header");for(U i=0;i<mission.header.size();++i)c.write(0x8cf908+i,1,mission.header[i]);current.initialize_definitions("LOOP.DEF");check(key_reads==2,"Ambient passes do not read the current key separately");current.resolve_definitions("SNIPER.PWF","NEW.PWF");U ambient=0;
  for(U id=1;id<512;++id)if(c.read(0x4f2ea4+id*40+36,1)&2){ambient=id;break;}
  check(ambient!=0,"Stock ambient definition is missing");record[0]=1;current.attach(0x7cca80,ambient,255,255);
  auto items=dfre::build_runtime_items(dfre::load_item_catalog(assets));U lookups=0,bound=0;dfre::bind_runtime_item_callbacks(items,[&](std::string_view name){++lookups;return current.definition_id(name);});
