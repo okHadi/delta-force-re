@@ -175,7 +175,7 @@ void setup_placements(MissionRuntimeState& state, const MissionInitConfig& confi
     state.placements.assign(kPlacementCount, ActorPlacement{});
     ActorPlacement& player = state.placements[0];
     // 0x444C50 writes name, +0x9C = 1 and both factory arguments; the enable
-    // byte producer is 0x43F830 (PlayerAddedCB), exposed as config input.
+    // byte producer is 0x43FF30, exposed as config input.
     player.object_id = config.player_object_id;
     player.name = config.player_name;
     player.field_9c = 1;

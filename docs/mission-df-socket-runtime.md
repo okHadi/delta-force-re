@@ -20,4 +20,6 @@ Windows uses Winsock and copies native WSADATA fields into the source layout. Li
 
 Numeric IPv4 lookup uses local address parsing. Named lookup requires `allow_external_dns=true`. The default disables named DNS. The backend has no packet send or receive operation. Source bind calls preserve their requested address, including ANY.
 
+A `gethostbyname` call before this runtime's first successful Winsock startup returns zero and sets error 10093 (`WSANOTINITIALISED`). This error path performs no DNS lookup. Source `43FF30` reaches address resolution before `454BB0` starts Winsock. See the [Windows return contract](https://learn.microsoft.com/en-us/windows/win32/api/winsock2/nf-winsock2-gethostbyname).
+
 The native test joins real OS calls to `454BB0`, receive/send retry bodies, buffer helpers, address resolution, and guarded allocation. It checks source memory visibility, frame reuse, failure prefixes, thread checks, address-in-use errors, and socket release. It uses local binds and sends no packets. Run the test where local socket creation is permitted. The frozen pure-body checker supplies the instruction comparison; this test checks the OS boundary.

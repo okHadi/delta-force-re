@@ -121,8 +121,13 @@ set(DFRE_RUNTIME_MODULES
     mission_actor_insert_live
     mission_line_file_runtime
     mission_type_mark
+    mission_actor_message
+    mission_trail_frame
+    mission_animation_effect
+    mission_wet_effect
+    mission_client_added
 )
-target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp src/mission_sound_live.cpp src/mission_crt_thread.cpp src/mission_df_socket_runtime.cpp src/mission_scene_projectiles.cpp)
+target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp src/mission_sound_live.cpp src/mission_crt_thread.cpp src/mission_df_socket_runtime.cpp src/mission_scene_projectiles.cpp src/mission_client_live.cpp)
 find_package(Threads REQUIRED)
 target_link_libraries(dfre_core PRIVATE Threads::Threads)
 if(WIN32)
@@ -256,10 +261,10 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(dfre_scene_test mission_scene_projectiles scene_effect_image)
-        add_executable(native_${dfre_scene_test} tests/native_${dfre_scene_test}.cpp)
-        target_link_libraries(native_${dfre_scene_test} PRIVATE dfre_core)
-        add_test(NAME native_${dfre_scene_test} COMMAND native_${dfre_scene_test})
+    foreach(dfre_adapter_test mission_scene_projectiles scene_effect_image event_reference_policy mission_client_live)
+        add_executable(native_${dfre_adapter_test} tests/native_${dfre_adapter_test}.cpp)
+        target_link_libraries(native_${dfre_adapter_test} PRIVATE dfre_core)
+        add_test(NAME native_${dfre_adapter_test} COMMAND native_${dfre_adapter_test})
     endforeach()
     add_executable(native_mission_df_socket_runtime tests/native_mission_df_socket_runtime.cpp)
     target_link_libraries(native_mission_df_socket_runtime PRIVATE dfre_core)
@@ -304,7 +309,7 @@ if(BUILD_TESTING)
         native_mission_round_checks native_mission_event_person
         native_crt_random native_mission_projectile_trails native_mission_terrain_mark native_mission_script_start native_mission_client_startup native_mission_df_socket native_mission_localization native_mission_rtxt native_mission_line_file native_mission_banned_record native_mission_script_registry native_mission_df_socket_runtime
         native_mission_terrain_types native_mission_actor_insert native_mission_scene_transient native_scene_effect_image
-        native_mission_actor_insert_live native_mission_line_file_runtime native_mission_type_mark)
+        native_mission_actor_insert_live native_mission_line_file_runtime native_mission_type_mark native_mission_actor_message native_mission_trail_frame native_mission_animation_effect native_mission_wet_effect native_mission_client_added)
         if(MSVC)
             target_compile_options(${dfre_peer_test} PRIVATE /UNDEBUG)
         else()

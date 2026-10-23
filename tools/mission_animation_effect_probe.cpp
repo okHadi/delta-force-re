@@ -1,0 +1,7 @@
+#include "dfre/mission_animation_effect.hpp"
+#include <iostream>
+#include <sstream>
+int main(){using namespace dfre;using U=std::uint32_t;using Q=std::uint64_t;U first,step,x,y,z,water,type,mutation;Q bias;while(std::cin>>first>>step>>x>>y>>z>>water>>type>>bias>>mutation){std::array<U,3> args{first,step,0x1200000};std::ostringstream trace;U reads=0,waters=0,calls=0;bool failed=false;MissionAnimationEffectBindings b;
+ b.read=[&](U at,U width)->Q{trace<<'R'<<at<<','<<width<<';';++reads;if((mutation&128)&&reads==3)throw std::runtime_error("Reader failure");if(at==0xbd5248){++waters;if(waters==1&&mutation&1)x^=0xabcdef01;if(waters==2&&mutation&2)water^=0xffffffff;return water;}if(at==0x1200024)return x;if(at==0x1200028){if(mutation&4)args[1]^=0xffffffff;return y;}if(at==0x120002c)return z;if(at==0x4ccb2c)return bias;if(at==0xbd52ac){if(mutation&8)args[1]^=0xffffffff;return 0x1220000u;}if(at==0x1220000+((x&0x3ff0000u)>>16)+((y&0x3ff0000u)>>6))return 7u;if(at==0xbd533b)return type;throw std::runtime_error("Unknown fixture read");};
+ b.call=[&](U site,const auto& values){trace<<'C'<<site;for(auto value:values)trace<<','<<value;trace<<';';++calls;if(site==0x45dc70){if(mutation&16)water^=0xffffffff;if(mutation&32)args[1]^=0xffffffff;if(mutation&64){x^=0x13579bdf;y^=0x2468ace0;}}if((mutation&256)&&calls==1)throw std::runtime_error("Call failure");};
+ try{mission_animation_effect(b,args);}catch(const std::exception&){failed=true;}std::cout<<failed<<' '<<water<<' '<<args[1]<<' '<<trace.str()<<'\n';}}

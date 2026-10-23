@@ -23,6 +23,11 @@
 #include "dfre/mission_actor_insert_live.hpp"
 #include "dfre/mission_scene_transient.hpp"
 #include "dfre/mission_scene_projectiles.hpp"
+#include "dfre/mission_client_live.hpp"
+#include "dfre/mission_client_startup.hpp"
+#include "dfre/mission_df_socket_runtime.hpp"
+#include "dfre/mission_line_file_runtime.hpp"
+#include "dfre/mission_localization.hpp"
 
 #include <array>
 #include <cstring>
@@ -30,6 +35,7 @@
 #include <iostream>
 #include <iterator>
 #include <map>
+#include <mutex>
 #include <stdexcept>
 
 namespace dfre {
@@ -99,7 +105,6 @@ public:
             config.powerup_pass=(mission_rules_67f548_&0x800)==0;
             config.mode = mission_theme(mission);
             config.night = mission_night(mission);
-            config.player_object_id = player_->marker_object_id;
             config.player_name = profile.name();
             config.player_face_id = profile.portrait();
             config.campaign_text_file = mission_selection_->text_file;
@@ -116,12 +121,25 @@ public:
             if (!config.campaign_text_file.empty() && mission_asset_present(assets_, config.campaign_text_file))
                 names.emplace(assets_.read(config.campaign_text_file).bytes);
             prepare_mission_sound();
+            const auto& source_memory=mission_sound_->asset_bindings();
+            const auto name=profile.name();
+            const auto name_at=source_memory.call(0x497f60,{std::uint32_t(name.size()+1),4,0,0});
+            for(std::size_t i=0;i<=name.size();++i)source_memory.write(name_at+std::uint32_t(i),1,i<name.size()?std::uint8_t(name[i]):0);
+            MissionClientStartupBindings client_setup{source_memory.read,source_memory.write,source_memory.call,{}};
+            mission_client_setup_local(client_setup,name_at,config.player_face_id,config.player_side);
+            source_memory.call(0x4980d0,{name_at});
+            config.player_object_id=mission_sound_->asset_bindings().read(0x50133c,4);
+            config.player_team=mission_clients_->read(mission_client_source_base+0x1c4,2);
+            config.local_player_active=mission_clients_->read(mission_client_source_base+0x18c,1)!=0;
             mission_runtime_ = std::make_unique<MissionRuntimeState>(assemble_mission_runtime(
                 *mission_resources_, mission_assets_->items(), world_->terrain.geometry,
                 names ? &*names : nullptr, config,
                 [this](std::string_view name){return mission_sound_->definition_id(name);}));
             if (!mission_runtime_->local_player || !mission_runtime_->actors)
                 throw std::runtime_error("Mission has no local player actor");
+            for(const auto& spawn:mission_runtime_->spawns)
+                mission_clients_->write(MissionClientLive::source_address(spawn.placement,8),4,
+                    mission_actor_source_address(3,spawn.actor));
             init_mission_tick(*mission_tick_,{},*mission_runtime_,0);
             mission_tick_->projectiles.assign(512,ProjectileEntity{});
             prepare_mission_extra_actor_pool(*mission_tick_);
@@ -173,7 +191,10 @@ public:
             mission_scripts_.reset();
             mission_script_cells_.reset();
             mission_extra_memory_={};
+            mission_files_.reset();
+            mission_sockets_.reset();
             mission_sound_.reset();
+            mission_clients_.reset();
             mission_audio_frame_.reset();
             mission_sound_terrain_=nullptr;
             mission_tick_.reset();
@@ -227,6 +248,7 @@ public:
     }
     void prepare_mission_sound() {
         mission_tick_=std::make_unique<MissionTickState>();
+        mission_clients_=std::make_unique<MissionClientLive>();
         mission_sound_terrain_=&world_->terrain.geometry;
         mission_listener_={};mission_listener_yaw_=0;
         mission_audio_frame_=std::make_unique<MissionAudioFrameCells>(
@@ -239,7 +261,19 @@ public:
         const auto record_base=bindings.record_base;
         const auto record_read=bindings.record_read;
         const auto record_store=bindings.record_store;
+        const auto actor_word=bindings.actor_word;
+        bindings.actor_word=[this,actor_word](std::uint32_t actor,std::uint32_t offset){
+            if(mission_extra_memory_.read){
+                if(const auto base=mission_extra_actor_record_base(actor,1)){
+                    if(*base!=actor||offset>0x110)throw MissionTickError("Extra sound actor needs a complete current word");
+                    return mission_extra_memory_.read(actor+offset,4);
+                }
+            }
+            return actor_word(actor,offset);
+        };
         bindings.record_base=[this,record_base](std::uint32_t at,std::uint32_t width)->std::optional<std::uint32_t>{
+            if(mission_clients_->claims(at,width))return at;
+            if(mission_sockets_&&mission_sockets_->claims(at,width))return at;
             if(mission_scripts_&&mission_scripts_->owns(at,width))return at;
             if(mission_extra_memory_.read){if(const auto base=mission_extra_actor_record_base(at,width))return base;if(extra_count_claim(at,width))return at;}
             if(definition_claim(at,width))return at;
@@ -247,6 +281,8 @@ public:
         };
         bindings.record_read=[this,record_read](std::uint32_t base,std::uint32_t offset,std::uint32_t width){
             const auto at=base+offset;
+            if(mission_clients_->claims(at,width))return mission_clients_->read(at,width);
+            if(mission_sockets_&&mission_sockets_->claims(at,width))return mission_sockets_->read(at,width);
             if(mission_scripts_&&mission_scripts_->owns(at,width))return mission_scripts_->memory().read(at,width);
             if(mission_extra_memory_.read&&(mission_extra_actor_record_base(at,width)||extra_count_claim(at,width)))return mission_extra_memory_.read(at,width);
             if(definition_claim(at,width))return definition_read(at,width);
@@ -254,6 +290,8 @@ public:
         };
         bindings.record_store=[this,record_store](std::uint32_t base,std::uint32_t offset,std::uint32_t width,std::uint32_t value){
             const auto at=base+offset;
+            if(mission_clients_->claims(at,width)){mission_clients_->write(at,width,value);return;}
+            if(mission_sockets_&&mission_sockets_->claims(at,width)){mission_sockets_->write(at,width,value);return;}
             if(mission_scripts_&&mission_scripts_->owns(at,width)){mission_scripts_->memory().write(at,width,value);return;}
             if(mission_extra_memory_.write&&(mission_extra_actor_record_base(at,width)||extra_count_claim(at,width))){mission_extra_memory_.write(at,width,value);return;}
             if(definition_claim(at,width))throw MissionTickError("Mission definitions are read-only after initialization");
@@ -262,6 +300,17 @@ public:
         bindings.service=[this](std::uint32_t site,const std::vector<std::uint32_t>& args){
             if(mission_scripts_){const auto result=mission_scripts_->service(site,args);if(result)return *result;}
             const auto& memory=mission_sound_->asset_bindings();
+            if(mission_files_){if(const auto result=mission_files_->service(site,args))return *result;}
+            if(site==0x49a620){
+                const auto target=args.at(0),count=args.at(2),byte=args.at(1)&255u,word=byte*0x01010101u;
+                std::uint32_t i=0;for(;count-i>=4;i+=4)memory.write(target+i,4,word);
+                for(;i<count;++i)memory.write(target+i,1,byte);
+                return target;
+            }
+            if(site==0x404cf0)return mission_localized_text({memory.read,
+                [&memory](auto table,auto group,auto key){return mission_rtxt_lookup(memory,table,group,key);}},args.at(0),args.at(1));
+            if(site==0x454df0&&mission_sockets_)return mission_df_socket_resolve(mission_sockets_->bindings(),args.at(0));
+            if(site==0x454bb0&&mission_sockets_)return mission_df_socket_start(mission_sockets_->bindings(),args.at(0),args.at(1),args.at(2));
             if(site==0x499f1f)return mission_rtxt_load(memory,args.at(0));
             if(site==0x49a092)return mission_rtxt_lookup(memory,args.at(0),args.at(1),args.at(2));
             if(site==0x49a076)return mission_rtxt_entry(memory,args.at(0),args.at(1));
@@ -281,6 +330,15 @@ public:
         const auto& mission=mission_resources_->mission;
         (void)mission_dialogue_archive(mission);
         const auto& memory=mission_sound_->asset_bindings();
+        mission_socket_memory_={memory.read,memory.write};
+        mission_sockets_=std::make_unique<MissionDfSocketRuntime>(mission_socket_memory_);
+        const auto file_scratch=memory.call(0x497f60,{0x2000,4,0,0});
+        MissionLineFileRuntimeBindings file_locks;
+        file_locks.lock=[this](auto){mission_file_mutex_.lock();};
+        file_locks.unlock=[this](auto){mission_file_mutex_.unlock();};
+        mission_files_=std::make_unique<MissionLineFileRuntime>(options_.game_folder,memory,
+            file_scratch,0x2000,std::move(file_locks));
+        mission_client_startup({memory.read,memory.write,memory.call,{}});
         for(std::size_t i=0;i<mission.header.size();++i)
             memory.write(0x8cf908+std::uint32_t(i),1,mission.header[i]);
         mission_sound_->initialize_definitions("LOOP.DEF");
@@ -423,7 +481,12 @@ private:
     std::uint32_t mission_voice_volume_67f51c_=0;
     const TerrainGeometry* mission_sound_terrain_=nullptr;
     std::unique_ptr<MissionAudioFrameCells> mission_audio_frame_;
+    std::unique_ptr<MissionClientLive> mission_clients_;
     std::unique_ptr<MissionSoundRuntime> mission_sound_;
+    MissionDfSocketRuntimeMemory mission_socket_memory_;
+    std::recursive_mutex mission_file_mutex_;
+    std::unique_ptr<MissionDfSocketRuntime> mission_sockets_;
+    std::unique_ptr<MissionLineFileRuntime> mission_files_;
     MissionScriptQueueCells mission_script_queue_{};
     std::unique_ptr<MissionScriptRuntimeCells> mission_script_cells_;
     std::unique_ptr<MissionScriptRegistry> mission_scripts_;

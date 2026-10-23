@@ -17,6 +17,14 @@ U make_socket(const MissionDfSocketBindings& b){const auto value=b.call(0x4c55c8
 U bind_port(MissionDfSocketRuntime& r,const MissionDfSocketBindings& b,U token,U port){r.write(0x1200000,2,2);r.write(0x1200002,2,b.call(0x4c55bc,{port}));r.write(0x1200004,4,0x0100007f);r.write(0x1200008,4,0);r.write(0x120000c,4,0);return b.call(0x4c55b6,{token,0x1200000,16});}
 }
 int main(){
+ {Memory m;MissionDfSocketRuntime r(m.bindings);auto b=r.bindings();
+  m.text(0x1200100,"nw2.novaworld.net");
+  assert(mission_df_socket_resolve(b,0x1200100)==0);
+  assert(b.call(0x4c55e0,{})==10093&&r.socket_count()==0);
+  m.text(0x1200100,"127.0.0.1");
+  assert(mission_df_socket_resolve(b,0x1200100)==0x0100007f);
+  assert(b.call(0x4c55e0,{})==10093);
+ }
  {Memory m;MissionDfSocketRuntimeOptions options;options.allocation_limit=48;options.new_memory_byte=0xa5;MissionDfSocketRuntime r(m.bindings,options);auto b=r.bindings();
   assert(b.call(0x49dc80,{0})==0&&b.call(0x49dc80,{0xffffffd5})==0);const auto first=b.call(0x49dc80,{1}),second=b.call(0x49dc80,{17});assert(first==0x24000000&&second==first+16);assert(r.read(first,4)==0xa5a5a5a5);r.write(first+14,4,0x12345678);assert(r.read(second,2)==0x1234&&r.read(first+14,4)==0x12345678);assert(b.call(0x49dc80,{1})==0);assert(r.claims(first+47,1));rejects([&]{r.read(first+40,1);});
   r.write(0x8e3544,4,123);assert(m.bindings.read(0x8e3544,4)==123);m.bindings.write(0x8e3544,4,456);assert(r.read(0x8e3544,4)==456);assert(!r.claims(0x8e3544,4));rejects([&]{r.read(first,3);});

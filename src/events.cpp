@@ -160,6 +160,16 @@ std::uint32_t EventStage::event_fired(std::size_t event_index) const {
     return events_.at(event_index).words[5] & 0xffu;
 }
 
+std::uint32_t event_fired_reference(const EventStage& stage,std::size_t requested,
+    EventReferencePolicy policy,const EventReferenceDiagnostic& diagnostic){
+    const auto loaded=stage.event_count();
+    if(requested<loaded)return stage.event_fired(requested);
+    if(policy!=EventReferencePolicy::missing_not_fired)
+        throw EventError("Event fired reference exceeds its loaded table");
+    if(!diagnostic)throw EventError("Missing event repair needs its diagnostic");
+    diagnostic(requested,loaded);return 0;
+}
+
 EventHost& EventStage::require_host() const {
     if(!host_)throw EventError("Event host is not bound");
     return *host_;

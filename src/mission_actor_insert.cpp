@@ -27,7 +27,7 @@ U mission_actor_insert(const MissionActorInsertBindings& b,U source,U mode){
     return destination;
 }
 MissionActorInsertBindings mission_transient_actor_bindings(MissionTransientActorPool& pool,MissionActorInsertBindings delegated){
-    constexpr U base=0x822e80,bytes=0x45000,count=0x8cfa14;
+    static constexpr U base=0x822e80,bytes=0x45000,count=0x8cfa14;
     MissionActorInsertBindings result;
     result.read=[&pool,foreign=std::move(delegated.read)](U at,U n){width(at,n);U value=0;
         if(at>=base&&std::uint64_t(at)+n<=std::uint64_t(base)+bytes){for(U i=0;i<n;++i){const U offset=at-base+i;value|=U(pool.records[offset/0x114][offset%0x114])<<(i*8);}return value;}

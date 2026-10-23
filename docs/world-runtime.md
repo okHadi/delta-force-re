@@ -14,4 +14,6 @@ initialization, as in `4011C0` and `43F490`.
 
 Source: `Df.exe`, SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`. Entries: `403A60`, `444C50`, `449710`, `402EC0`, `440640`, `44A110`, `4829F0`.
 
-The original replay checks all 62 missions, including 25,492 group records, resource binding, heights, placements, and local player state.
+Pass the current `50133C` peer ID as `MissionInitConfig.player_object_id`. Placement `+00` supplies actor `+08`; `4829F0` finds the local actor with this peer ID. Start markers supply the pose through `43F610`.
+
+The original comparison checks explicit configuration inputs across 62 missions, including 25,492 group records, resource binding, heights, placements, and local player state. These component checks do not replay full application startup.

@@ -199,6 +199,9 @@ public:
         return host() ? host()->object_index_dword(address, index)
                       : EventHost::object_index_dword(address, index);
     }
+    std::uint32_t external_event_fired(std::size_t index) override {
+        return host() ? host()->external_event_fired(index) : EventHost::external_event_fired(index);
+    }
     std::uint32_t probe_460330(std::size_t trigger_index) override {
         return host() ? host()->probe_460330(trigger_index) : EventHost::probe_460330(trigger_index);
     }

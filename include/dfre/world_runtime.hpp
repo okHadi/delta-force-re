@@ -92,7 +92,7 @@ struct MissionInitConfig {
     std::uint32_t player_face_id = 0;    // 0x67F430; factory argument 1
     std::uint32_t player_side = 0;       // 0x67F434; factory argument 2
     std::uint32_t player_team = 0;       // slot +0x1C4
-    bool local_player_active = true;     // +0x18C; producer is 0x43F830 (not ported)
+    bool local_player_active = true;     // +0x18C; local startup producer is 0x43FF30
     std::uint32_t weapon_slot_value = 0; // C239C0[C239B8] for 0x4829F0
     std::vector<MissionPlacementInput> extra_placements;
 };

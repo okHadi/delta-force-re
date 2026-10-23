@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <vector>
+#include <functional>
 #include <stdexcept>
 
 namespace dfre {
@@ -206,5 +207,11 @@ private:
     std::uint32_t flags_6e0254_ = 0;
     std::uint32_t flags_67dbec_ = 0; // 0x42ebe0 does not clear this one
 };
+
+// Caller-selected reconstruction repair. The raw EventStage path stays strict.
+enum class EventReferencePolicy { strict, missing_not_fired };
+using EventReferenceDiagnostic = std::function<void(std::size_t requested,std::size_t loaded)>;
+std::uint32_t event_fired_reference(const EventStage&,std::size_t requested,
+    EventReferencePolicy=EventReferencePolicy::strict,const EventReferenceDiagnostic& diagnostic={});
 
 } // namespace dfre

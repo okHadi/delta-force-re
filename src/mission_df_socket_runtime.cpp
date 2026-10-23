@@ -126,7 +126,11 @@ struct MissionDfSocketRuntime::Impl {
    return last_error;}
   if(site==0x4c55bc){count(1);return ((a[0]&255)<<8)|((a[0]>>8)&255);}
   if(site==0x4c55b0){count(1);const auto value=::inet_addr(text(a[0]).c_str());return little_ip(&value);}
-  if(site==0x4c55ec){count(1);require(startups>0,"DF socket lookup needs its source WSAStartup");return lookup(a[0]);}
+  if(site==0x4c55ec){count(1);if(!startups){last_error=10093;
+#ifdef _WIN32
+   WSASetLastError(int(last_error));
+#endif
+   return 0;}return lookup(a[0]);}
   if(site==0x4c55c8){count(3);require(startups>0,"DF socket creation needs its source WSAStartup");require(a[0]==2&&a[1]==2&&a[2]==0,"DF socket creation parameters are unsupported");const auto native=::socket(AF_INET,SOCK_DGRAM,0);if(native==invalid_socket)return failure();const auto token=next_socket++;try{sockets.emplace(token,native);}catch(...){close_socket(native);throw;}return token;}
   if(site==0x4c55c2){count(3);require(a[1]==0x8004667e,"DF socket ioctl operation is unsupported");const auto native=socket(a[0]);if(native==invalid_socket)return 0xffffffffu;const auto prior=read(a[2],4);
 #ifdef _WIN32
