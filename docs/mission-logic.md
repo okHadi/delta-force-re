@@ -31,4 +31,10 @@ receive, timer, budget, round-clear, and client outbox bodies. This check uses
 shared current cells, inactive client inputs, and an empty peer buffer. Packet
 parsing and timer expiry require their reached handlers.
 
+The same check sends a reliable shot from a client without an actor through
+the shared peer buffer and real parser. The source actor guard skips its shot
+handler. The real ACK outbox and local receiver cancel the original producer
+record. Keep ACK history, client records, and the producer queue with their
+current owners.
+
 Source: `Df.exe` SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.

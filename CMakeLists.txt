@@ -75,6 +75,10 @@ set(DFRE_RUNTIME_MODULES
     mission_peer_frame
     mission_peer_budget
     mission_peer_timers
+    mission_peer_expiry
+    mission_control_gate
+    mission_audio_listener
+    mission_peer_parser
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -215,7 +219,7 @@ if(BUILD_TESTING)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)
         add_test(NAME native_${dfre_module} COMMAND native_${dfre_module})
     endforeach()
-    foreach(dfre_peer_test native_mission_peer_frame native_mission_peer_budget native_mission_peer_timers)
+    foreach(dfre_peer_test native_mission_peer_frame native_mission_peer_budget native_mission_peer_timers native_mission_control_gate native_mission_audio_listener)
         if(MSVC)
             target_compile_options(${dfre_peer_test} PRIVATE /UNDEBUG)
         else()
