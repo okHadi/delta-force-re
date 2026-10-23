@@ -119,7 +119,17 @@ void bind_mission_actor_collision(MissionTickState& state,const MissionGeometry&
             const auto& definition=state.definitions.entries()[index];
             return ActorCollisionDefinition{definition.id,definition.flags24};
         };
-        bindings.actor=record;
+        bindings.actor=[&](std::uint32_t source){
+            constexpr std::array<std::size_t,4> capacities{1024,1024,512,256}; //449620 actor table extents;822E80 is separate.
+            for(std::uint8_t group=0;group<4;++group){
+                const auto base=mission_actor_source_address(group,0);if(source<base)continue;
+                const auto delta=source-base;if(delta%0x114u)continue;const auto slot=delta/0x114u;
+                if(slot>=capacities[group])continue;
+                if(slot>=state.tables.groups[group].size())throw MissionTickError("Collision carried source exceeds its current table");
+                return record(actor_handle(group,slot));
+            }
+            throw MissionTickError("Collision carried actor needs a physical source address");
+        };
         bindings.call=[&](const ActorCollisionCall& call){
             flush();
             std::optional<std::uint32_t> result;

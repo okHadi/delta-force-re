@@ -3,6 +3,7 @@
 #include "dfre/ai.hpp"
 #include "dfre/assets.hpp"
 #include "dfre/item_runtime.hpp"
+#include "dfre/item_callbacks.hpp"
 #include "dfre/items.hpp"
 #include "dfre/menu.hpp"
 #include "dfre/mission.hpp"
@@ -162,6 +163,12 @@ MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& reso
                                              const TerrainGeometry& terrain,
                                              const RtxtTable* people_names,
                                              const MissionInitConfig& config);
+MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& resources,
+                                             const ItemCatalog& items,
+                                             const TerrainGeometry& terrain,
+                                             const RtxtTable* people_names,
+                                             const MissionInitConfig& config,
+                                             const ItemSoundResolver& sound);
 
 // Load the mission and its terrain, then assemble. One empty cache per call.
 MissionRuntimeState initialize_mission(const AssetStore& assets, std::string_view mission_file,

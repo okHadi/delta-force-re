@@ -62,12 +62,10 @@ def main():
             if definition:put(image,4,1)
             if struct.unpack_from('<I',image,0xc)[0]:put(image,0xc,PERSON_HANDLE+(struct.unpack_from('<I',image,0xc)[0]-PERSON))
             if struct.unpack_from('<I',image,0x18)[0]:put(image,0x18,CHAR_HANDLE+(struct.unpack_from('<I',image,0x18)[0]-CHR)//0x9c)
-            if struct.unpack_from('<I',image,0x90)[0]:put(image,0x90,ACTOR_HANDLE)
             return image.hex()
         registrations=[]
         for slot in [0,1,1023]:
             values=list(struct.unpack('<4I',u.mem_read(REGS+slot*16,16)))
-            if values[1]:values[1]=ACTOR_HANDLE+(3*0x10000 if values[1]==SELF else 0)
             registrations.append(values)
         expected={'cache':list(struct.unpack('<3i',u.mem_read(0xc91e90,12))),'self':actor(SELF),'linked':actor(TARGET),'people':[bytes(u.mem_read(PERSON+i*0xb4,0xb4)).hex() for i in range(2)],'instances':list(u.mem_read(USED,2)),'registrations':registrations,'calls':calls}
         for key,value in expected.items():

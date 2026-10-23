@@ -3,7 +3,9 @@
 Use `MissionActorLifecycle` for live actor removal. Keep the current
 `MissionTickState`, its one `MissionAnimations` owner and the shared 1024
 sound registrations alive. Links and registration actor fields use
-`actor_handle(group, slot)` identities.
+`mission_actor_source_address(group, slot)` addresses. Linked records must fit
+the current table and its physical capacity: 1024, 1024, 512, or 256 rows for
+groups 0 through 3.
 
 - `remove(ref)` runs `45DA30`. A null reference returns. A class-3 actor first
   drops its link and releases its current CHR instance. The current person

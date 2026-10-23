@@ -379,13 +379,22 @@ MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& reso
                                              const TerrainGeometry& terrain,
                                              const RtxtTable* people_names,
                                              const MissionInitConfig& config) {
+    return assemble_mission_runtime(resources,items,terrain,people_names,config,{});
+}
+
+MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& resources,
+                                             const ItemCatalog& items,
+                                             const TerrainGeometry& terrain,
+                                             const RtxtTable* people_names,
+                                             const MissionInitConfig& config,
+                                             const ItemSoundResolver& sound) {
     check_group_limits(resources.mission);
     MissionRuntimeState state;
     state.mission = resources.mission;
     state.definitions = build_runtime_items(items);
     // Original 0x4011C0: bind the AI/MOVE callback ids and ambient lookups
     // before any 0x449710 conversion reads definitions +0x84/+0x90.
-    bind_runtime_item_callbacks(state.definitions);
+    bind_runtime_item_callbacks(state.definitions,sound);
     fill_definition_handles(state, resources);
     state.resource_calls = resources.plan.calls.size();
     state.resource_steps = resources.plan.steps.size();

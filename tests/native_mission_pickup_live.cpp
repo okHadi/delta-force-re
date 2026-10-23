@@ -1,4 +1,6 @@
 #include "dfre/mission_pickup_live.hpp"
+#include "dfre/mission_actor_lifecycle.hpp"
+#include "dfre/motion_queries.hpp"
 #include <stdexcept>
 #include <string>
 
@@ -6,8 +8,8 @@ using namespace dfre;
 namespace {
 void check(bool value){if(!value)throw std::runtime_error("Mission pickup live test failed");}
 void init(MissionTickState& state,std::size_t targets=1) {
-    AiActorTables tables;tables.groups[3].resize(1);tables.groups[1].resize(targets);tables.groups[0].resize(targets);
-    for(auto group:{3u,1u,0u})for(auto& a:tables.groups[group]){a.active=true;a.definition_index=group==3?1:2;a.field_6c=group==3?1:0;}
+    AiActorTables tables;tables.groups[3].resize(1);tables.groups[1].resize(targets);tables.groups[0].resize(targets);tables.groups[2].resize(targets);
+    for(auto group:{3u,1u,0u,2u})for(auto& a:tables.groups[group]){a.active=true;a.definition_index=group==3?1:2;a.field_6c=group==3?1:0;}
     tables.groups[3][0].person_slot=0;
     std::vector<AiPersonState> people(1);people[0].owner=actor_handle(3,0);people[0].position[0]=123;people[0].angle_yaw=0x12345678;
     std::vector<AiItemDefinition> definitions(3);definitions[1].field_94=25;definitions[1].field_28=3;definitions[2].id=0xfc3;
@@ -43,12 +45,12 @@ void messages_and_errors() {
     const auto actor=actor_handle(3,0),target=actor_handle(1,0);MissionPickupLiveBindings bindings;unsigned messages=0;
     bindings.message=[&](MissionTickState& live,ActorPickupState& same,auto transport,auto id,const auto& payload){
         check(&same==&shared&&transport==ActorPickupTransport::broadcast&&id==0x20&&payload==std::vector<std::uint8_t>({0x14,0,0}));
-        check(live.runtime_for({3,0}).link_90==target&&(word(snapshot_mission_actor(live,{1,0}),0x6c)&0x200102)==0x200102);++messages;
+        check(live.runtime_for({3,0}).link_90==mission_actor_source_address(1,0)&&(word(snapshot_mission_actor(live,{1,0}),0x6c)&0x200102)==0x200102);++messages;
         live.tables.groups[3][0].position[0]=333;live.extra_for({1,0}).field_74=77;clients[5]={1,actor,10};throw std::runtime_error("transport stopped");
     };
     auto effect=mission_pickup_live_effect(shared,bindings);bool rejected=false;
     try{effect(state,request(ActorCollisionSite::pickup,{actor,target}));}catch(const std::runtime_error& e){rejected=std::string(e.what())=="transport stopped";}
-    check(rejected&&messages==1&&state.runtime_for({3,0}).link_90==target&&state.tables.groups[3][0].position[0]==333&&state.extra_for({1,0}).field_74==77&&clients[5].deliveries_1bc==10);
+    check(rejected&&messages==1&&state.runtime_for({3,0}).link_90==mission_actor_source_address(1,0)&&state.tables.groups[3][0].position[0]==333&&state.extra_for({1,0}).field_74==77&&clients[5].deliveries_1bc==10);
     unsigned removals=0;bindings.message=[&](auto& live,auto& same,auto,auto,const auto&){check(same.team_one_6e815c==1);live.globals.mission_67f528=0;clients[3]={1,actor,0};};
     bindings.remove=[&](auto&,auto&,const auto&){++removals;};effect=mission_pickup_live_effect(shared,bindings);
     effect(state,request(ActorCollisionSite::deliver_side_one,{actor,target}));
@@ -96,10 +98,26 @@ void removal_and_validation() {
     };
     effect=mission_pickup_live_effect(shared,bindings);effect(state,request(ActorCollisionSite::remove,{actor}));
     check(cleaned==1&&state.people[0].owner==0&&!state.tables.groups[3][0].active&&snapshot_mission_actor(state,{3,0})==AiActorImage{});
-    for(const auto& call:{request(ActorCollisionSite::heal,{}),request(ActorCollisionSite::heal,{actor_handle(4,0)}),request(ActorCollisionSite::heal,{actor_handle(0,0)})}) {
+    for(const auto& call:{request(ActorCollisionSite::heal,{}),request(ActorCollisionSite::heal,{actor_handle(4,0)}),request(ActorCollisionSite::heal,{actor_handle(0,0)}),request(ActorCollisionSite::heal,{mission_actor_source_address(3,0)}),request(ActorCollisionSite::pickup,{actor,mission_actor_source_address(1,0)})}) {
         rejected=false;try{effect(state,call);}catch(const MissionTickError&){rejected=true;}check(rejected);
+    }
+}
+void pickup_then_drop() {
+    TerrainGeometry terrain(AssetBytes(1024*1024,5),AssetBytes(1024*1024),std::vector<std::uint32_t>(65536));
+    for(std::uint8_t group=0;group<4;++group){
+        MissionTickState state;init(state);
+        state.globals.mission_67f528=0;state.tables.groups[3][0].field_6c|=4;state.world.terrain=&terrain;
+        state.tables.groups[group][0].position[0]=1;state.tables.groups[group][0].position[1]=2;
+        ActorPickupState shared;const auto source=actor_handle(3,0),target=actor_handle(group,0);
+        auto effect=mission_pickup_live_effect(shared,{});effect(state,request(ActorCollisionSite::pickup,{source,target}));
+        check(state.runtime_for({3,0}).link_90==mission_actor_source_address(group,0));
+        MissionAnimations animations(std::vector<MissionAnimationBinding>{});std::array<MissionAudioRegistration,1024> registrations{};unsigned terrain_reads=0;
+        MissionActorLifecycleBindings bindings;bindings.terrain_47df40=[&](auto x,auto y){check(state.runtime_for({3,0}).link_90==0&&x==1&&y==2);++terrain_reads;return std::uint32_t(ground_height_query(*state.world.terrain,std::int32_t(x),std::int32_t(y)));};
+        MissionActorLifecycle lifecycle(state,animations,registrations,bindings);lifecycle.drop_link({3,0});
+        const auto dropped=snapshot_mission_actor(state,{group,0});check(terrain_reads==1&&state.runtime_for({3,0}).link_90==0&&word(dropped,0x2c)==5*16384);
+        check((word(dropped,0x6c)&0x102)==0x100);
     }
 }
 
 }
-int main(){try{home_and_void();messages_and_errors();clients_and_pose();removal_and_validation();}catch(...){return 1;}return 0;}
+int main(){try{home_and_void();messages_and_errors();clients_and_pose();removal_and_validation();pickup_then_drop();}catch(...){return 1;}return 0;}

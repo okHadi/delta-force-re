@@ -8,6 +8,10 @@ Use `mission_actor_image` to read the complete initialized actor record. `scene_
 
 The game uses the selected profile name and face, the mission start marker, and its loaded local actor for the initial camera.
 
+Pass the current sound definition lookup to `assemble_mission_runtime` when
+loading sound. The lookup fills each item's four ambient IDs before actor
+initialization, as in `4011C0` and `43F490`.
+
 Source: `Df.exe`, SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`. Entries: `403A60`, `444C50`, `449710`, `402EC0`, `440640`, `44A110`, `4829F0`.
 
 The original replay checks all 62 missions, including 25,492 group records, resource binding, heights, placements, and local player state.

@@ -21,10 +21,10 @@ int main(){std::string line;while(std::getline(std::cin,line)){try{
     state.person_extras[0].field_6c=99;state.person_extras[1].field_6c=88;
     auto target=snapshot_mission_actor(state,{0,0});put(target,0x6c,0x1234ffff);apply_mission_actor_image(state,{0,0},target);
     state.runtime_for({3,0}).step_cache={111,222,333};
-    state.runtime_for({3,0}).link_90=link?actor_handle(0,0):0;
+    state.runtime_for({3,0}).link_90=link?mission_actor_source_address(0,0):0;
     CharacterModel character;character.runtime_prepared=true;character.bone_map={0};
     MissionAnimations animations({{kCharacterInstanceBase,&character,{}},{kCharacterInstanceBase+1,&character,{}}});
-    std::array<MissionAudioRegistration,1024> registrations{};registrations[0]={1,actor_handle(3,0),3,4};registrations[1]={5,actor_handle(0,0),7,8};registrations[1023]={9,actor_handle(3,0),11,12};
+    std::array<MissionAudioRegistration,1024> registrations{};registrations[0]={1,mission_actor_source_address(3,0),3,4};registrations[1]={5,mission_actor_source_address(0,0),7,8};registrations[1023]={9,mission_actor_source_address(3,0),11,12};
     std::vector<std::vector<std::uint32_t>> calls;
     MissionActorLifecycleBindings b;
     b.sincos_4776c0=[&](auto angle,auto& sine,auto& cosine){calls.push_back({0x4776c0,angle});sine=-96;cosine=160;

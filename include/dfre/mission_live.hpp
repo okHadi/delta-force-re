@@ -16,6 +16,7 @@ void bind_mission_geometry(MissionTickState& state,const MissionGeometry& geomet
     MissionGeometryMatrixSource matrices={});
 using MissionCollisionEffect = std::function<std::optional<std::uint32_t>(
     MissionTickState&,const ActorCollisionCall&)>;
+// Collision+90 contains source addresses; effect arguments use typed handles.
 void bind_mission_actor_collision(MissionTickState& state,const MissionGeometry& geometry,
     MissionCollisionEffect effect,MissionGeometryMatrixSource matrices={});
 // Use defined zero state at matrix callback boundaries, including copied flags.

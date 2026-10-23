@@ -26,7 +26,8 @@ void actor_pickup_heal(ActorPickupActor actor,ActorPickupState& s,const ActorPic
 }
 void actor_pickup_take(ActorPickupActor actor,ActorPickupActor target,ActorPickupState& s,const ActorPickupBindings& b) {
     auto& t=image(target);if(!word(t,4))return;
-    put(image(actor),0x90,target.identity);put(t,0x6c,word(t,0x6c)|0x200102);
+    if(!target.original_address)throw std::invalid_argument("Pickup target needs its source address");
+    put(image(actor),0x90,target.original_address);put(t,0x6c,word(t,0x6c)|0x200102);
     auto id=need(b.definition)(word(t,4)).id;
     if(id==0xfc3||id==0xfc4)actor_pickup_flag_message(actor,s,b);
 }

@@ -8,6 +8,7 @@
 using namespace dfre;
 namespace {
 constexpr std::uint32_t actor_id=0x2201000,target_id=0x2202000,carried_id=0x2203000;
+constexpr std::uint32_t carried_identity=0x76010007;
 std::uint32_t next(std::istream& in) {std::uint64_t value;if(!(in>>value))throw std::invalid_argument("Short collision probe row");return std::uint32_t(value);}
 std::int32_t integer(std::istream& in) {return std::int32_t(next(in));}
 std::uint32_t word(const AiActorImage& a,unsigned at) {return std::uint32_t(a[at])|std::uint32_t(a[at+1])<<8|std::uint32_t(a[at+2])<<16|std::uint32_t(a[at+3])<<24;}
@@ -24,7 +25,7 @@ int main(int argc,char** argv) {
             ActorCollisionBindings b;b.host=next(in)!=0;auto incoming=next(in),seed=next(in),mutation=next(in);
             std::ostringstream trace;unsigned calls=0;
             b.definition=[&](auto id){return id==0x2205000?carried_definition:definition;};
-            b.actor=[&](auto id){if(id!=carried_id)throw std::invalid_argument("Unknown carried actor");return ActorCollisionActor{&carried,id};};
+            b.actor=[&](auto id){if(id!=carried_id)throw std::invalid_argument("Unknown carried actor");return ActorCollisionActor{&carried,carried_identity};};
             b.call=[&](const ActorCollisionCall& request) {
                 trace<<std::uint32_t(request.site);for(unsigned i=0;i<request.count;++i)trace<<','<<request.arguments[i];
                 trace<<':'<<hex(a)<<':'<<hex(t)<<':'<<hex(carried)<<';';++calls;

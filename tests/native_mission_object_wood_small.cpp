@@ -1,0 +1,12 @@
+#include "dfre/mission_object_wood_small.hpp"
+#include "dfre/mission_event_actor_flags.hpp"
+#include "dfre/mission_object_update.hpp"
+#include <cassert>
+using namespace dfre;
+int main(){MissionTickState s;AiActorTables tables;tables.groups[1].resize(1);auto& a=tables.groups[1][0];a.active=true;a.definition_index=1;a.field_72=0xffff;a.field_110=0x453810;init_mission_tick(s,{},std::move(tables),AiItemDefinitionTable(std::vector<AiItemDefinition>(2)),{},123);s.extra_for({1,0}).field_74=100;s.globals.mission_67f528=1;
+ bind_mission_object_wood_small(s,{});MissionTickReport report;run_actor_action(s,{AiActorActionKind::update,{1,0},0x453810},report);assert(report.callbacks_run==1&&s.tables.groups[1][0].field_fc==0x780);bool failed=false;try{bind_mission_object_wood_small(s,{});}catch(const MissionTickError&){failed=true;}assert(failed);
+ unsigned damage=77,calls=0;MissionObjectLiveBindings b;b.call=[&](auto& current,const auto&,const ObjectBehaviorAction& action)->MissionObjectCallResult{assert(damage==0&&current.extra_for({1,0}).field_74==0xffce);if(calls++==0){assert(action.site==0x44ed40);current.tables.groups[1][0].field_6c=0x80;}else{assert(action.site==0x447980&&action.args[1]==123);current.tables.groups[1][0].field_6c=0x40;}return {};};b.global=[&](auto&,unsigned at){assert(at==0xa158c0&&calls==1);return 123u;};MissionEventActorFlagBindings event;event.update=[&](const auto& ref,unsigned callback,unsigned message){assert(callback==0x453810&&message==1);mission_object_update(s,ref,callback,message,b);};mission_event_actor_flags(s,0xffffffff,damage,event);assert(calls==2&&s.tables.groups[1][0].field_6c==0x4c&&s.tables.groups[1][0].field_fc==0x400);
+ s.globals.mission_67f528=0;const auto before=snapshot_mission_actor(s,{1,0});mission_object_wood_small(s,{4,999},{},1);assert(snapshot_mission_actor(s,{1,0})==before);
+ b.call=[&](auto& current,const auto&,const ObjectBehaviorAction& action)->MissionObjectCallResult{assert(action.site==0x44ed40);current.tables.groups[1][0].field_6c=0x20;return {};};mission_object_wood_small(s,{1,0},b,4);assert(s.tables.groups[1][0].field_6c==0x2c&&s.tables.groups[1][0].field_fc==0x400);
+ s.globals.mission_67f528=1;s.tables.groups[1][0].field_6c=0;s.tables.groups[1][0].field_fc=999;s.extra_for({1,0}).field_74=0x8000;b.global={};failed=false;try{mission_object_wood_small(s,{1,0},b,0);}catch(const MissionTickError&){failed=true;}assert(failed&&s.tables.groups[1][0].field_6c==0x20&&s.tables.groups[1][0].field_fc==999);
+}

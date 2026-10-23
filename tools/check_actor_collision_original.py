@@ -11,6 +11,7 @@ from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ESP
 from check_projectile_hits_original import Replay, HASH, match, pack, setword, signed
 
 ACTOR, TARGET, CARRIED, DEF, CDEF = 0x2201000, 0x2202000, 0x2203000, 0x2204000, 0x2205000
+CARRIED_IDENTITY=0x76010007
 SITES = {0x446f00:1, 0x446f60:1, 0x45da30:1, 0x4605d0:1, 0x460470:2,
          0x447280:1, 0x4472d0:2, 0x447360:2, 0x446fb0:3, 0x447610:4, 0x43e720:1}
 
@@ -57,6 +58,8 @@ def run(args):
         def effect(site):
             site_counts[hex(site)] += 1
             arguments = r.read(r.u.reg_read(UC_X86_REG_ESP) + 4, SITES[site])
+            if site in (0x4472d0,0x447360):
+                assert arguments[1]==CARRIED;arguments=(*arguments[:1],CARRIED_IDENTITY)
             trace.append(f'{site}' + ''.join(f',{n}' for n in arguments) + ':' + r.u.mem_read(ACTOR, 0x114).hex() + ':' + r.u.mem_read(TARGET, 0x114).hex() + ':' + r.u.mem_read(CARRIED, 0x114).hex() + ';')
             calls[0] += 1
             if mutation & 1 and site in (0x446f00, 0x446f60):r.write(ACTOR + 0x74, 0x01020304)
@@ -141,6 +144,7 @@ def run(args):
     counts['4889C0_full_records_ordered_calls'] = len(cases)
     report = {'source_sha256': HASH, 'cases': counts,
               'foreign_call_counts': site_counts,
+              'identity_contract':'Raw actor+90 images and return values compare directly. Delivery argument2 uses an explicit test callee-identity codec after source-pointer resolution.',
               'foreign_fixtures': ['model radius and volume views', 'model state callback', 'inventory and mission trigger calls'],
               'angle_coverage': 'cylinder direction uses axis-aligned fixtures; box matrices include quarter turns'}
     if args.report:

@@ -54,8 +54,8 @@ public:
             ObjectBehaviorInput input;input.site=action.site;input.values=result.values;input.output_mask=result.output_mask;return input;
         };
     }
-    void run(std::uint32_t address=0x429bc0){
-        try{if(address==0x4519a0)object_behavior::slgt_ai(self_,scratch_,world_,0);else if(address==0x451cb0)object_behavior::slgt_move(self_,scratch_,world_);else if(address==0x429ea0)object_behavior::veh0_move(self_,scratch_,world_);else object_behavior::veh0_ai(self_,scratch_,world_,0);}
+    void run(std::uint32_t address=0x429bc0,std::uint32_t message=0){
+        try{if(address==0x4519a0)object_behavior::slgt_ai(self_,scratch_,world_,message);else if(address==0x451cb0)object_behavior::slgt_move(self_,scratch_,world_);else if(address==0x429ea0)object_behavior::veh0_move(self_,scratch_,world_);else object_behavior::veh0_ai(self_,scratch_,world_,message);}
         catch(...){const auto error=std::current_exception();flush();std::rethrow_exception(error);}
         flush();
     }
@@ -101,10 +101,12 @@ private:
     std::map<std::uint32_t,AiActorImage> others_;
 };
 }
-void mission_object_veh0(MissionTickState& state,const AiActorRef& ref,const MissionObjectLiveBindings& bindings){Veh0(state,ref,bindings).run();}
+void mission_object_veh0(MissionTickState& state,const AiActorRef& ref,const MissionObjectLiveBindings& bindings){mission_object_veh0(state,ref,bindings,0);}
+void mission_object_veh0(MissionTickState& state,const AiActorRef& ref,const MissionObjectLiveBindings& bindings,std::uint32_t message){Veh0(state,ref,bindings).run(0x429bc0,message);}
 void mission_object_veh0_move(MissionTickState& state,const AiActorRef& ref,const MissionObjectLiveBindings& bindings){Veh0(state,ref,bindings).run(0x429ea0);}
 void mission_object_slgt_move(MissionTickState& state,const AiActorRef& ref,const MissionObjectLiveBindings& bindings){Veh0(state,ref,bindings).run(0x451cb0);}
-void mission_object_slgt_ai(MissionTickState& state,const AiActorRef& ref,const MissionObjectLiveBindings& bindings){Veh0(state,ref,bindings).run(0x4519a0);}
+void mission_object_slgt_ai(MissionTickState& state,const AiActorRef& ref,const MissionObjectLiveBindings& bindings){mission_object_slgt_ai(state,ref,bindings,0);}
+void mission_object_slgt_ai(MissionTickState& state,const AiActorRef& ref,const MissionObjectLiveBindings& bindings,std::uint32_t message){Veh0(state,ref,bindings).run(0x4519a0,message);}
 void bind_mission_object_veh0(MissionTickState& state,MissionObjectLiveBindings bindings){
     if(state.update_callbacks.count(0x429bc0))throw MissionTickError("veh0 callback already has an owner");
     state.update_callbacks.emplace(0x429bc0,[bindings=std::move(bindings)](auto& current,const auto& ref,const auto& action){

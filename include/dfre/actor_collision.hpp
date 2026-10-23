@@ -31,7 +31,8 @@ struct ActorCollisionBindings {
     // Null is the original callback's null result. Ignore mesh state +3C flags.
     std::function<const std::vector<ActorCollisionMesh>*(std::uint32_t model,ActorCollisionActor target)> state;
     std::function<ActorCollisionDefinition(std::uint32_t definition)> definition;
-    std::function<ActorCollisionActor(std::uint32_t identity)> actor;
+    // Resolve the raw source pointer stored at+90 to a current typed actor view.
+    std::function<ActorCollisionActor(std::uint32_t source_address)> actor;
     // Execute each reached operation now. Arguments use bound actor identities.
     // objective argument 2 is the target identity +24, the position pointer.
     std::function<std::uint32_t(const ActorCollisionCall&)> call;

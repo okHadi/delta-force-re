@@ -17,6 +17,7 @@ struct MissionObjectLiveBindings {
 };
 // 429BC0 only. Keep current actor/person ownership and the shared behavior RNG.
 void mission_object_veh0(MissionTickState&,const AiActorRef&,const MissionObjectLiveBindings&);
+void mission_object_veh0(MissionTickState&,const AiActorRef&,const MissionObjectLiveBindings&,std::uint32_t message);
 // Register only the proven veh0 AI entry. Existing ownership is an error.
 void bind_mission_object_veh0(MissionTickState&,MissionObjectLiveBindings);
 // 429EA0 only. Keep definition reads and foreign sine/terrain calls current.
@@ -26,5 +27,6 @@ void bind_mission_object_veh0_move(MissionTickState&,MissionObjectLiveBindings);
 void mission_object_slgt_move(MissionTickState&,const AiActorRef&,const MissionObjectLiveBindings&);
 void bind_mission_object_slgt_move(MissionTickState&,MissionObjectLiveBindings);
 void mission_object_slgt_ai(MissionTickState&,const AiActorRef&,const MissionObjectLiveBindings&);
+void mission_object_slgt_ai(MissionTickState&,const AiActorRef&,const MissionObjectLiveBindings&,std::uint32_t message);
 void bind_mission_object_slgt_ai(MissionTickState&,MissionObjectLiveBindings);
 }

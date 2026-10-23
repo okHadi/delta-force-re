@@ -9,6 +9,9 @@ from unicorn.x86_const import UC_X86_REG_EAX, UC_X86_REG_ESP
 from check_projectile_hits_original import Replay, HASH, match, pack, setword
 
 A,T,S,P=0x2201000,0x2202000,0x2203000,0x2204000
+IA,IT,IS=0x76030000,0x76010000,0x76000000
+def typed(value):return {A:IA,T:IT,S:IS}.get(value,value)
+def typed_pose(value):return {A+0x24:IA+0x24,T+0x24:IT+0x24,S+0x24:IS+0x24}.get(value,value)
 CLIENTS,STRIDE=0x6e9a90,0x9b84
 SITES=[0x446f00,0x446f60,0x460470,0x4605d0,0x447220,0x4471d0,0x447280,0x4472d0,0x447360,0x446fb0,0x447610]
 
@@ -29,8 +32,8 @@ def run(args):
             host=rng.randrange(2);rules=rng.randrange(256);local=rng.choice([0,A]);team1,team2=rng.getrandbits(32),rng.getrandbits(32)
             clients=[[rng.choice([0,1,1,255]),rng.choice([0,A,T]),rng.getrandbits(32)] for _ in range(17)]
             mutation=rng.randrange(512);mode=rng.getrandbits(32);owner=rng.choice([0,A]);position=[rng.getrandbits(32) for _ in range(3)]
-            row=[a.hex(),t.hex(),spawn.hex(),have_person,*home,hp,target_id,spawn_id,host,rules,local,team1,team2,
-                 *[n for c in clients for n in c],mutation,mode,owner,*position]
+            row=[a.hex(),t.hex(),spawn.hex(),have_person,*home,hp,target_id,spawn_id,host,rules,typed(local),team1,team2,
+                 *[n for c in clients for n in [c[0],typed(c[1]),c[2]]],mutation,mode,typed(owner),*position]
             for address,data in ((A,a),(T,t),(S,spawn)):r.u.mem_write(address,bytes(data))
             r.write(P+0x54,*home);r.write(0x2240000+0x94,hp);r.write(0x2240100+0x20,target_id);r.write(0x2240200+0x20,spawn_id)
             r.write(0x67f528,host);r.u.mem_write(0x67f549,bytes([rules]));r.write(0xc23820,local);r.write(0x6e815c,team1);r.write(0x6e81c4,team2)
@@ -38,8 +41,8 @@ def run(args):
                 r.u.mem_write(CLIENTS+i*STRIDE+0x18c,bytes([c[0]]));r.write(CLIENTS+i*STRIDE+8,c[1]);r.write(CLIENTS+i*STRIDE+0x1bc,c[2])
             def dump():
                 output='|'.join(r.u.mem_read(address,0x114).hex() for address in (A,T,S))
-                values=[r.read(0x67f528)[0],r.u.mem_read(0x67f549,1)[0],r.read(0xc23820)[0],r.read(0x6e815c)[0],r.read(0x6e81c4)[0]]
-                for i in range(17):values.extend([r.u.mem_read(CLIENTS+i*STRIDE+0x18c,1)[0],r.read(CLIENTS+i*STRIDE+8)[0],r.read(CLIENTS+i*STRIDE+0x1bc)[0]])
+                values=[r.read(0x67f528)[0],r.u.mem_read(0x67f549,1)[0],typed(r.read(0xc23820)[0]),r.read(0x6e815c)[0],r.read(0x6e81c4)[0]]
+                for i in range(17):values.extend([r.u.mem_read(CLIENTS+i*STRIDE+0x18c,1)[0],typed(r.read(CLIENTS+i*STRIDE+8)[0]),r.read(CLIENTS+i*STRIDE+0x1bc)[0]])
                 return output+'|'+','.join(map(str,values))
             trace=[]
             def snap(tag):
@@ -60,7 +63,7 @@ def run(args):
                 sound_id=r.read(r.u.reg_read(UC_X86_REG_ESP)+4)[0];snap(f'43e720,{sound_id}')
                 if mutation&256:r.write(A+0x74,r.read(A+0x74)[0]+1)
             def remove():
-                actor=r.read(r.u.reg_read(UC_X86_REG_ESP)+4)[0];snap(f'45da30,{actor}')
+                actor=r.read(r.u.reg_read(UC_X86_REG_ESP)+4)[0];snap(f'45da30,{typed(actor)}')
                 if mutation&4:r.u.mem_write(actor,bytes(0x114));r.write(CLIENTS+3*STRIDE+0x1bc,77)
             def message(transport):
                 message_id,data,count=r.read(r.u.reg_read(UC_X86_REG_ESP)+4,3);payload=r.u.mem_read(data,count).hex()
@@ -70,9 +73,9 @@ def run(args):
                 if mutation&8:r.write(T+0x24,r.read(T+0x24)[0]+123)
                 if mutation&128:r.write(0xc23820,0 if r.read(0xc23820)[0] else A)
             def objective():
-                actor,pose,argument=r.read(r.u.reg_read(UC_X86_REG_ESP)+4,3);snap(f'4606b0,{actor},{pose},{argument}')
+                actor,pose,argument=r.read(r.u.reg_read(UC_X86_REG_ESP)+4,3);snap(f'4606b0,{typed(actor)},{typed_pose(pose)},{argument}')
             def allocate():
-                value,x,y,z=r.read(r.u.reg_read(UC_X86_REG_ESP)+4,4);snap(f'460d20,{value},{x},{y},{z}')
+                value,x,y,z=r.read(r.u.reg_read(UC_X86_REG_ESP)+4,4);snap(f'460d20,{typed(value)},{x},{y},{z}')
                 if mutation&32 and not mutation&16:r.write(S+0x6c,0x87654321)
                 r.u.reg_write(UC_X86_REG_EAX,0 if mutation&16 else S)
             for address,callback in ((0x441750,client_message),(0x447e80,resupply),(0x43e720,sound),(0x484ed0,lambda:snap('484ed0')),
@@ -85,6 +88,7 @@ def run(args):
     report={'source_sha256':HASH,'cases':counts,'foreign_call_counts':foreign_counts,
             'foreign_fixtures':['441750 client message','447E80 resupply','43E720 sound','484ED0 local flag effect',
                                 '45DA30 removal','4423F0/442630 transport','4606B0 objective logic','460D20 allocator'],
+            'identity_contract':'Client/callee identities use an explicit test codec; source actor images including+90 compare without pointer normalization',
             'comparison':'full actor images, 17 active/actor/delivery client fields, team counters, ordered packets/effects; 4605D0 return'}
     if args.report:
         args.report.parent.mkdir(parents=True,exist_ok=True);args.report.write_text(json.dumps(report,indent=2)+'\n')

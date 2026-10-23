@@ -93,7 +93,7 @@ struct MissionActorRuntime {
     std::uint32_t roll_38 = 0;  // +0x38
     std::int32_t vertical_44 = 0;  // +0x44
     std::uint32_t ground_100 = 0;  // +0x100 ground entity handle
-    std::uint32_t link_90 = 0;     // +0x90 linked position record handle
+    std::uint32_t link_90 = 0;     // +0x90 linked actor source address
     CachedStep step_cache{};       // 0xC91E90 + group-3 slot * 0xC
 };
 

@@ -17,6 +17,7 @@ struct MissionPickupLiveBindings {
 };
 // Keep shared state/clients alive for the returned provider. It owns no client
 // storage. Change host/local-player cells through MissionTickState in callbacks.
+// Calls use typed actor handles. Stored actor+90 uses the target source address.
 // can_use returns the defined restore-home value. Void paths return an ignored
 // collision ABI value; actor_target_collision discards those trigger returns.
 MissionCollisionEffect mission_pickup_live_effect(ActorPickupState& shared,MissionPickupLiveBindings bindings);

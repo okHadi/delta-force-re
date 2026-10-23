@@ -38,11 +38,11 @@ void trigger() {
     check(actor_collision_trigger({&a,1},{&t,2},b)==0x12342578);
     check(get(t,0x74)==0&&t[0x6c]==0x25&&calls.size()==2&&calls[1].arguments[1]==77&&calls[1].arguments[3]==0x8000);
     calls.clear();id=0xfcb;put(a,0x90,3);put(carried,4,30);
-    b.actor=[&](auto identity){check(identity==3);return ActorCollisionActor{&carried,3};};
+    b.actor=[&](auto source){check(source==3);return ActorCollisionActor{&carried,0x76010007};};
     b.definition=[&](auto definition){return ActorCollisionDefinition{definition==30?0xfc3u:id,0x10};};
     b.call=[&](const auto& request){calls.push_back(request);put(a,0x90,99);return 12u;};
     check(actor_collision_trigger({&a,1},{&t,2},b)==12&&get(a,0x90)==0);
-    check(calls.size()==1&&calls[0].site==ActorCollisionSite::deliver_side_one&&calls[0].arguments[1]==3);
+    check(calls.size()==1&&calls[0].site==ActorCollisionSite::deliver_side_one&&calls[0].arguments[1]==0x76010007);
 }
 }
 int main() {try{collision();trigger();}catch(...){return 1;}return 0;}

@@ -1,0 +1,21 @@
+#include "dfre/mission_event_actor_flags.hpp"
+#include <cassert>
+using namespace dfre;
+namespace {unsigned get(const std::uint8_t* p,unsigned width=4){unsigned n=0;for(unsigned i=0;i<width;++i)n|=unsigned(p[i])<<(8*i);return n;}void put(std::uint8_t* p,unsigned n,unsigned width=4){for(unsigned i=0;i<width;++i)p[i]=std::uint8_t(n>>(8*i));}}
+int main(){MissionTickState s;AiActorTables tables;for(unsigned g:{0u,1u,3u}){tables.groups[g].resize(1);auto& a=tables.groups[g][0];a.active=true;a.definition_index=1;a.field_72=0xffff;a.field_76=0x1234;a.field_110=0x111;}tables.groups[3][0].person_slot=0;tables.groups[3][0].field_18=kCharacterInstanceBase;
+ std::vector<AiPersonState> people(1);people[0].owner=actor_handle(3,0);std::vector<AiItemDefinition> definitions(2);definitions[1].field_28=3;init_mission_tick(s,{},std::move(tables),AiItemDefinitionTable(definitions),people,0);
+ unsigned damage=0x55;MissionEventActorFlagBindings missing;bool failed=false;try{mission_event_actor_flags(s,0xffffffff,damage,missing);}catch(const MissionTickError&){failed=true;}assert(failed);assert(s.extra_for({1,0}).field_74==0xffce&&damage==0&&s.tables.groups[1][0].field_76==0x1234);
+ s.tables.groups[1][0].field_110=0;missing.update=[](const auto&,unsigned,unsigned){assert(false);};failed=false;try{mission_event_actor_flags(s,0xffffffff,damage,missing);}catch(const MissionTickError&){failed=true;}assert(failed&&damage==0&&s.extra_for({1,0}).field_74==0xffce);
+ std::vector<unsigned> groups;MissionEventActorFlagBindings b;b.update=[&](const auto& ref,unsigned callback,unsigned message){assert(callback==0x222&&message==1);assert(damage==0&&s.extra_for(ref).field_74==0xffce);groups.push_back(ref.group);damage=0x42;};AiActorRef current{};
+ b.before_write=[&](unsigned at,unsigned width,unsigned){if(width==2){for(unsigned g:{0u,1u,3u})if(at==mission_actor_source_address(g,0)+0x74)current={std::uint8_t(g),0};s.tables.groups[current.group][0].field_72=9;}else s.tables.groups[current.group][0].field_110=0x222;};
+ mission_event_actor_flags(s,0xffffffff,damage,b);assert((groups==std::vector<unsigned>{1,3,0}));assert(damage==0x42);
+ b.current_count=[](std::size_t){return -1;};groups.clear();mission_event_actor_flags(s,0xffffffff,damage,b);assert(groups.empty()&&damage==0x42);b.before_read=[](unsigned){throw MissionTickError("Zero side must return before reads");};mission_event_actor_flags(s,0,damage,b);mission_event_actor_remove(s,0,b);
+ CharacterModel character;character.runtime_prepared=true;character.bone_map={0};MissionAnimations animations({{kCharacterInstanceBase,&character,{{0,0,0,false,0,0,0,0}}}});bind_mission_animations(s,animations);std::array<MissionAudioRegistration,1024> registrations{};registrations[0].actor=mission_actor_source_address(3,0);MissionActorLifecycle lifecycle(s,animations,registrations,{});
+ GameMessageStage messages;MissionServerMessageBuffer buffer;std::vector<std::array<std::uint8_t,mission_client_record_size>> clients(17);clients[0][0x18c]=1;put(clients[0].data()+0x1c4,5,2);MissionClientOutboxBindings outbox_b;outbox_b.client=[&](std::size_t i){return MissionClientRecordView{clients.at(i).data(),clients.at(i).size()};};outbox_b.cell=[](unsigned){return 0u;};MissionClientOutbox outbox(messages,buffer,outbox_b);
+ auto live=mission_event_actor_flag_bindings(lifecycle,outbox);for(unsigned g:{0u,1u,3u})s.tables.groups[g][0].field_72=0xffff;
+ s.globals.mission_67f528=0;mission_event_actor_remove(s,0xffffffff,live);assert(s.tables.groups[3][0].active&&animations.size()==1);s.globals.mission_67f528=1;mission_event_actor_remove(s,0xffffffff,live);
+ for(unsigned g:{0u,1u,3u})assert(snapshot_mission_actor(s,{std::uint8_t(g),0})==AiActorImage{});assert(s.people[0].owner==0&&animations.size()==0&&registrations[0].actor==0);
+ unsigned slot=0;for(unsigned g:{1u,3u,0u}){const auto* row=clients[0].data()+0x204+slot++*0x264;assert(row[8]==0x10);const auto index=(mission_actor_source_address(g,0)-0x7cca80u)/0x114u;assert(get(row+10,2)==(index&0xffff));}assert(damage==0x42);
+ // A missing broadcast fails after the real actor removal.
+ s.tables.groups[0][0].field_72=1;auto only_remove=live;only_remove.broadcast_442630={};failed=false;try{mission_event_actor_remove_one(s,{0,0},only_remove);}catch(const MissionTickError&){failed=true;}assert(failed&&s.tables.groups[0][0].field_72==0);
+}

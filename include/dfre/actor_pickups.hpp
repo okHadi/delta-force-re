@@ -8,8 +8,8 @@ namespace dfre {
 // Df.exe SHA-256 abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff.
 struct ActorPickupActor {
     AiActorImage* image = nullptr;
-    std::uint32_t identity = 0;
-    std::uint32_t original_address = 0; // Original table address for wire indexes.
+    std::uint32_t identity = 0; // Typed client and callback identity.
+    std::uint32_t original_address = 0; // Source pointer for stored+90 and wire indexes.
     AiPersonState* person = nullptr; // Canonical home fields +54..+60, when present.
 };
 struct ActorPickupClient {

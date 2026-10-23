@@ -17,10 +17,14 @@ void MissionActorLifecycle::write(const AiActorRef& ref,std::size_t at,std::uint
     apply_mission_actor_image(state_,ref,image);
 }
 AiActorRef MissionActorLifecycle::linked_actor(std::uint32_t identity) const {
-    if(identity<kActorHandleBase)throw MissionTickError("Actor link needs a current actor handle");
-    const auto token=identity-kActorHandleBase;const auto group=token/0x10000u,slot=token%0x10000u;
-    if(group>=4 || slot>=state_.tables.groups[group].size())throw MissionTickError("Actor link exceeds its table");
-    return {std::uint8_t(group),slot};
+    constexpr std::array<std::uint32_t,4> capacities{1024,1024,512,256};
+    for(std::uint8_t group=0;group<4;++group){
+        const auto base=mission_actor_source_address(group,0);if(identity<base)continue;
+        const auto delta=identity-base;
+        if(delta%0x114)continue;
+        const auto slot=delta/0x114;if(slot<capacities[group]&&slot<state_.tables.groups[group].size())return {group,slot};
+    }
+    throw MissionTickError("Actor link has no current source record");
 }
 void MissionActorLifecycle::drop_link(const AiActorRef& ref){
     const auto identity=read(ref,0x90);write(ref,0x90,0);
@@ -44,7 +48,7 @@ void MissionActorLifecycle::drop_link(const AiActorRef& ref){
 void MissionActorLifecycle::release_character(std::uint32_t instance){animations_.release(instance);}
 void MissionActorLifecycle::unregister_audio(const AiActorRef& ref){
     if(!state_.actor_at(ref)||ref.group>=4)throw MissionTickError("Audio removal actor exceeds its table");
-    const auto identity=actor_handle(ref.group,ref.index);
+    const auto identity=mission_actor_source_address(ref.group,ref.index);
     for(auto& registration:registrations_)if(registration.actor==identity)registration={};
 }
 void MissionActorLifecycle::remove(std::optional<AiActorRef> actor){

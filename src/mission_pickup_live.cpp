@@ -83,6 +83,7 @@ private:
         if(const auto slot=live_.actor_at(ref)->person_slot) {
             if(*slot>=live_.people.size())throw MissionTickError("Pickup person exceeds its pool");person=&live_.people[*slot];
         }
+        // Client/callee identity and persisted source links use separate fields.
         return {&found->second.image,identity,mission_actor_source_address(ref.group,ref.index),person};
     }
     void flush() {

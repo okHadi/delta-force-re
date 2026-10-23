@@ -27,7 +27,10 @@ remove an actor and its current animation binding.
 Call `bind_mission_actor_collision` with the current geometry and trigger effects.
 Effects read and change the live tick state. Each effect sees earlier collision
 writes. Its changes remain current on return or error. Supply a handler for each
-reached pickup, objective, sound, or removal call.
+reached pickup, objective, sound, or removal call. Actor `+90` holds a raw source
+address. The collision join resolves it before it sends typed IDs to effects.
+The physical table limits for groups 0–3 are 1024, 1024, 512, and 256 rows.
+The separate pool at `0x822E80` requires its own binding.
 
 Call `bind_mission_player_burst` after player setup. Weapons read and write the
 local actor's current person counter. Use `mission_player_burst` as the storage

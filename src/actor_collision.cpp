@@ -118,7 +118,7 @@ std::uint32_t actor_collision_trigger(ActorCollisionActor actor,ActorCollisionAc
         const auto carried_actor=required(b.actor)(carried);const auto& c=image(carried_actor);
         if(!word(c,4)) {put(a,0x90,0);return carried;}
         if(definition(c,b).id!=(id==0xfcb?0xfc3u:0xfc4u))return carried;
-        auto result=call(id==0xfcb?ActorCollisionSite::deliver_side_one:ActorCollisionSite::deliver_side_two,{actor.identity,carried});
+        auto result=call(id==0xfcb?ActorCollisionSite::deliver_side_one:ActorCollisionSite::deliver_side_two,{actor.identity,carried_actor.identity});
         put(a,0x90,0);return result;
     }
     if(id==0xfd6) {

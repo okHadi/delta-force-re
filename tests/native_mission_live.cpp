@@ -1,8 +1,46 @@
 #include "dfre/mission_live.hpp"
+#include "dfre/mission_pickup_live.hpp"
+#include "dfre/mission_actor_lifecycle.hpp"
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
 #define CHECK(x) do{if(!(x))throw std::runtime_error("mission live: " #x);}while(false)
+namespace {
+void pickup_collision_delivery(){
+    using namespace dfre;using U=std::uint32_t;
+    Model wall;wall.version=5;wall.render_types[0]=0x676e7263;wall.lods.resize(1);auto& lod=wall.lods[0];lod.meshes.resize(1);lod.meshes[0].raw.resize(112);
+    const auto write=[](auto& bytes,std::size_t at,U value){std::memcpy(bytes.data()+at,&value,4);};
+    std::array<std::uint8_t,72> volume{};write(volume,0,1);write(lod.meshes[0].raw,0x1c,1);
+    for(std::size_t axis=0;axis<3;++axis){write(volume,32+axis*4,32768);write(volume,48+axis*8,U(-32768));write(volume,52+axis*8,32768);write(lod.meshes[0].raw,0x40+axis*8,U(-65536));write(lod.meshes[0].raw,0x44+axis*8,65536);}
+    lod.collision_volumes={volume};MissionGeometry geometry({{1,&wall,{131072,196608},{},{}}});
+    for(std::uint8_t group=0;group<4;++group)for(bool side_two:{false,true}){
+        MissionTickState state;AiActorTables tables;for(auto g:{0u,1u,2u,3u})tables.groups[g].resize(2);
+        const AiActorRef carrier{3,0},carried{group,group==3?1u:0u},base{1,1};
+        auto& player=tables.groups[3][0];player.active=true;player.definition_index=1;player.field_6c=1;player.field_70=side_two?2:1;
+        for(const auto ref:{carried,base}){auto& actor=tables.groups[ref.group][ref.index];actor.active=true;actor.definition_index=ref.group==base.group&&ref.index==base.index?3:2;actor.field_10=1;}
+        std::vector<AiItemDefinition> defs(4);defs[2].id=side_two?0xfc4:0xfc3;defs[2].flags24=0x10;defs[2].field_28=6;defs[3].id=side_two?0xfcc:0xfcb;defs[3].flags24=0x10;
+        MissionTickConfig config;config.local_actor=0;init_mission_tick(state,config,std::move(tables),AiItemDefinitionTable(defs),{},0);state.globals.mission_67f528=1;
+        ActorPickupState shared;std::array<ActorPickupClient,17> clients{};shared.clients=&clients;clients[2]={1,actor_handle(3,0),7};
+        MissionAnimations animations(std::vector<MissionAnimationBinding>{});std::array<MissionAudioRegistration,1024> registrations{};registrations[0]={42,mission_actor_source_address(group,carried.index),1,0};MissionActorLifecycle lifecycle(state,animations,registrations,{});
+        std::vector<U> order;MissionPickupLiveBindings bindings;
+        bindings.message=[&](auto& live,auto& same,auto transport,auto id,const auto& bytes){
+            CHECK(&live==&state&&&same==&shared);
+            if(id==0x20){CHECK(transport==ActorPickupTransport::broadcast&&bytes.size()==3&&bytes[1]==0&&bytes[2]==0);if(bytes[0]==0x14){CHECK(order.empty());order.push_back(1);}else{CHECK(bytes[0]==0x13&&order==std::vector<U>({1,2}));CHECK((side_two?same.team_two_6e81c4:same.team_one_6e815c)==1);order.push_back(3);}}
+            else{const auto slot=(mission_actor_source_address(group,carried.index)-0x7cca80u)/0x114u;CHECK(id==0x10&&transport==ActorPickupTransport::reliable&&bytes==std::vector<std::uint8_t>({std::uint8_t(slot),std::uint8_t(slot>>8)}));CHECK(!live.actor_at(carried)->active&&registrations[0].definition==0);order.push_back(5);}
+        };
+        bindings.local_flag=[&](auto& live,auto&){CHECK(live.runtime_for(carrier).link_90==mission_actor_source_address(group,carried.index));order.push_back(2);};
+        bindings.remove=[&](auto& live,auto&,const auto& ref){CHECK(ref.group==carried.group&&ref.index==carried.index&&live.runtime_for(carrier).link_90==mission_actor_source_address(group,carried.index));order.push_back(4);lifecycle.remove(ref);};
+        bind_mission_actor_collision(state,geometry,mission_pickup_live_effect(shared,bindings));
+        CHECK(state.world.target_collision(carrier,carried)==1&&state.runtime_for(carrier).link_90==mission_actor_source_address(group,carried.index));
+        CHECK(state.world.target_collision(carrier,base)==1&&state.runtime_for(carrier).link_90==0);
+        CHECK(order==std::vector<U>({1,2,3,4,5})&&clients[2].deliveries_1bc==8&&!state.actor_at(carried)->active);
+        state.runtime_for(carrier).link_90=mission_actor_source_address(group,carried.index);CHECK(state.world.target_collision(carrier,base)==1&&state.runtime_for(carrier).link_90==0&&clients[2].deliveries_1bc==8);
+        for(auto invalid:{actor_handle(group,carried.index),mission_actor_source_address(group,carried.index)+1,mission_actor_source_address(0,3)}){state.runtime_for(carrier).link_90=invalid;bool rejected=false;try{state.world.target_collision(carrier,base);}catch(const MissionTickError&){rejected=true;}CHECK(rejected&&state.runtime_for(carrier).link_90==invalid&&clients[2].deliveries_1bc==8);}
+        state.tables.groups[0].resize(1025);state.tables.groups[0][1024].active=true;state.tables.groups[0][1024].definition_index=2;
+        state.runtime_for(carrier).link_90=0x822e80;bool runtime_pool_rejected=false;try{state.world.target_collision(carrier,base);}catch(const MissionTickError&){runtime_pool_rejected=true;}CHECK(runtime_pool_rejected&&state.runtime_for(carrier).link_90==0x822e80&&clients[2].deliveries_1bc==8);
+    }
+}
+}
 int main(){try{
     using namespace dfre;
     CharacterModel character;character.runtime_prepared=true;character.bone_map={0};
@@ -114,5 +152,5 @@ int main(){try{
         rejected=false;try{live.weapons.burst_counter();}catch(const MissionTickError&){rejected=true;}
         CHECK(rejected);
     }
-    std::cout<<"mission live checks passed\n";return 0;
+    pickup_collision_delivery();std::cout<<"mission live checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

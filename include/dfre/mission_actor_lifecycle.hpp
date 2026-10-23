@@ -6,7 +6,7 @@ struct MissionActorLifecycleBindings {
     std::function<void(std::uint32_t,std::int32_t&,std::int32_t&)> sincos_4776c0;
     std::function<std::uint32_t(std::uint32_t,std::uint32_t)> terrain_47df40;
 };
-// Keep these shared owners alive. Registrations use actor_handle identities.
+// Keep these shared owners alive. Registrations and actor+90 use source addresses.
 class MissionActorLifecycle {
 public:
     MissionActorLifecycle(MissionTickState&,MissionAnimations&,

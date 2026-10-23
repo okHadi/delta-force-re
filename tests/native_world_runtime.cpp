@@ -91,6 +91,7 @@ dfre::ItemCatalog test_catalog() {
         " type building\n"
         " graphic b1\n"
         " husk h1\n"
+        " ambient WIND 12\n"
         " hp 9\n"
         "end\n";
     return dfre::ItemCatalog(text);
@@ -283,6 +284,15 @@ int main() {
     if (!require(raw.spawns.empty() && raw.placements[0].actor == std::nullopt &&
                  !raw.local_player.has_value(),
                  "Unnetworked run must skip the placement pass.")) return 1;
+
+    unsigned sound_matches=0;
+    const auto with_sound=dfre::assemble_mission_runtime(
+        fixture.resources,fixture.items,fixture.terrain,nullptr,fixture.config,
+        [&](std::string_view name){if(name=="WIND"){++sound_matches;return 17u;}return 0u;});
+    const auto plain=dfre::runtime_item_index(with_sound.definitions,4002);
+    if(!require(sound_matches==1&&with_sound.definitions[plain].ambient_handles[0]==17&&
+                with_sound.definitions[plain].ambient_sound[0]==12,
+                "Mission assembly did not bind its current sound definitions."))return 1;
 
     std::cout << "native_world_runtime: all checks passed\n";
     return 0;

@@ -26,7 +26,7 @@ void pickup_delivery() {
     ActorPickupBindings b;b.definition=[](auto){return ActorPickupDefinition{0xfc3,0};};unsigned local=0;
     b.message=[&](auto transport,auto id,const auto& payload){check(transport==ActorPickupTransport::broadcast&&id==0x20&&payload==std::vector<std::uint8_t>({0x14,1,0}));state.local_player=10;};
     b.local_flag=[&]{++local;};actor_pickup_take(actor,target,state,b);
-    check(get(a,0x90)==20&&(get(t,0x6c)&0x200102)==0x200102&&local==1);
+    check(get(a,0x90)==target.original_address&&(get(t,0x6c)&0x200102)==0x200102&&local==1);
     std::vector<unsigned> order;state.team_one_6e815c=0xffffffff;
     b.message=[&](auto transport,auto id,const auto& payload){
         if(id==0x20){check(state.team_one_6e815c==0&&transport==ActorPickupTransport::broadcast&&payload[0]==0x13);order.push_back(1);}
@@ -37,7 +37,8 @@ void pickup_delivery() {
     state.host=1;b.message=[&](auto,auto,const auto&){state.host=0;};b.remove=[](auto){throw std::runtime_error("Host-off removal reached");};
     actor_pickup_deliver(actor,target,true,state,b);check(state.team_two_6e81c4==1&&clients[3].deliveries_1bc==2);
     state.host=0;put(t,4,1);put(a,0x90,0);ActorPickupBindings definitions_only;definitions_only.definition=b.definition;
-    actor_pickup_take(actor,target,state,definitions_only);check(get(a,0x90)==20);
+    actor_pickup_take(actor,target,state,definitions_only);check(get(a,0x90)==target.original_address);
+    target.original_address=0;put(a,0x90,123);const auto before=t;bool failed=false;try{actor_pickup_take(actor,target,state,definitions_only);}catch(const std::invalid_argument&){failed=true;}check(failed&&get(a,0x90)==123&&t==before);
 }
 void objective() {
     AiActorImage source{},spawn{};put(source,0x24,1);put(source,0x28,2);put(source,0x2c,3);put(source,0x30,0x12345678);
