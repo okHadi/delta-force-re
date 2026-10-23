@@ -83,6 +83,8 @@ struct AiTickHooks {
     std::function<void(const AiTickCall&)> on_call;
     std::function<void(const AiActorAction&)> on_action;
     std::function<void(std::uint32_t)> on_mark;
+    // Complete the side storage clear at488138 before the secondary callback read.
+    std::function<void(const AiActorRef&)> on_clear;
 };
 
 // Original 0x487C50 for one actor: clears +0x108, stores the shared-list start

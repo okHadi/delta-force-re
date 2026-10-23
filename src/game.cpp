@@ -20,6 +20,9 @@
 #include "dfre/mission_crt_thread.hpp"
 #include "dfre/mission_script_registry.hpp"
 #include "dfre/mission_rtxt.hpp"
+#include "dfre/mission_actor_insert_live.hpp"
+#include "dfre/mission_scene_transient.hpp"
+#include "dfre/mission_scene_projectiles.hpp"
 
 #include <array>
 #include <cstring>
@@ -120,6 +123,18 @@ public:
             if (!mission_runtime_->local_player || !mission_runtime_->actors)
                 throw std::runtime_error("Mission has no local player actor");
             init_mission_tick(*mission_tick_,{},*mission_runtime_,0);
+            mission_tick_->projectiles.assign(512,ProjectileEntity{});
+            prepare_mission_extra_actor_pool(*mission_tick_);
+            MissionActorInsertBindings extra_memory;
+            extra_memory.read=[this](auto at,auto width){return mission_sound_->asset_bindings().read(at,width);};
+            extra_memory.write=[this](auto at,auto width,auto value){mission_sound_->asset_bindings().write(at,width,value);};
+            mission_extra_memory_=mission_actor_insert_live_bindings(*mission_tick_,mission_extra_count_8cfa14_,
+                std::move(extra_memory),[this](auto pointer){
+                    const auto offset=pointer-definition_base;
+                    if(pointer<definition_base||offset%runtime_item_size||offset/runtime_item_size>=mission_runtime_->definitions.size())
+                        throw MissionTickError("Extra actor definition is outside its current table");
+                    return std::uint32_t(offset/runtime_item_size);
+                });
             bind_mission_linked_position(*mission_tick_);
             mission_tick_->weapons=std::move(weapons);
             mission_animations_=std::make_unique<MissionAnimations>(*mission_runtime_,*mission_assets_);
@@ -157,6 +172,7 @@ public:
             if(mission_scripts_)mission_scripts_->service(0x455ea0,{});
             mission_scripts_.reset();
             mission_script_cells_.reset();
+            mission_extra_memory_={};
             mission_sound_.reset();
             mission_audio_frame_.reset();
             mission_sound_terrain_=nullptr;
@@ -182,6 +198,33 @@ public:
         end.render = [this] { if (!frame_.empty()) window_->present(frame_); };
     }
 
+    bool definition_claim(std::uint32_t at,std::uint32_t width) const {
+        const auto end=std::uint64_t(at)+width;
+        if(at<0xc23814&&end>0xc23810){
+            if(at<0xc23810||end>0xc23814)throw MissionTickError("Definition pointer access crosses its field");
+            return true;
+        }
+        if(!mission_runtime_)return false;
+        const auto limit=std::uint64_t(definition_base)+mission_runtime_->definitions.size()*runtime_item_size;
+        if(at<limit&&end>definition_base){
+            if(at<definition_base||end>limit)throw MissionTickError("Definition access crosses its table");
+            return true;
+        }
+        return false;
+    }
+    std::uint32_t definition_read(std::uint32_t at,std::uint32_t width) const {
+        if(!mission_runtime_)throw MissionTickError("Mission definition table is not ready");
+        if(at>=0xc23810&&at<0xc23814)return (definition_base>>((at-0xc23810)*8))&(width==4?0xffffffffu:((1u<<(width*8))-1));
+        const auto* bytes=reinterpret_cast<const std::uint8_t*>(mission_runtime_->definitions.data());
+        std::uint32_t value=0;for(std::uint32_t i=0;i<width;++i)value|=std::uint32_t(bytes[at-definition_base+i])<<(8*i);
+        return value;
+    }
+    bool extra_count_claim(std::uint32_t at,std::uint32_t width) const {
+        const auto end=std::uint64_t(at)+width;
+        if(at>=0x8cfa18||end<=0x8cfa14)return false;
+        if(at<0x8cfa14||end>0x8cfa18)throw MissionTickError("Extra actor count access crosses its field");
+        return true;
+    }
     void prepare_mission_sound() {
         mission_tick_=std::make_unique<MissionTickState>();
         mission_sound_terrain_=&world_->terrain.geometry;
@@ -198,16 +241,22 @@ public:
         const auto record_store=bindings.record_store;
         bindings.record_base=[this,record_base](std::uint32_t at,std::uint32_t width)->std::optional<std::uint32_t>{
             if(mission_scripts_&&mission_scripts_->owns(at,width))return at;
+            if(mission_extra_memory_.read){if(const auto base=mission_extra_actor_record_base(at,width))return base;if(extra_count_claim(at,width))return at;}
+            if(definition_claim(at,width))return at;
             return record_base(at,width);
         };
         bindings.record_read=[this,record_read](std::uint32_t base,std::uint32_t offset,std::uint32_t width){
             const auto at=base+offset;
             if(mission_scripts_&&mission_scripts_->owns(at,width))return mission_scripts_->memory().read(at,width);
+            if(mission_extra_memory_.read&&(mission_extra_actor_record_base(at,width)||extra_count_claim(at,width)))return mission_extra_memory_.read(at,width);
+            if(definition_claim(at,width))return definition_read(at,width);
             return record_read(base,offset,width);
         };
         bindings.record_store=[this,record_store](std::uint32_t base,std::uint32_t offset,std::uint32_t width,std::uint32_t value){
             const auto at=base+offset;
             if(mission_scripts_&&mission_scripts_->owns(at,width)){mission_scripts_->memory().write(at,width,value);return;}
+            if(mission_extra_memory_.write&&(mission_extra_actor_record_base(at,width)||extra_count_claim(at,width))){mission_extra_memory_.write(at,width,value);return;}
+            if(definition_claim(at,width))throw MissionTickError("Mission definitions are read-only after initialization");
             record_store(base,offset,width,value);
         };
         bindings.service=[this](std::uint32_t site,const std::vector<std::uint32_t>& args){
@@ -250,8 +299,11 @@ public:
         camera.position=player_->camera.position;camera.yaw=player_->camera.angles[0];
         camera.pitch=player_->camera.angles[1];camera.focal_distance=view.projection.focal_length;
         const auto images=snapshot_mission_actors(*mission_tick_);
+        const auto transient=mission_scene_transient_records(*mission_runtime_,*mission_tick_);
+        const auto effects=mission_scene_projectile_records(mission_tick_->projectiles);
         MissionSceneLiveInputs32 live;
         live.actors=&images;live.pose=[this](auto instance){return mission_animations_->pose(instance);};
+        live.runtime_records=&transient;live.effects=&effects;
         auto scene=mission_scene_->render(*world_,camera,{},live);
         if(report_gaps)for(const auto& gap:scene.gaps)
             std::clog<<"Scene input: "<<scene_model_gap_name(gap.kind)<<" "<<gap.note<<'\n';
@@ -356,6 +408,9 @@ private:
     std::unique_ptr<MissionRuntimeState> mission_runtime_;
     std::optional<InitialPlayer> player_;
     std::unique_ptr<MissionTickState> mission_tick_;
+    static constexpr std::uint32_t definition_base=0x18000000;
+    MissionActorInsertBindings mission_extra_memory_;
+    std::uint32_t mission_extra_count_8cfa14_=0;
     std::uint32_t mission_rules_67f548_=0;
     std::unique_ptr<MissionAnimations> mission_animations_;
     std::unique_ptr<MissionGeometry> mission_geometry_;

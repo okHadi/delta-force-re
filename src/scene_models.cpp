@@ -474,7 +474,7 @@ SceneModelCollectResult SceneModels32::collect(const SceneModelCollectInputs& in
         ++collected_.records;
         handle_record(record);
     }
-    if (inputs.runtime_records.empty()) {
+    if (inputs.runtime_records.empty() && !inputs.runtime_records_supplied) {
         add_gap(collected_.gaps, SceneModelGapKind::runtime_pool_not_supplied, 0,
             "0x822e80 runtime actor pool is not modelled; pass its records explicitly");
     } else {
@@ -490,28 +490,41 @@ SceneModelCollectResult SceneModels32::collect(const SceneModelCollectInputs& in
     }
 
     // 0x485290 effect loop over 0x9f3098: gate [+0xfc] > 0 and a nonzero record.
-    if (inputs.effects.empty()) {
+    if (inputs.effects.empty() && !inputs.effects_supplied) {
         add_gap(collected_.gaps, SceneModelGapKind::effect_table_not_supplied, 0,
             "0x9f3098 effect records are not supplied; pass them explicitly");
     } else {
         for (const auto& effect : inputs.effects) {
             ++collected_.effect_records;
-            if (effect.counter_fc <= 0 || effect.identity == nullptr) continue;
-            if (effect.model == 0) continue;
-            const Model* model = catalog_->model(effect.model);
+            const auto* image=effect.image?&*effect.image:nullptr;
+            const auto counter=image?read_i32(image->data(),0xfc):effect.counter_fc;
+            if(counter<=0)continue;
+            if(image&&read_u32(image->data(),0)==0)continue;
+            if(effect.identity==nullptr){if(image)throw std::invalid_argument("Effect image needs its current source identity");continue;}
+            const auto handle=image?read_u32(image->data(),0x10):effect.model;
+            if (handle == 0) continue;
+            const Model* model = catalog_->model(handle);
             if (model == nullptr) {
-                add_gap(collected_.gaps, SceneModelGapKind::missing_model, effect.model,
+                add_gap(collected_.gaps, SceneModelGapKind::missing_model, handle,
                     "effect model handle has no decoded model");
                 continue;
             }
             ModelCollectInput input;
             input.identity = effect.identity;
-            input.position = effect.position;
+            input.position = image?std::array<std::int32_t,3>{read_i32(image->data(),0x24),read_i32(image->data(),0x28),read_i32(image->data(),0x2c)}:effect.position;
             input.model = model;
             input.radius = model->bounding_radius;
             input.hidden = false;
             const auto entry = collect_effect_model(input, inputs.view.view);
-            if (entry) collected_.near.push_back(*entry);
+            if (entry) {
+                if(image){
+                    if(record_index_.count(effect.identity))throw std::invalid_argument("duplicate scene record identity");
+                    record_index_.emplace(effect.identity,frame_records_.size());
+                    SceneModelRecord record;record.identity=effect.identity;record.image=*image;
+                    frame_records_.push_back(std::move(record));
+                }
+                collected_.near.push_back(*entry);
+            }
         }
     }
     return collected_;
@@ -524,7 +537,7 @@ std::optional<SceneModelDrawCall> SceneModels32::build_call(const ModelQueueEntr
     ModelQueue queue, const SceneModelPassInputs& inputs, std::vector<SceneModelGap>& gaps) {
     const auto* record = find_record(entry.object);
     if (record == nullptr)
-        throw std::invalid_argument("queue object was not offered to collect");
+        throw std::invalid_argument("Queue object needs a full current source image");
     const auto& image = record->image;
     ModelObjectView object;
     object.identity = entry.object;
@@ -969,6 +982,8 @@ MissionSceneFrame32 MissionScene32::render(const TerrainScene32& terrain,const V
     renderer.begin_frame();
     SceneModelCollectInputs collect;
     collect.view=view;collect.records=live.actors?scene_model_records(state,*live.actors):scene_model_records(state);
+    if(live.runtime_records){collect.runtime_records=*live.runtime_records;collect.runtime_records_supplied=true;}
+    if(live.effects){collect.effects=*live.effects;collect.effects_supplied=true;}
     const auto queues=renderer.collect(collect);
     SceneModelPassInputs pass;pass.view=view;pass.time=options.time;
     pass.z_reference=std::int32_t(camera.yaw);pass.direction_reference=std::int32_t(camera.pitch);

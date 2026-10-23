@@ -191,6 +191,7 @@ struct SceneEffectRecord {
     std::array<std::int32_t, 3> position{};
     std::uint32_t model{};   // deterministic model handle
     std::int32_t counter_fc{};
+    std::optional<ActorImage> image{}; // Required current full image for draw planning.
 };
 
 // ---------------------------------------------------------------------------
@@ -237,6 +238,8 @@ struct SceneModelCollectInputs {
     // 0x485040 +0x8c: registry slot (+0x94) -> runtime definition index
     // (original 0x4828C0 result). Null reports character_secondary_write.
     std::function<std::uint32_t(std::uint32_t)> secondary_definition;
+    bool runtime_records_supplied{}; // A bound pool can contain no active records.
+    bool effects_supplied{};
 };
 struct SceneModelCollectResult {
     ModelQueueList large;     // 0xc23e70
@@ -394,6 +397,8 @@ struct MissionSceneFrame32 {
 struct MissionSceneLiveInputs32 {
     const MissionActorImages* actors{};
     std::function<const std::vector<CharacterBonePose>*(std::uint32_t)> pose;
+    const std::vector<SceneModelRecord>* runtime_records{};
+    const std::vector<SceneEffectRecord>* effects{};
 };
 class MissionScene32 {
 public:

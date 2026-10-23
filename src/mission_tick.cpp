@@ -336,6 +336,10 @@ void init_mission_tick(MissionTickState& state, MissionTickConfig config, AiActo
         state.actor_extras[group].assign(state.tables.groups[group].size(), BehaviorActorExtra{});
         state.runtimes[group].assign(state.tables.groups[group].size(), std::nullopt);
     }
+    if(state.tables.extra.size()>0x400)throw MissionTickError("mission tick: extra actor pool exceeds1024 physical records");
+    state.stored_extra_actor_images.clear();
+    state.extra_actor_encoding.assign(state.tables.extra.size(),MissionExtraActorEncoding{});
+    for(const auto& actor:state.tables.extra)state.stored_extra_actor_images.push_back(ai_actor_image(actor));
     state.actor_extras[4].assign(state.tables.extra.size(), BehaviorActorExtra{});
     state.runtimes[4].assign(state.tables.extra.size(), std::nullopt);
     for(std::size_t group=0;group<4;++group){
@@ -370,13 +374,17 @@ void init_mission_tick(MissionTickState& state,MissionTickConfig config,
     }
 }
 AiActorImage snapshot_mission_actor(const MissionTickState& state,const AiActorRef& ref) {
-    if(ref.group>=4 || ref.index>=state.tables.groups[ref.group].size())
+    const bool extra_group=ref.group==kAiExtraTableGroup;
+    if(ref.group>kAiExtraTableGroup || (extra_group?(ref.index>=state.tables.extra.size()||ref.index>=0x400):ref.index>=state.tables.groups[ref.group].size()))
         throw MissionTickError("mission tick: snapshot actor outside the mission tables");
     const auto group=ref.group;const auto slot=ref.index;
-    const auto stored=slot<state.stored_actor_images[group].size()?state.stored_actor_images[group][slot]:AiActorImage{};
+    const auto& stored_rows=extra_group?state.stored_extra_actor_images:state.stored_actor_images[group];
+    const auto stored=slot<stored_rows.size()?stored_rows[slot]:AiActorImage{};
     const auto extra=slot<state.actor_extras[group].size()?state.actor_extras[group][slot]:BehaviorActorExtra{};
-    const auto encoding=slot<state.person_encoding[group].size()?state.person_encoding[group][slot]:ActorPersonEncoding::handle;
-    auto image=merge_live_actor_image(stored,state.tables.groups[group][slot],extra,encoding);
+    const auto encoding=extra_group?(slot<state.extra_actor_encoding.size()?state.extra_actor_encoding[slot].person:ActorPersonEncoding::slot):(slot<state.person_encoding[group].size()?state.person_encoding[group][slot]:ActorPersonEncoding::handle);
+    const auto& actor=extra_group?state.tables.extra[slot]:state.tables.groups[group][slot];
+    auto image=merge_live_actor_image(stored,actor,extra,encoding);
+    if(extra_group)std::memcpy(image.data()+4,stored.data()+4,4);
     const auto put=[&](std::size_t at,const auto& value){std::memcpy(image.data()+at,&value,sizeof(value));};
     if(slot<state.runtimes[group].size() && state.runtimes[group][slot]){
         const auto& runtime=*state.runtimes[group][slot];
@@ -385,6 +393,14 @@ AiActorImage snapshot_mission_actor(const MissionTickState& state,const AiActorR
         if(runtime.driver){const auto action=std::uint32_t(runtime.driver->current_action());put(0x80,action);}
     }
     return image;
+}
+void clear_mission_extra_actor(MissionTickState& state,std::size_t index){
+    if(index>=0x400||index>=state.tables.extra.size())throw MissionTickError("mission tick: extra actor clear exceeds its physical pool");
+    state.tables.extra[index]=AiActorState{};
+    state.stored_extra_actor_images.at(index).fill(0);
+    state.extra_actor_encoding.at(index)=MissionExtraActorEncoding{};
+    state.actor_extras[4].at(index)=BehaviorActorExtra{};
+    state.runtimes[4].at(index).reset();
 }
 MissionActorImages snapshot_mission_actors(const MissionTickState& state) {
     MissionActorImages images;
@@ -1054,6 +1070,7 @@ void run_ai_stage(MissionTickState& state, MissionTickReport& report) {
         trace_plain(report,MissionTraceKind::mark,kProfilerMark,mark);
     };
     hooks.on_action=[&](const AiActorAction& action){run_actor_action(state,action,report);};
+    hooks.on_clear=[&](const AiActorRef& ref){if(ref.group!=kAiExtraTableGroup)throw MissionTickError("mission tick: actor clear has an unowned table");clear_mission_extra_actor(state,ref.index);};
     hooks.on_call=[&](const AiTickCall& call) {
         switch(call.kind) {
         case AiTickCall::Kind::local_player_control:

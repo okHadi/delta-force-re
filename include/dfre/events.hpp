@@ -32,8 +32,9 @@ public:
     virtual ~EventHost() = default;
 
     // Reads the dword at [address + index * 0x40], as the original does.
-    // 0x7936a4: marker/briefing flag; 0x7936a8: live count per object ident;
-    // 0x7936ac: mission-start count per object ident (0x44a110 fills it).
+    // 0x7936a4: marker/briefing flag.
+    // 0x7936a8: initial count per object ident (0x44a110).
+    // 0x7936ac: current count per object ident (0x44a200).
     virtual std::uint32_t object_index_dword(std::uint32_t address, std::uint32_t index);
 
     // 0x460330(trigger): rectangle test, trigger kind 1 subtype 10.

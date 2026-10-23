@@ -164,10 +164,11 @@ AiTickReport tick_ai(AiActorTables& tables, AiUpdateState& state,
         AiActorState& actor = tables.extra[index];
         if (actor.definition_index == 0) continue;
         const auto& definition = definition_for(definitions, actor);
-        const std::int32_t previous = static_cast<std::int32_t>(actor.field_fc);
-        actor.field_fc = static_cast<std::uint32_t>(previous + 1);
-        if (static_cast<std::int32_t>(definition.field_9c) <= previous + 1) {
+        const std::uint32_t next = actor.field_fc + 1u;
+        actor.field_fc = next;
+        if (static_cast<std::int32_t>(definition.field_9c) <= static_cast<std::int32_t>(next)) {
             actor = AiActorState{};
+            if(hooks.on_clear)hooks.on_clear({kAiExtraTableGroup,index});
         }
         if (actor.field_10c != 0 && actor.field_10c != kAiDefaultCallback)
             emit_action(

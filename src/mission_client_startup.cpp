@@ -1,5 +1,6 @@
 #include "dfre/mission_client_startup.hpp"
 #include <cstring>
+#include <string>
 namespace dfre {namespace {
 using U=std::uint32_t;
 std::int32_t si(U n){std::int32_t v;std::memcpy(&v,&n,4);return v;}

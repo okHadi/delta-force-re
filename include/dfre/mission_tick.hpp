@@ -155,6 +155,11 @@ struct MissionTickWorld {
     std::function<std::optional<std::uint32_t>(MissionTickState&,const DispatchCall&)> dispatch_effect;
 };
 
+struct MissionExtraActorEncoding {
+    ActorPersonEncoding person=ActorPersonEncoding::slot;
+    std::uint32_t raw_definition=0; // source+04 before pointer normalization
+};
+
 struct MissionTickState {
     MissionTickConfig config;
     MissionTickWorld world;
@@ -162,6 +167,8 @@ struct MissionTickState {
     // Original actor storage; mutated in place and kept across ticks.
     AiActorTables tables;
     MissionActorImages stored_actor_images;
+    std::vector<AiActorImage> stored_extra_actor_images;
+    std::vector<MissionExtraActorEncoding> extra_actor_encoding;
     std::array<std::vector<ActorPersonEncoding>,4> person_encoding;
     AiUpdateState ai;                     // includes the shared target list
     AiItemDefinitionTable definitions;    // +0x28/+0x9C read by the AI tick,
@@ -233,6 +240,8 @@ void init_mission_tick(MissionTickState& state,MissionTickConfig config,
     const MissionRuntimeState& initial,std::uint32_t behavior_rng);
 AiActorImage snapshot_mission_actor(const MissionTickState& state,const AiActorRef& ref);
 MissionActorImages snapshot_mission_actors(const MissionTickState& state);
+// Full0x114 clear at the extra actor expiry store boundary.
+void clear_mission_extra_actor(MissionTickState&,std::size_t index);
 // Record and execute a weapon effect at its source call site.
 void mission_weapon_effect(MissionTickState& state,const WeaponEvent& event);
 

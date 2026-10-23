@@ -16,7 +16,7 @@ std::int32_t signed_bits(std::uint32_t value){std::int32_t result;std::memcpy(&r
 }
 void apply_mission_actor_image(MissionTickState& state,const AiActorRef& ref,const AiActorImage& image){
     auto* actor=state.actor_at(ref);
-    if(ref.group>=4 || !actor)throw MissionTickError("Actor image exceeds its mission table");
+    if(ref.group>kAiExtraTableGroup || (ref.group==kAiExtraTableGroup&&ref.index>=0x400) || !actor)throw MissionTickError("Actor image exceeds its mission table");
     const auto index=word(image,0);
     if(index!=word(image,4))throw MissionTickError("Actor image has different definition bindings");
     if(index>=state.definitions.entries().size())throw MissionTickError("Actor definition exceeds its table");
@@ -32,7 +32,8 @@ void apply_mission_actor_image(MissionTickState& state,const AiActorRef& ref,con
     const auto person=active?actor->person_slot:std::nullopt;
     *actor=read_live_actor_image(image,active,person);
     state.extra_for(ref)=read_live_actor_extra(image);
-    state.stored_actor_images.at(ref.group).at(ref.index)=image;
+    if(ref.group==kAiExtraTableGroup)state.stored_extra_actor_images.at(ref.index)=image;
+    else state.stored_actor_images.at(ref.group).at(ref.index)=image;
     runtime.byte_6e=image[0x6e];runtime.roll_38=word(image,0x38);runtime.vertical_44=signed_word(image,0x44);
     runtime.ground_100=word(image,0x100);runtime.link_90=word(image,0x90);
     if(!word(image,0x18)){runtime.driver.reset();runtime.animation=nullptr;}
