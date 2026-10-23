@@ -103,6 +103,7 @@ int main(int argc,char** argv){try{
     sound_host.record_store=[&,base_store](auto base,auto offset,auto width,auto value){if(current_session&&current_session->claims(base+offset,width)){current_session->write(base+offset,width,value);return;}if(clients.claims(base+offset,width)){clients.write(base+offset,width,value);return;}if(sockets&&sockets->claims(base+offset,width)){sockets->write(base+offset,width,value);return;}if(base>=0x822e80&&base<0x867e80){if(!extra_memory||offset>0x114||width>0x114-offset||mission_extra_actor_record_base(base,1)!=base)throw MissionTickError("Extra sound record range is invalid");extra_memory->write(base+offset,width,value);return;}base_store(base,offset,width,value);};
     sound_host.actor_word=[&,base_actor](auto actor,auto offset){if(actor>=0x822e80&&actor<0x867e80){if(!extra_memory||offset>0x110||mission_extra_actor_record_base(actor,1)!=actor)throw MissionTickError("Extra sound actor range is invalid");return extra_memory->read(actor+offset,4);}return base_actor(actor,offset);};
     sound_host.service=[&](auto site,const auto& args)->std::uint32_t{
+        if(site==0x42eba0){if(!args.empty()||!current_session)throw MissionTickError("End events lost their current Session");current_session->end_events();return 0;}
         if(current_session)if(const auto value=current_session->hud_service(site,args))return *value;
         if(line_owner)if(const auto value=line_owner->service(site,args))return *value;
         if(registry){if(const auto value=registry->service(site,args))return *value;}
@@ -214,10 +215,22 @@ int main(int argc,char** argv){try{
     session.step();session.step();
     if(session.read(0x67f718,4)!=1||session.read(0x67f71c,4)!=result_packet[1])throw MissionTickError("Session result did not reach the current result image");
     std::cout<<"session_result mode1 rows "<<session.read(0x67f71c,4)<<" source_projectile_ring "<<shots_before_result<<std::endl;
+    sound_memory.call(0x42eba0,{});
+    std::cout<<"session_end_events current_live_owners selected "<<std::count_if(resources.mission.events.begin(),resources.mission.events.end(),[](const auto& event){return (event.words[0]&4u)!=0;})<<"\n";
     state.update_callbacks.emplace(0x0badf00e,[](auto&,const auto&,const auto&){});
     session.uninstall();current_session=nullptr;if(state.update_callbacks.size()!=prior_updates+1||state.secondary_callbacks.size()!=prior_secondary||!state.update_callbacks.count(0x0badf00d)||!state.update_callbacks.count(0x0badf00e))throw MissionTickError("Session removed another callback owner");if(session.installed())throw MissionTickError("Session did not uninstall");
+    bool stopped_end_events=false;try{session.end_events();}catch(const MissionTickError&){stopped_end_events=true;}if(!stopped_end_events)throw MissionTickError("End events used an uninstalled Session");
     MissionResultImage expected_result{};for(std::size_t i=0;i<expected_result.size();++i)expected_result[i]=std::uint8_t(session.read(result_state_block+std::uint32_t(i),1));
     if(retained_result!=expected_result)throw MissionTickError("Session result has a second byte owner");
     session_owner.reset();if(retained_result!=expected_result||retained_result[4]!=1)throw MissionTickError("Mission result did not survive Session teardown");
+    // Explicit end-event input uses the same live actors, clients and message owners.
+    auto end_fixture=resources.mission;MissionEvent end_event;end_event.words={4,0,0,0,0,1u<<16};
+    end_fixture.events={end_event};end_fixture.triggers.clear();end_fixture.actions={{0,8,0,0,0,0,0,0}};
+    auto end_session=std::make_unique<MissionSession>(MissionSessionContext{state,initial,end_fixture,cache,terrain,animations,geometry,muzzle,bridge,sound,*registry,audio,scripts,crt_cells,clients,*extra_memory,rules_word,requested,camera_position},host,retained_result);
+    current_session=end_session.get();script_message=[&](auto id,const auto& packet){current_session->script_message(id,packet.data(),packet.size());};
+    end_session->install();end_session->write(0x67dbc0,4,0);sound_memory.call(0x42eba0,{});
+    if(end_session->read(0x67dbc0,4)!=1)throw MissionTickError("End event did not reach the live result publisher");
+    end_session->uninstall();current_session=nullptr;end_session.reset();
+    std::cout<<"session_end_event_fixture live_result_publisher\n";
     std::cout<<"session_pass"<<frame_count<<" ammo27 namedrepair retainedresult device0\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

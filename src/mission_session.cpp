@@ -847,6 +847,7 @@ void MissionSession::uninstall() noexcept {auto& p=*impl_;if(!p.active)return;if
 bool MissionSession::installed() const noexcept{return impl_->active;}
 MissionTickReport MissionSession::step(){if(!installed())throw MissionTickError("Mission session is not installed");return mission_tick(impl_->c.state,impl_->input);}
 void MissionSession::request_result(U mode,MissionLogicResultPacket& packet){if(!installed())throw MissionTickError("Mission result requires an installed session");mission_logic_request_result(impl_->result_bindings,mode,packet);}
+void MissionSession::end_events(){if(!installed())throw MissionTickError("Mission end events require an installed Session");impl_->event_stage.run_bit2_events();}
 std::optional<U> MissionSession::hud_service(U site,const std::vector<U>& args){return impl_->hud_service(site,args);}
 void MissionSession::script_message(U id,const std::uint8_t* bytes,std::size_t length){if(!installed()||!impl_->outbox)throw MissionTickError("Mission script outbox is not installed");if(length>std::numeric_limits<U>::max())throw MissionTickError("Mission script message is too large");impl_->outbox->broadcast(std::int32_t(id),bytes,U(length));}
 U MissionSession::camera_yaw() const{return impl_->camera.yaw_6ba3e8;}
