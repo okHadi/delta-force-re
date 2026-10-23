@@ -51,6 +51,9 @@
 #include "dfre/mission_object_helo_condition.hpp"
 #include "dfre/mission_object_helo_home.hpp"
 #include "dfre/mission_projectile_owner.hpp"
+#include "dfre/mission_object_tree_spawn.hpp"
+#include "dfre/mission_object_seagull.hpp"
+#include "dfre/mission_animation_table_live.hpp"
 #include "dfre/world_hits.hpp"
 #include "dfre/mission_logic.hpp"
 #include "dfre/mission_client_outbox.hpp"
@@ -105,8 +108,8 @@ struct MissionSession::Impl {
     std::uint16_t fp_control_word=0x037f;
     MissionTickWorld prior_world; bool active=false;
     std::map<U,MissionTickState::ActorCallback> prior_updates,prior_secondary;
-    inline static constexpr std::array<U,11> update_ids{0x429bc0,0x4519a0,0x4534a0,0x45c3a0,0x45c340,0x453810,0x4533f0,0x453930,0x45bf80,0x451d40,0x450e40};
-    inline static constexpr std::array<U,4> secondary_ids{0x429ea0,0x451cb0,0x451590,0x451dd0};
+    inline static constexpr std::array<U,13> update_ids{0x429bc0,0x4519a0,0x4534a0,0x45c3a0,0x45c340,0x453810,0x4533f0,0x453930,0x45bf80,0x451d40,0x450e40,0x451e70,0x451fd0};
+    inline static constexpr std::array<U,5> secondary_ids{0x429ea0,0x451cb0,0x451590,0x451dd0,0x452310};
     std::array<bool,update_ids.size()> installed_updates{};
     std::array<bool,secondary_ids.size()> installed_secondary{};
     MissionGeometryMatrixSource matrices;
@@ -197,6 +200,25 @@ struct MissionSession::Impl {
     static constexpr U helo_altitude_source=0x1b004200;
     std::array<std::uint8_t,0x40> helo_altitude_frame{};
     bool helo_altitude_active=false;
+    MissionObjectTreeBindings tree;
+    std::unique_ptr<MissionAnimationTableLive> animation_tables;
+    static constexpr U animation_table_base=0x20800000,tree_source=0x1b006000;
+    std::array<std::uint8_t,0x114> tree_frame{};
+    bool tree_active=false;
+    MissionObjectSeagullBindings seagull;
+    static constexpr U seagull_source=0x1b006200;
+    std::array<std::uint8_t,28> seagull_frame{};
+    bool seagull_active=false;
+    void run_seagull(U actor){
+        if(seagull_active)throw MissionTickError("Seagull caller frame is already active");
+        seagull_active=true;struct Scope{bool& active;~Scope(){active=false;}} scope{seagull_active};
+        mission_object_seagull_ai(seagull,actor,seagull_source);
+    }
+    void run_tree(U actor,U message){
+        if(tree_active)throw MissionTickError("Tree caller frame is already active");
+        tree_active=true;struct Scope{bool& active;~Scope(){active=false;}} scope{tree_active};
+        mission_object_tree_spawn(tree,actor,tree_source,message);
+    }
     static constexpr U barrel_source=0x1b003000;
     std::array<std::uint8_t,24> barrel_frame{};
     bool running_periodic=false;
@@ -463,6 +485,8 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         if(callback==0x45bf80){mission_object_barrel(barrel,mission_actor_source_address(ref.group,ref.index),barrel_source,message);return;}
         if(callback==0x451d40){mission_object_mine_update(mine_update,mission_actor_source_address(ref.group,ref.index),mine_source);return;}
         if(callback==0x450e40){mission_object_helo_update(helo,mission_actor_source_address(ref.group,ref.index),message,helo_source,helo_frame.size());return;}
+        if(callback==0x451e70){run_tree(mission_actor_source_address(ref.group,ref.index),message);return;}
+        if(callback==0x451fd0){run_seagull(mission_actor_source_address(ref.group,ref.index));return;}
         mission_object_update(state,ref,callback,message,object);
     };
     flag_bindings=mission_event_actor_flag_bindings(*lifecycle,*outbox,[&](const auto& ref,auto callback,auto message){dispatch_object(ref,callback,message);});
@@ -642,6 +666,73 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     };
     bind_mission_object_helo_move(state,helo);
     bind_mission_object_helo_update(state,helo,helo_source,helo_frame.size());
+    if(std::uint64_t(color_base)+terrain.color.pixels.size()>animation_table_base||std::uint64_t(definition_base)+initial.definitions.size()*sizeof(RuntimeItemDefinition)>animation_table_base)
+        throw MissionTickError("Animation table reservation overlaps current source memory");
+    animation_tables=std::make_unique<MissionAnimationTableLive>(initial,cache,animation_table_base,0x2000,1024);
+    tree.read=[&](U at,U width){
+        if(at>=tree_source&&std::uint64_t(at-tree_source)+width<=tree_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(tree_frame.at(at-tree_source+i))<<(i*8);return n;}
+        if(animation_tables->claims(at,width))return animation_tables->read(at,width);
+        if(at==0xc23814&&width==4)return U(initial.definitions.size());
+        if(at==0xc23820&&width==4)return state.config.local_actor?mission_actor_source_address(3,*state.config.local_actor):0u;
+        if(at>=0x7cca80&&std::uint64_t(at)+width<=0x7dde80){
+            const U slot=(at-0x7cca80)/0x114,offset=(at-0x7cca80)%0x114;
+            if(offset+width>0x114)throw MissionTickError("Tree physical read crosses its actor record");
+            auto image=slot<state.tables.groups[3].size()?snapshot_mission_actor(state,{3,slot}):group3_tail.at(slot);
+            if(slot<state.tables.groups[3].size()){
+                U index;std::memcpy(&index,image.data()+4,4);const U definition=index?definition_base+index*0x13c:0;
+                std::memcpy(image.data()+4,&definition,4);
+                const auto person=state.tables.groups[3][slot].person_slot;const U physical=person?0x794680+U(*person)*0xb4:0;
+                std::memcpy(image.data()+0xc,&physical,4);
+            }
+            U n=0;for(U i=0;i<width;++i)n|=U(image.at(offset+i))<<(i*8);return n;
+        }
+        if(at>=definition_base&&std::uint64_t(at-definition_base)<initial.definitions.size()*sizeof(RuntimeItemDefinition)){
+            const U offset=(at-definition_base)%sizeof(RuntimeItemDefinition);
+            if(offset>=0x78&&offset+width<=0x7c){const auto index=(at-definition_base)/sizeof(RuntimeItemDefinition);const U pointer=animation_tables->table_address(initial.definitions.at(index).animation);return (pointer>>((offset-0x78)*8))&(width==4?0xffffffffu:((1u<<(width*8))-1));}
+        }
+        return periodic.read(at,width);
+    };
+    tree.write=[&](U at,U width,U value){if(at>=tree_source&&std::uint64_t(at-tree_source)+width<=tree_frame.size()){for(U i=0;i<width;++i)tree_frame.at(at-tree_source+i)=std::uint8_t(value>>(i*8));return;}periodic.write(at,width,value);};
+    tree.call=[&](U site,const auto& args)->U{
+        if(site==0x44fba0)return mission_object_tree_signal(tree,args.at(0));
+        if(site==0x477670){std::array<std::int32_t,3> n{};for(U i=0;i<3;++i)std::memcpy(&n[i],&args.at(i),4);return U(collision_approximate_length(n[0],n[1],n[2]));}
+        if(site==0x477860)return behavior_rng_next(state.behavior);
+        if(site==0x43e7d0){Fixed3 p;std::memcpy(&p.x,&args.at(1),4);std::memcpy(&p.y,&args.at(2),4);std::memcpy(&p.z,&args.at(3),4);sound.positional(args.at(0),p);return 0;}
+        if(site==0x49a620){for(U i=0;i<args.at(2);++i)tree.write(args.at(0)+i,1,args.at(1)&255);return args.at(0);}
+        if(site==0x45d970){if(!h.primary_source_records)throw MissionTickError("Tree insertion needs current primary source records");auto raw=insertion;raw.read=tree.read;raw.write=tree.write;return mission_actor_insert(raw,args.at(0),args.at(1));}
+        throw MissionTickError("Tree required body is not bound "+std::to_string(site));
+    };
+    if(state.update_callbacks.count(0x451e70))throw MissionTickError("Tree callback already has an owner");
+    state.update_callbacks.emplace(0x451e70,[this](auto& current,const auto& ref,const auto& action){
+        if(action.kind!=AiActorActionKind::update||action.target!=0x451e70||ref.group>=4||!current.actor_at(ref))throw MissionTickError("Tree callback actor or action has no current owner");
+        const auto actor=mission_actor_source_address(ref.group,ref.index);(void)mission_projectile_owner_source_ref(current,actor);run_tree(actor,0);
+    });
+    seagull.read=[&](U at,U width){
+        if(at>=seagull_source&&std::uint64_t(at-seagull_source)+width<=seagull_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(seagull_frame.at(at-seagull_source+i))<<(i*8);return n;}
+        return periodic.read(at,width);
+    };
+    seagull.write=[&](U at,U width,U value){
+        if(at>=seagull_source&&std::uint64_t(at-seagull_source)+width<=seagull_frame.size()){for(U i=0;i<width;++i)seagull_frame.at(at-seagull_source+i)=std::uint8_t(value>>(i*8));return;}
+        periodic.write(at,width,value);
+    };
+    seagull.call=[&](U site,const auto& args)->U{
+        if(site==0x477860)return behavior_rng_next(state.behavior);
+        if(site==0x477820){const U index=args.at(0)>>21;seagull.write(args.at(1),4,U(kSineTableQ22.at(index)));seagull.write(args.at(2),4,U(kSineTableQ22.at(index+512)));return 0;}
+        if(site==0x477670){std::array<std::int32_t,3> n{};for(U i=0;i<3;++i)std::memcpy(&n[i],&args.at(i),4);return U(collision_approximate_length(n[0],n[1],n[2]));}
+        if(site==0x477770)return query_angle_477770(args.at(0),args.at(1));
+        if(site==0x47df40){std::int32_t x,y;std::memcpy(&x,&args.at(0),4);std::memcpy(&y,&args.at(1),4);return U(ground_height_query(terrain.geometry,x,y));}
+        if(site==0x43e7d0){Fixed3 p;std::memcpy(&p.x,&args.at(1),4);std::memcpy(&p.y,&args.at(2),4);std::memcpy(&p.z,&args.at(3),4);sound.positional(args.at(0),p);return 0;}
+        throw MissionTickError("Seagull required body is not bound "+std::to_string(site));
+    };
+    if(state.update_callbacks.count(0x451fd0)||state.secondary_callbacks.count(0x452310))throw MissionTickError("Seagull callbacks already have an owner");
+    state.update_callbacks.emplace(0x451fd0,[this](auto& current,const auto& ref,const auto& action){
+        if(action.kind!=AiActorActionKind::update||action.target!=0x451fd0||!current.actor_at(ref))throw MissionTickError("Seagull AI actor or action has no current owner");
+        const auto actor=mission_actor_source_address(ref.group,ref.index);(void)mission_projectile_owner_source_ref(current,actor);run_seagull(actor);
+    });
+    state.secondary_callbacks.emplace(0x452310,[this](auto& current,const auto& ref,const auto& action){
+        if(action.kind!=AiActorActionKind::secondary||action.target!=0x452310||!current.actor_at(ref))throw MissionTickError("Seagull move actor or action has no current owner");
+        const auto actor=mission_actor_source_address(ref.group,ref.index);(void)mission_projectile_owner_source_ref(current,actor);mission_object_seagull_move(seagull,actor);
+    });
     bind_mission_object_mine_move(state,{periodic.read,periodic.write});
     barrel.read=[&](U at,U width){if(at>=barrel_source&&std::uint64_t(at-barrel_source)+width<=barrel_frame.size()){U value=0;for(U i=0;i<width;++i)value|=U(barrel_frame.at(at-barrel_source+i))<<(i*8);return value;}return periodic.read(at,width);};
     barrel.write=[&](U at,U width,U value){if(at>=barrel_source&&std::uint64_t(at-barrel_source)+width<=barrel_frame.size()){for(U i=0;i<width;++i)barrel_frame.at(at-barrel_source+i)=std::uint8_t(value>>(8*i));return;}periodic.write(at,width,value);};

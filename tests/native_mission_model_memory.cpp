@@ -1,0 +1,51 @@
+#include "dfre/mission_model_memory.hpp"
+#include "dfre/mission_item_resource.hpp"
+#include "dfre/mission_object_helo_pose.hpp"
+#include "dfre/mission_live.hpp"
+#include "dfre/model_specials.hpp"
+#include "dfre/model_visibility.hpp"
+#include "dfre/world_runtime.hpp"
+#include <cstring>
+#include <iostream>
+#include <stdexcept>
+using namespace dfre;using U=std::uint32_t;
+namespace {
+void check(bool value,const char* text){if(!value)throw std::runtime_error(text);}
+template<class F>void rejects(F body){bool failed=false;try{body();}catch(const std::exception&){failed=true;}check(failed,"Invalid model memory operation succeeded");}
+template<class B>U get(const B& bytes,U at,U width=4){U value=0;for(U i=0;i<width;++i)value|=U(bytes.at(at+i))<<(i*8);return value;}
+template<class B>void put(B& bytes,U at,U value,U width=4){for(U i=0;i<width;++i)bytes.at(at+i)=std::uint8_t(value>>(i*8));}
+std::int32_t si(U value){std::int32_t result;std::memcpy(&result,&value,4);return result;}
+AssetBytes source(U count){AssetBytes raw(128+184+count*12);raw[0]='3';raw[1]='D';raw[2]='I';raw[3]=5;raw[4]='x';put(raw,20,1);put(raw,0x28,0x68656c6f);put(raw,128+20,count*12);put(raw,128+0xa0,count);put(raw,0x3c,0xabcdef01);return raw;}
+struct Pose {
+ static constexpr U A=0x7dde80,F=0x1b000000,O=0x1b000100;
+ MissionTickState state;MissionModelMemory& memory;std::array<std::uint8_t,0x80> frame{};std::array<std::uint8_t,24> out{};bool stop=false;
+ explicit Pose(MissionModelMemory& value):memory(value){AiActorTables tables;tables.groups[0].resize(1);tables.groups[0][0].active=true;tables.groups[0][0].definition_index=1;tables.groups[0][0].field_10=0x71000000;for(U i=0;i<3;++i)tables.groups[0][0].position[i]=(i+1)*100000;init_mission_tick(state,{},std::move(tables),AiItemDefinitionTable(std::vector<AiItemDefinition>(2)),{},1);frame.fill(0xa5);out.fill(0xcc);}
+ U read(U at){if(memory.claims(at,4))return memory.read(at,4);if(at>=A&&std::uint64_t(at-A)+4<=0x114){const auto image=snapshot_mission_actor(state,{0,0});if(at==A+0x10||at==A+0x14){const U handle=get(image,at-A);try{return memory.source(handle);}catch(const MissionModelMemoryError&){throw MissionTickError("Pose current typed model handle differs: "+std::to_string(handle));}}return get(image,at-A);}if(at>=F&&std::uint64_t(at-F)+4<=frame.size())return get(frame,at-F);if(at>=O&&std::uint64_t(at-O)+4<=out.size())return get(out,at-O);throw MissionTickError("Pose memory is not owned");}
+ void write(U at,U value){if(memory.claims(at,4)){memory.write(at,4,value);return;}if(at>=F&&std::uint64_t(at-F)+4<=frame.size()){put(frame,at-F,value);return;}if(at>=O&&std::uint64_t(at-O)+4<=out.size()){put(out,at-O,value);return;}throw MissionTickError("Pose output is not owned");}
+ MissionObjectHeloBindings bindings(){MissionObjectHeloBindings b;b.read=[&](U at,U width){check(width==4,"pose read width differs");return read(at);};b.write=[&](U at,U width,U n){check(width==4,"pose store width differs");write(at,n);};b.call=[&](U site,const std::vector<U>& args)->U{
+  if(site==0x45d1e0){if(stop){state.tables.groups[0][0].position[0]=999;throw MissionTickError("Matrix provider stopped");}const U p=args.at(1);const auto matrix=compose_pose({si(read(p)),si(read(p+4)),si(read(p+8))},{read(p+12),read(p+16),read(p+20)});for(U i=0;i<12;++i)write(args.at(0)+i*4,U(matrix.m[i]));return 0;}
+  if(site==0x45d400){const U p=args.at(1);const auto matrix=model_special_pivot_matrix({si(read(p)),si(read(p+4)),si(read(p+8))},{si(read(p+12)),si(read(p+16)),si(read(p+20))});for(U i=0;i<12;++i)write(args.at(0)+i*4,U(matrix[i]));return 0;}
+  if(site==0x45cb40){Matrix4 left,right;for(U i=0;i<12;++i){left.m[i]=si(read(args.at(0)+i*4));right.m[i]=si(read(args.at(1)+i*4));}const auto matrix=matrix_multiply(left,right);for(U i=0;i<12;++i)write(args.at(2)+i*4,U(matrix.m[i]));return 0;}
+  if(site==0x45cda0){Matrix4 matrix;for(U i=0;i<12;++i)matrix.m[i]=si(read(args.at(0)+i*4));const U p=args.at(1);const auto point=transform_point(matrix,{si(read(p)),si(read(p+4)),si(read(p+8))});write(args.at(2),U(point.x));write(args.at(2)+4,U(point.y));write(args.at(2)+8,U(point.z));return 0;}
+  throw MissionTickError("Pose matrix body is not owned");};return b;}
+};
+}
+int main(int argc,char** argv){try{
+ const auto raw=source(0);Model mutable_model=decode_model(raw);MissionModelMemory zero([&](std::string_view)->const Model&{return mutable_model;},[&](std::string_view){return raw;},{{17,"x.3di",MissionModelCallbackSeed::pre_producer()}});
+ const U graphic=zero.source(17),lod=zero.read(graphic+0x50,4),empty=zero.read(lod+0xa4,4);check(graphic==0x20000000&&lod==0x20100000&&empty==0x20200000&&!zero.read(lod+0xa0,4)&&zero.read(graphic+0x14,4)==1,"model address or source counts differ");check(zero.handle(graphic)==17&&zero.source(0)==0&&zero.handle(0)==0,"model codec round trip differs");rejects([&]{zero.read(empty,1);});rejects([&]{zero.read(graphic+0x6c,4);});rejects([&]{zero.read(graphic+0x38,1);});rejects([&]{zero.claims(graphic-1,2);});rejects([&]{zero.read(graphic+0x7b,2);});rejects([&]{zero.read(0x20800000,4);});rejects([&]{zero.handle(graphic+1);});rejects([&]{zero.source(18);});rejects([&]{zero.write(graphic+0x50,4,0);});check(!zero.claims(0x20800000,4)&&!zero.claims(0x1fffffff,1),"model codec claims another owner");
+ zero.write(graphic+0x3f,4,0x12345678);check(zero.read(graphic+0x3c,4)==0x78cdef01&&zero.read(graphic+0x40,4)==0x00123456,"callback byte alias across words differs");
+ rejects([&]{MissionModelMemory missing([&](std::string_view)->const Model&{return mutable_model;},[&](std::string_view){return raw;},{{17,"x.3di",{}}});});
+ rejects([&]{MissionModelMemory duplicate([&](std::string_view)->const Model&{return mutable_model;},[&](std::string_view){return raw;},{{17,"x.3di",MissionModelCallbackSeed::pre_producer()},{18,"alias.3di",MissionModelCallbackSeed::pre_producer()}});});
+ auto wrong=raw;put(wrong,0x28,1);rejects([&]{MissionModelMemory mismatch([&](std::string_view)->const Model&{return mutable_model;},[&](std::string_view){return wrong;},{{17,"x.3di",MissionModelCallbackSeed::pre_producer()}});});
+ mutable_model.lods[0].hardpoints.push_back({1,2,3});rejects([&]{zero.read(lod+0xa4,4);});mutable_model.lods[0].hardpoints.clear();
+ if(argc==2){AssetStore assets(argv[1]);MissionAssetCache cache(assets);const auto resources=cache.load_runtime("C06M01.BMS");(void)resources;unsigned file_calls=0;const auto provider=[&](std::string_view name)->const Model&{return cache.model(name);};const auto files=[&](std::string_view name){++file_calls;return assets.read(name).bytes;};
+  MissionModelMemory memory(provider,files,{{0x71000000,"gazelle.3di",MissionModelCallbackSeed::pre_producer()},{0x71000001,"bexp.3di",MissionModelCallbackSeed::pre_producer()}});
+  const auto& gazelle=cache.model("gazelle.3di");const U g=memory.source(0x71000000),e=memory.source(0x71000001);check(g!=e&&&memory.model(g)==&gazelle&&memory.read(g+0x50,4)!=memory.read(e+0x50,4),"model separation or cache owner differs");const U hp=memory.read(memory.read(g+0x50,4)+0xa4,4);check(gazelle.lods[0].hardpoints.size()>8&&memory.read(hp+0x60,4)==U(gazelle.lods[0].hardpoints[8][0]),"Gazelle hardpoint owner differs");rejects([&]{memory.read(hp+U(gazelle.lods[0].hardpoints.size())*12,1);});
+  const std::array<U,5> canonical{{1,2,3,4,5}};MissionModelMemory post(provider,files,{{0x71000000,"gazelle.3di",MissionModelCallbackSeed::post_initialized(canonical)}});check(file_calls==3&&post.read(post.source(0x71000000)+0x3c,4)==1&&memory.read(g+0x3c,4)==get(assets.read("gazelle.3di").bytes,0x3c),"callback seed phase differs");
+  RuntimeItemDefinition item{};item.type=8;std::memcpy(item.graphic,"bexp",5);item.effect_count=0x12345678;U flag=0,loads=0;constexpr U D=0x18000000,S=0x1b000300;
+  MissionItemResourceBindings b;b.read=[&](U at,U width){if(memory.claims(at,width))return memory.read(at,width);if(at==0xc23810)return D;if(at==0xc23814)return 1u;if(at==0x503138)return 1u;if(at==S)return flag;if(at>=D&&std::uint64_t(at-D)+width<=sizeof(item)){if(at==D+0x6c)return memory.source(item.model);if(at==D+0x70)return memory.source(item.husk_model);const auto* bytes=reinterpret_cast<const std::uint8_t*>(&item);U result=0;for(U i=0;i<width;++i)result|=U(bytes[at-D+i])<<(i*8);return result;}throw MissionTickError("Item read is not owned");};
+  b.write=[&](U at,U width,U value){if(memory.claims(at,width)){memory.write(at,width,value);return;}check(width==4,"item source write width differs");if(at==D+0x6c)item.model=memory.handle(value);else if(at==D+0x9c)item.effect_count=value;else throw MissionTickError("Item store is not owned");};b.call=[&](U site,const std::vector<U>& args)->U{if(site==0x486530){check(args==std::vector<U>{D+0x2c,0,S},"item graphic request differs");++loads;flag=1;return e;}if(site==0x4818f0||site==0x481a00){const auto* tag=find_model_callback_tag(args.at(0));if(!tag)tag=&model_callback_tags.front();return site==0x4818f0?tag->draw_address:tag->matrix_address;}throw MissionTickError("Item service is not owned");};mission_item_resource_load(b,0,S);check(item.model==0x71000001&&item.effect_count==96&&loads==1,"real item loader lost current typed handle or metadata");mission_item_resource_load(b,0,S);check(loads==1,"cached item repeated logical first load");
+  Pose pose(memory);mission_object_helo_smoke_pose(pose.bindings(),Pose::A,Pose::O,Pose::F,pose.frame.size());const auto hp2=gazelle.lods[0].hardpoints[2];const auto reference=transform_point(compose_pose({100000,200000,300000},{0,0,0}),{hp2[0],hp2[1],hp2[2]});check(get(pose.out,0)==U(reference.x)&&get(pose.out,4)==U(reference.y)&&get(pose.out,8)==U(reference.z),"Gazelle smoke pose differs");mission_object_helo_weapon_pose(pose.bindings(),Pose::A,Pose::O,Pose::F,pose.frame.size());check(pose.state.tables.groups[0].size()==1&&pose.state.tables.groups[0][0].field_10==0x71000000,"pose created another actor or changed its typed graphic");pose.stop=true;pose.out.fill(0xcc);rejects([&]{mission_object_helo_weapon_pose(pose.bindings(),Pose::A,Pose::O,Pose::F,pose.frame.size());});check(pose.state.tables.groups[0][0].position[0]==999&&get(pose.out,0)==0xcccccccc,"pose failure prefix differs");
+ }
+ std::cout<<"model memory checks passed\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
