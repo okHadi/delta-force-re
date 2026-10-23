@@ -72,6 +72,9 @@ set(DFRE_RUNTIME_MODULES
     mission_audio_cache
     mission_sound_bank
     mission_audio_playback
+    mission_peer_frame
+    mission_peer_budget
+    mission_peer_timers
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
@@ -204,10 +207,20 @@ if(BUILD_TESTING)
     add_executable(native_mission_results_live tests/native_mission_results_live.cpp)
     target_link_libraries(native_mission_results_live PRIVATE dfre_core)
     add_test(NAME native_mission_results_live COMMAND native_mission_results_live)
+    add_executable(native_mission_peer_live tests/native_mission_peer_live.cpp)
+    target_link_libraries(native_mission_peer_live PRIVATE dfre_core)
+    add_test(NAME native_mission_peer_live COMMAND native_mission_peer_live)
     foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
         add_executable(native_${dfre_module} tests/native_${dfre_module}.cpp)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)
         add_test(NAME native_${dfre_module} COMMAND native_${dfre_module})
+    endforeach()
+    foreach(dfre_peer_test native_mission_peer_frame native_mission_peer_budget native_mission_peer_timers)
+        if(MSVC)
+            target_compile_options(${dfre_peer_test} PRIVATE /UNDEBUG)
+        else()
+            target_compile_options(${dfre_peer_test} PRIVATE -UNDEBUG)
+        endif()
     endforeach()
     foreach(dfre_view_test native_world_hits native_mission_geometry native_projectile_hits native_actor_collision native_mission_live native_mission_projectile_stage native_mission_area_live native_mission_player_live native_mission_pickup_live native_mission_projectile_live)
         if(MSVC)

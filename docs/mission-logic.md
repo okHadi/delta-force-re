@@ -26,4 +26,9 @@ Keep result cells `67F714..67F720`, result rows at `67F724 + row*0x24`, and stat
 
 Run `check_mission_logic_results_original.py GAME PROBE --report FILE` for the three original result bodies. The check compares complete packets, client images, result buffers, ordered calls, current names, changes made by providers, and signed division faults. Foreign body providers are explicit fixtures.
 
+Run `native_mission_peer_live` for two single-player frames through the real
+receive, timer, budget, round-clear, and client outbox bodies. This check uses
+shared current cells, inactive client inputs, and an empty peer buffer. Packet
+parsing and timer expiry require their reached handlers.
+
 Source: `Df.exe` SHA-256 `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.

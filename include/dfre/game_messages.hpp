@@ -503,6 +503,15 @@ struct GameMessageLiveBindings {
     std::function<void()> player_update_0a;
 };
 
+// Shared 0x4611C0 producer and 0x460E40 consumer storage.
+struct GameMessagePeerBuffer {
+    std::array<std::uint8_t,kGameMessageFrameCapacity> bytes_8ec1cc{};
+    std::uint32_t count_8ee1cc=0;
+    const std::uint8_t* data() const noexcept { return bytes_8ec1cc.data(); }
+    std::uint8_t* data() noexcept { return bytes_8ec1cc.data(); }
+    std::size_t size() const noexcept { return count_8ee1cc; }
+};
+
 // Whole message bus: queue, frame builder, dispatch and the 0x46F5C0 update.
 class GameMessageStage {
 public:
@@ -557,7 +566,8 @@ public:
 
     // 0x4611C0 flush bookkeeping for the network path: the original appends
     // finished frames to 0x8EC1CC / 0x8EE1CC.
-    const std::vector<std::uint8_t>& network_packet() const noexcept { return network_packet_; }
+    const GameMessagePeerBuffer& network_packet() const noexcept { return network_packet_; }
+    GameMessagePeerBuffer& peer_frame_buffer() noexcept { return network_packet_; }
     // 0x8EA1C8 local echo buffer (filled by the effects queue and the network).
     void submit_local_echo(const std::uint8_t* frame, std::size_t length);
     const std::vector<std::uint8_t>& pending_local_echo() const noexcept { return local_echo_; }
@@ -582,7 +592,7 @@ private:
     std::uint32_t update_counter_ = 0;
     std::uint32_t tick_counter_ = 0;
     std::uint32_t player_update_counter_ = 0;
-    std::vector<std::uint8_t> network_packet_;
+    GameMessagePeerBuffer network_packet_;
     std::vector<std::uint8_t> local_echo_;
     std::vector<std::uint8_t> received_;
     bool received_pending_=false,inspection_=false,dispatching_=false;

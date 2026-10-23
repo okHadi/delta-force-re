@@ -1820,8 +1820,9 @@ void GameMessageStage::flush_frame() {
     if (!frame_.bytes().empty()) {
         if (source_global(0x67f528)) {
             if (network_packet_.size() + frame_.bytes().size() < kGameMessageFrameCapacity) {
-                network_packet_.insert(network_packet_.end(), frame_.bytes().begin(),
-                                       frame_.bytes().end());
+                auto at=network_packet_.count_8ee1cc;
+                for(const auto byte:frame_.bytes())network_packet_.bytes_8ec1cc[at++]=byte;
+                network_packet_.count_8ee1cc=at;
             }
         } else if (host_ != nullptr) {
             host_->send_local_frame(frame_.bytes().data(), frame_.bytes().size());
@@ -1951,7 +1952,7 @@ void GameMessageStage::reset() {
     update_counter_ = 0;
     tick_counter_ = 0;
     player_update_counter_ = 0;
-    network_packet_.clear();
+    network_packet_.count_8ee1cc=0;
     local_echo_.clear();
     received_.clear();received_pending_=false;
     dispatch_.set_single_player(true);
