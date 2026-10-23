@@ -1,6 +1,7 @@
 #include "dfre/projectiles.hpp"
 #include <cstdlib>
 #include <cmath>
+#include <stdexcept>
 namespace dfre {
 namespace {
 std::int32_t rol32(std::uint32_t value, unsigned bits) noexcept {
@@ -406,5 +407,30 @@ void tick_projectile(ProjectileEntity& entity, Fixed3 world_center,
     entity.position = final_position;
     if ((entity.class_flags & 0x40) == 0) entity.velocity.z = wrap_sub(entity.velocity.z,0xB2);
     entity.ttl = wrap_sub(entity.ttl,1);
+}
+namespace {
+bool projectile_modeled_byte(std::size_t at) noexcept {
+    return at<8||(at>=0x10&&at<0x14)||(at>=0x24&&at<0x38)||
+        (at>=0x3c&&at<0x48)||(at>=0x6c&&at<0x70)||(at>=0x7c&&at<0x8c)||(at>=0xf8&&at<0x100);
+}
+std::int32_t projectile_signed(std::uint32_t n) noexcept {return n<=0x7fffffffu?std::int32_t(n):std::int32_t(std::int64_t(n)-0x100000000LL);}
+}
+ProjectileRecordImage snapshot_projectile_record(const ProjectileEntity& p) noexcept {
+    ProjectileRecordImage image;std::size_t residue=0;for(std::size_t at=0;at<image.size();++at)if(!projectile_modeled_byte(at))image[at]=p.reserved_source_bytes[residue++];
+    const auto put=[&](unsigned at,std::uint32_t value){for(unsigned i=0;i<4;++i)image[at+i]=std::uint8_t(value>>(8*i));};
+    put(0,std::uint32_t(p.item_main));put(4,std::uint32_t(p.item_alt));put(0x10,std::uint32_t(p.item_field));
+    put(0x24,std::uint32_t(p.position.x));put(0x28,std::uint32_t(p.position.y));put(0x2c,std::uint32_t(p.position.z));put(0x30,p.aim_yaw);put(0x34,p.aim_pitch);
+    put(0x3c,std::uint32_t(p.velocity.x));put(0x40,std::uint32_t(p.velocity.y));put(0x44,std::uint32_t(p.velocity.z));put(0x6c,p.class_flags);
+    put(0x7c,p.field_7c);put(0x80,p.field_80);put(0x84,p.field_84);put(0x88,p.color);
+    put(0xf8,p.owner_slot==-1?0u:0x7cca80u+std::uint32_t(p.owner_slot)*0x114u);put(0xfc,std::uint32_t(p.ttl));return image;
+}
+void apply_projectile_record(ProjectileEntity& p,const ProjectileRecordImage& image){
+    const auto get=[&](unsigned at){std::uint32_t n=0;for(unsigned i=0;i<4;++i)n|=std::uint32_t(image[at+i])<<(8*i);return n;};
+    const auto owner=get(0xf8);if(owner&&(owner<0x7cca80u||(owner-0x7cca80u)%0x114u))throw std::invalid_argument("Projectile image owner is not a player source address");
+    p.item_main=projectile_signed(get(0));p.item_alt=projectile_signed(get(4));p.item_field=projectile_signed(get(0x10));
+    p.position={projectile_signed(get(0x24)),projectile_signed(get(0x28)),projectile_signed(get(0x2c))};p.aim_yaw=get(0x30);p.aim_pitch=get(0x34);
+    p.velocity={projectile_signed(get(0x3c)),projectile_signed(get(0x40)),projectile_signed(get(0x44))};p.class_flags=get(0x6c);
+    p.field_7c=get(0x7c);p.field_80=get(0x80);p.field_84=get(0x84);p.color=get(0x88);p.owner_slot=owner?std::int32_t((owner-0x7cca80u)/0x114u):-1;p.ttl=projectile_signed(get(0xfc));
+    std::size_t residue=0;for(std::size_t at=0;at<image.size();++at)if(!projectile_modeled_byte(at))p.reserved_source_bytes[residue++]=image[at];
 }
 } // namespace dfre

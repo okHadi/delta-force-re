@@ -79,6 +79,9 @@ set(DFRE_RUNTIME_MODULES
     mission_control_gate
     mission_audio_listener
     mission_peer_parser
+    mission_fragment_spawn
+    mission_explosion_runtime
+    mission_peer_requests
 )
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)

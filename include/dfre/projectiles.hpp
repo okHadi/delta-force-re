@@ -87,8 +87,13 @@ struct ProjectileEntity {
     std::uint32_t color = 0;     // +0x88
     std::int32_t owner_slot = -1; // +0xF8 actor pointer as slot input
     std::int32_t ttl = 0;        // +0xFC
+    std::array<std::uint8_t,204> reserved_source_bytes{}; // Unmodeled source offsets in increasing order.
     bool active() const noexcept { return ttl > 0 && position.z >= -65536; }
 };
+using ProjectileRecordImage=std::array<std::uint8_t,0x114>;
+ProjectileRecordImage snapshot_projectile_record(const ProjectileEntity&) noexcept;
+void apply_projectile_record(ProjectileEntity&,const ProjectileRecordImage&);
+
 struct ClassSpawnFields { // weapon class record inputs
     std::uint32_t speed = 0;     // +0x0C
     std::uint32_t field_10 = 0;  // +0x10
