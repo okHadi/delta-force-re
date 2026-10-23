@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <string>
 #include <vector>
@@ -163,6 +164,9 @@ int main() {
     // Pivot transform is T(-p) x R x T(p); identity when the angles are zero.
     const std::array<std::int32_t, 3> pivot{0x1000, 0x2000, 0x3000};
     const dfre::ModelMatrix identity = dfre::model_special_pivot_matrix(pivot, {0, 0, 0});
+    const auto minimum = std::numeric_limits<std::int32_t>::min();
+    if (!require(dfre::model_special_pivot_matrix({minimum, minimum, minimum}, {0, 0, 0}) == identity,
+                 "Minimum signed pivot must retain the identity transform")) return 1;
     const dfre::ModelMatrix want_identity = dfre::model_identity_matrix();
     if (!require(identity == want_identity,
                  "Zero angles must produce the identity pivot.")) return 1;

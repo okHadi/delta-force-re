@@ -328,6 +328,11 @@ std::uint32_t mission_steady(const MissionTickState& state);
 // uses WeaponState burst storage and does not bind the full player prefix.
 void mission_weapon_part(MissionTickState& state,bool trigger_held_fixture);
 
+// Execute477D40 and its effects synchronously with the current input table.
+// Reuse an active frame report; outside a frame, keep trace storage local.
+void mission_dispatch_command(MissionTickState&,std::uint32_t id,std::int32_t value,
+                              const CommandTable&);
+
 // Join the lifecycle to the command, weapon and actor stages. Bind the other
 // reached addresses through world.external_stage before running the game.
 MissionTickReport mission_tick(MissionTickState& state, const MissionTickInputs& inputs);

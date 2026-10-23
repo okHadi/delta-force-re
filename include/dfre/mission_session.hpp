@@ -9,6 +9,7 @@
 #include "dfre/mission_actor_insert_live.hpp"
 #include "dfre/events.hpp"
 #include "dfre/terrain.hpp"
+#include "dfre/mission_logic.hpp"
 #include <memory>
 
 namespace dfre {
@@ -57,7 +58,9 @@ public:
     void uninstall() noexcept;
     bool installed() const noexcept;
     MissionTickReport step();
+    std::optional<std::uint32_t> hud_service(std::uint32_t site,const std::vector<std::uint32_t>& args);
     void script_message(std::uint32_t id,const std::uint8_t* bytes,std::size_t length);
+    void request_result(std::uint32_t mode,MissionLogicResultPacket& caller_packet);
     std::uint32_t camera_yaw() const;
     // Route these owned cells before the sound memory fallback. Construction
     // captures initial source values before the host installs that routing.

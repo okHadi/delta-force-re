@@ -103,15 +103,30 @@ Matrix4& MissionMuzzle::animated_slot(std::uint32_t graphic,const AiActorImage& 
 }
 bool MissionMuzzle::animated(ProjectileHitActor actor,
     const std::function<void(ProjectileHitActor,const MuzzleResult&)>& shot) {
+    return animated_body(actor,shot,nullptr);
+}
+bool MissionMuzzle::animated(ProjectileHitActor actor,
+    const std::function<void(ProjectileHitActor,const MuzzleResult&)>& shot,
+    const std::function<void(ProjectileHitActor)>& after_graphic) {
+    return animated_body(actor,shot,&after_graphic);
+}
+bool MissionMuzzle::animated_body(ProjectileHitActor actor,
+    const std::function<void(ProjectileHitActor,const MuzzleResult&)>& shot,
+    const std::function<void(ProjectileHitActor)>* after_graphic) {
     ProjectileMuzzleBindings bindings;
     bindings.weapon=[this](std::uint32_t index) {
         const auto& binding=weapon(index);
         return ProjectileMuzzleWeapon{resources_.definitions[binding.secondary_definition].model,
             std::uint32_t(weapon_definitions()[index].aim_field)};
     };
-    bindings.slot_seven=[this](std::uint32_t graphic,ProjectileHitActor actor)->Matrix4& {
+    bindings.slot_seven=[this,after_graphic](std::uint32_t graphic,ProjectileHitActor actor)->Matrix4& {
         if(!actor.image)throw std::invalid_argument("Animated muzzle needs an actor image");
-        return animated_slot(graphic,*actor.image);
+        auto& matrix=animated_slot(graphic,*actor.image);
+        if(after_graphic){
+            if(!*after_graphic)throw std::invalid_argument("Animated muzzle needs a current-image provider");
+            (*after_graphic)(actor);
+        }
+        return matrix;
     };
     bindings.hardpoint=[this](auto handle,auto index){return hardpoint(handle,index);};
     bindings.attachment=attachment_;bindings.shot=shot;

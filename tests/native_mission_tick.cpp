@@ -18,6 +18,34 @@ void seed(MissionTickState& state,bool paused=false){
 }
 int main(){
     {
+        MissionTickState immediate,queued;seed(immediate,true);seed(queued,true);CommandTable commands;
+        for(auto* state:{&immediate,&queued}){state->config.local_actor=0;state->tables.groups[3].resize(1);state->tables.groups[3][0].angle_yaw=100;state->tables.groups[3][0].angle_pitch=200;state->dispatch_actor.look_yaw_30=999;}
+        mission_dispatch_command(immediate,0x9d,17,commands);
+        MissionTickInputs input;input.commands={{0x9d,17}};input.dispatch_command=[&](auto id,auto value){return dispatch_game_command(id,value,queued.globals,queued.dispatch_actor,commands);};mission_tick(queued,input);
+        CHECK(immediate.tables.groups[3][0].angle_yaw==117&&queued.tables.groups[3][0].angle_yaw==117);
+        CHECK(immediate.tables.groups[3][0].angle_pitch==200&&immediate.current_report==nullptr);
+        unsigned calls=0;immediate.world.dispatch_effect=[&](auto& state,const auto& call)->std::optional<std::uint32_t>{CHECK(call.address==0x4604c0);CHECK(state.dispatch_actor.look_yaw_30==117);state.tables.groups[3][0].angle_yaw=800;++calls;return 0;};
+        mission_dispatch_command(immediate,0x21,0,commands);mission_dispatch_command(immediate,0x9d,7,commands);CHECK(calls==1&&immediate.tables.groups[3][0].angle_yaw==807);
+        immediate.world.dispatch_effect={};bool failed=false;try{mission_dispatch_command(immediate,0x21,0,commands);}catch(const MissionTickError&){failed=true;}CHECK(failed&&immediate.current_report==nullptr);
+    }
+    {
+        MissionTickState state;seed(state,true);CommandTable commands;state.config.local_actor=0;state.tables.groups[3].resize(1);state.tables.groups[3][0].angle_yaw=11;
+        std::array<std::uint8_t,kWeaponSlotCount> slots{};slots.fill(4);state.weapons.set_slot_map(slots);state.weapons.resupply(false);
+        unsigned prior=0,prior_query=0,shots=0;state.weapons.on_event=[&](const auto&){++prior;};state.weapons.trigger_query=[&]{++prior_query;return true;};MissionTickReport outer;state.current_report=&outer;
+        state.world.weapon_effect=[&](auto& current,const WeaponEvent& event){CHECK(current.current_report==&outer);if(event.kind==WeaponEventKind::shot){++shots;mission_dispatch_command(current,0x9d,5,commands);}return true;};
+        mission_dispatch_command(state,0x8c,0,commands);CHECK(shots==1&&prior==0&&state.current_report==&outer&&state.tables.groups[3][0].angle_yaw==16);
+        unsigned observations=0;for(const auto& entry:outer.trace)if(entry.kind==MissionTraceKind::weapon_event&&entry.address==std::uint32_t(WeaponEventKind::shot))++observations;CHECK(observations==1);
+        state.weapons.on_event({WeaponEventKind::sound,0});CHECK(prior==1);CHECK(state.weapons.trigger_query()&&prior_query==1);
+        state.world.dispatch_effect=[](auto&,const auto&)->std::optional<std::uint32_t>{throw MissionTickError("required immediate failure");};bool failed=false;try{mission_dispatch_command(state,0x21,0,commands);}catch(const MissionTickError&){failed=true;}CHECK(failed&&state.current_report==&outer);
+        state.weapons.on_event({WeaponEventKind::sound,0});CHECK(prior==2);CHECK(state.weapons.trigger_query()&&prior_query==2);state.current_report=nullptr;
+    }
+    {
+        MissionTickState state;seed(state,true);CommandTable commands;state.config.local_actor=0;state.tables.groups[3].resize(1);state.tables.groups[3][0].angle_yaw=40;
+        const auto prior=state.world.external_stage;bool immediate=false,queued=false;
+        state.world.external_stage=[&](auto& current,const auto& call)->std::optional<std::uint32_t>{if(call.address==0x479750){CHECK(current.current_report);mission_dispatch_command(current,0x9d,2,commands);immediate=true;return 0;}return prior(current,call);};
+        MissionTickInputs input;input.commands={{0x9d,3}};input.dispatch_command=[&](auto id,auto value){CHECK(immediate&&state.dispatch_actor.look_yaw_30==42);queued=true;return dispatch_game_command(id,value,state.globals,state.dispatch_actor,commands);};mission_tick(state,input);CHECK(queued&&state.tables.groups[3][0].angle_yaw==45&&state.current_report==nullptr);
+    }
+    {
         MissionTickState state;seed(state,true);
         state.weapons.set_slot_map({0,0,0,1,2,0,0,0,0,0});state.weapons.resupply(false);state.weapons.select_slot(3);
         auto bridge=InputBridge::with_shipped_profile();InputSourceFlags flags;flags.live_input=true;

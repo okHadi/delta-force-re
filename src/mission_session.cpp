@@ -38,9 +38,17 @@
 #include "dfre/mission_terrain_mark.hpp"
 #include "dfre/mission_actor_insert_live.hpp"
 #include "dfre/game_messages.hpp"
+#include "dfre/mission_scoreboard.hpp"
+#include "dfre/mission_periodic_services.hpp"
+#include "dfre/mission_ai_shot.hpp"
+#include "dfre/mission_result_live.hpp"
+#include "dfre/mission_hud_message.hpp"
+#include "dfre/mission_object_helo.hpp"
+#include "dfre/mission_object_mine_move.hpp"
 #include "dfre/mission_logic.hpp"
 #include "dfre/mission_client_outbox.hpp"
 #include "dfre/mission_peer_frame.hpp"
+#include "dfre/mission_peer_parser.hpp"
 #include "dfre/mission_peer_timers.hpp"
 #include "dfre/mission_peer_budget.hpp"
 #include "dfre/mission_round_services.hpp"
@@ -69,7 +77,9 @@ struct SessionEventHost : dfre::EventHost {
     std::function<bool()> rule_bit1;
     bool world_67f549_bit1() override{return rule_bit1();}
     std::function<void(std::uint32_t,std::uint32_t)> orders;
-    std::function<void(std::uint32_t)> flags,remove,script;
+    std::function<void(std::uint32_t)> flags,remove,script,result,text;
+    void action_404dd0(std::uint32_t id) override{need(text,"Mission triggered text is not bound")(id);}
+    void action_444ca0(std::uint32_t mode) override{need(result,"Mission result host is not bound")(mode);}
     std::function<void(std::size_t)> person_edit;
     void action_4601a0(std::size_t index) override{person_edit(index);}
     void action_43f500(std::uint32_t id) override{script(id);}
@@ -87,8 +97,9 @@ struct MissionSession::Impl {
     MissionTickWorld prior_world; bool active=false;
     std::map<U,MissionTickState::ActorCallback> prior_updates,prior_secondary;
     inline static constexpr std::array<U,8> update_ids{0x429bc0,0x4519a0,0x4534a0,0x45c3a0,0x45c340,0x453810,0x4533f0,0x453930};
-    inline static constexpr std::array<U,2> secondary_ids{0x429ea0,0x451cb0};
-    std::array<bool,8> installed_updates{};std::array<bool,2> installed_secondary{};
+    inline static constexpr std::array<U,4> secondary_ids{0x429ea0,0x451cb0,0x451590,0x451dd0};
+    std::array<bool,update_ids.size()> installed_updates{};
+    std::array<bool,secondary_ids.size()> installed_secondary{};
     MissionGeometryMatrixSource matrices;
     MissionPlayerCells player_cells; CrtRandomBindings crt;
     std::unique_ptr<MissionPlayerLive> player;
@@ -108,16 +119,22 @@ struct MissionSession::Impl {
     MissionEventActorOrderBindings order_binding;
     ProjectileDamageState shared_damage;
     MissionObjectLiveBindings object;MissionObjectTargetBindings target_binding;
+    MissionObjectHeloBindings helo;
+    std::unique_ptr<MissionAiShot> ai_shot;
     std::function<U(std::size_t,U,unsigned)> client_read;
     std::function<void(std::size_t,U,unsigned,U)> client_store;
     std::function<U(U)> cell;std::function<void(U,U)> cell_store;
     std::function<U(U,unsigned)> shared_read;std::function<void(U,unsigned,U)> shared_store;
     MissionServerMessageBuffer server;std::unique_ptr<MissionClientOutbox> outbox;
     std::unique_ptr<MissionActorLifecycle> lifecycle;MissionEventActorFlagBindings flag_bindings;
+    MissionPeerParserBindings parser;
     MissionPeerFrameBindings peer;MissionPeerTimerBindings peer_timers;
     MissionPeerBudgetBindings budget;MissionRoundServiceBindings round;
     MissionRoundCheckBindings round_checks;MissionActorMessageBindings actor_message;
     MissionLogicFrameBindings logic;
+    MissionLogicResultBindings result_bindings;
+    MissionLogicResultPacket result_caller_packet{};
+    std::array<std::uint8_t,0x514> result_image{};
     MissionBehaviorZones zone_owner;MissionBehaviorZoneBindings zone_binding;
     MissionProjectileSpawnCells spawn_cells;std::unique_ptr<MissionProjectileSpawn> spawn;
     std::array<U,900> shot_ledger{};MissionPeerRequestBindings shots;
@@ -130,11 +147,96 @@ struct MissionSession::Impl {
     std::vector<AssetBytes> height_bounds;std::array<AiActorImage,256> group3_tail{};
     MissionObjectSightBindings sight_bindings;
     MissionTickInputs input;
+    std::array<std::uint8_t,0x1360> hud_history{};
+    U hud_counter_bd4810=0;
+    std::array<std::uint8_t,32> hud_frame{};
+    static constexpr U hud_frame_address=0x1b002000;
+    bool hud_frame_active=false,hud_input_initialized=false;
+    MissionHudMessageBindings hud;
+    void triggered_text(U id){
+        if(hud_frame_active)throw MissionTickError("Triggered text caller frame is already active");
+        hud_frame_active=true;struct Scope{bool& active;~Scope(){active=false;}} scope{hud_frame_active};
+        mission_hud_triggered_text(hud,id,hud_frame_address);
+    }
+    std::optional<U> hud_service(U site,const std::vector<U>& args){
+        if(site!=0x479f00&&site!=0x479e90&&site!=0x404d80&&site!=0x404dd0&&!(site==0x493a80&&args.size()>1&&args[1]==0x4c82fc))return {};
+        if(!active||!hud.read)throw MissionTickError("HUD service requires an installed session");
+        if(site==0x479f00){const MissionHudMessageCall call{args.at(0),args.at(1)};mission_hud_message(hud,call);return 0;}
+        if(site==0x479e90){mission_hud_message_clear(hud);return 0;}
+        if(site==0x404d80)return mission_hud_triggered_lookup(hud,args.at(0),args.at(1));
+        if(site==0x404dd0){triggered_text(args.at(0));return 0;}
+        return mission_hud_message_format_id(hud,args.at(0),args.at(1),args.at(2));
+    }
+
+    static constexpr U scoreboard_base=0xbcf664,score_frame=0x1b000200,score_packet=0x1b000300;
+    std::array<std::uint8_t,0x5b0> scoreboard{};
+    bool receiving_scoreboard=false;
+    std::array<std::uint8_t,64*0x68> squads{};
+    static constexpr U periodic_source=0x1b001000;
+    std::array<std::uint8_t,0x500> periodic_frame{};
+    MissionPeriodicBindings periodic;
+    bool running_periodic=false;
+    void run_periodic(U site){
+        if(running_periodic)throw MissionTickError("Periodic frame is already active");
+        running_periodic=true;struct Scope{bool& active;~Scope(){active=false;}} scope{running_periodic};
+        if(site==0x4438c0)mission_periodic_scoreboard(periodic,periodic_source);
+        else if(site==0x448c30)mission_periodic_poll_clients(periodic);
+        else if(site==0x445c80)mission_periodic_clear_actor_flags(periodic);
+        else if(site==0x446200)mission_periodic_advertise(periodic,periodic_source);
+        else if(site==0x4482e0)mission_periodic_publish_flag(periodic,periodic_source);
+        else throw MissionTickError("Unknown periodic source body");
+    }
+
+    void receive_scoreboard(const std::uint8_t* packet,std::size_t length){
+        if(receiving_scoreboard||!packet||length!=0x8f)throw MissionTickError("Scoreboard receive scope is invalid");
+        receiving_scoreboard=true;struct Scope{bool& active;~Scope(){active=false;}} scope{receiving_scoreboard};
+        std::array<std::uint8_t,0x70> locals{};
+        const auto store_local=[&](U at,U width,U value){for(U i=0;i<width;++i)locals.at(at-score_frame+i)=std::uint8_t(value>>(i*8));};
+        store_local(score_frame+0x44,4,score_packet);
+        MissionScoreboardBindings b;
+        b.read=[&](U at,U width){
+            const auto bytes=[&](const auto& image,std::size_t offset){U n=0;for(U i=0;i<width;++i)n|=U(image.at(offset+i))<<(i*8);return n;};
+            if(at>=score_frame&&std::uint64_t(at-score_frame)+width<=locals.size())return bytes(locals,at-score_frame);
+            if(at>=score_packet&&std::uint64_t(at-score_packet)+width<=length){U n=0;for(U i=0;i<width;++i)n|=U(packet[at-score_packet+i])<<(i*8);return n;}
+            if(at>=score_packet&&at<score_packet+0x100)throw MissionTickError("Scoreboard payload read exceeds its current frame");
+            if(at>=0x7cca80&&std::uint64_t(at)+width<=0x7dde80){
+                const auto slot=(at-0x7cca80)/0x114,offset=(at-0x7cca80)%0x114;
+                if(offset+width>0x114)throw MissionTickError("Scoreboard actor read crosses its source record");
+                auto image=slot<c.state.tables.groups[3].size()?snapshot_mission_actor(c.state,{3,slot}):group3_tail.at(slot);
+                if(slot<c.state.tables.groups[3].size()){
+                    const auto person=c.state.tables.groups[3][slot].person_slot;
+                    const U physical=person?0x794680+U(*person)*0xb4:0;
+                    std::memcpy(image.data()+0x0c,&physical,4);
+                }
+                return bytes(image,offset);
+            }
+            if(at>=0x794680&&std::uint64_t(at)+width<=0x7cca80){
+                const auto slot=(at-0x794680)/0xb4,offset=(at-0x794680)%0xb4;
+                if(offset+width>0xb4||slot>=c.state.people.size())throw MissionTickError("Scoreboard person read has no current owner");
+                return bytes(ai_person_image(c.state.people[slot]),offset);
+            }
+            return c.sound.asset_bindings().read(at,width);
+        };
+        b.write=[&](U at,U width,U value){
+            if(at>=score_frame&&std::uint64_t(at-score_frame)+width<=locals.size()){store_local(at,width,value);return;}
+            c.sound.asset_bindings().write(at,width,value);
+        };
+        b.call=[&](U site,const auto& args){return c.sound.asset_bindings().call(site,args);};
+        mission_scoreboard_receive(b,score_frame);
+    }
 
     explicit Impl(MissionSessionContext context,MissionSessionHost host):c(context),h(std::move(host)),camera{c.camera_position_6ba3d0,{},0,0}{
         const auto& memory=c.sound.asset_bindings();
+        for(std::size_t i=0;i<hud_history.size();++i)hud_history[i]=std::uint8_t(memory.read(0xbd34b0+U(i),1));
+        hud_counter_bd4810=memory.read(0xbd4810,4);cells.emplace(0x67db54,memory.read(0x67db54,4));
+        for(std::size_t i=0;i<result_image.size();++i)result_image[i]=std::uint8_t(memory.read(0x67f714+U(i),1));
+        for(U at=0x6e576c;at<=0x6e5774;at+=4)cells.emplace(at,memory.read(at,4));
+        for(std::size_t i=0;i<squads.size();++i)squads[i]=std::uint8_t(memory.read(0x6e8090+U(i),1));
+        for(U at=0x8e61b4;at<=0x8e61bc;at+=4)cells.emplace(at,memory.read(at,4));
+        cells.emplace(0x67f524,memory.read(0x67f524,4));
+        for(std::size_t i=0;i<scoreboard.size();++i)scoreboard[i]=std::uint8_t(memory.read(scoreboard_base+U(i),1));
         for(U at=0x6e4730;at<=0x6e475c;at+=4)cells.emplace(at,memory.read(at,4));
-        for(U at=0x6e5570;at<=0x6e558c;at+=4)cells.emplace(at,memory.read(at,4));
+        for(U at=0x6e5570;at<0x6e558c;at+=4)cells.emplace(at,memory.read(at,4));
         for(U at=0x6e5778;at<=0x6e5880;at+=4)cells.emplace(at,memory.read(at,4));
         for(const U at:{0x50133cu,0x501340u,0x50321cu})cells.emplace(at,memory.read(at,4));
         for(const U at:{0x6e4708u,0x6e4704u,0x6e4700u,0x6e06b8u})listener_extra.emplace(at,memory.read(at,4));
@@ -152,6 +254,28 @@ struct MissionSession::Impl {
     }
     std::uint8_t* source_byte(U at){
         const auto field=[at](U base,auto& value)->std::uint8_t*{if(at<base||std::uint64_t(at-base)>=sizeof(value))return nullptr;return reinterpret_cast<std::uint8_t*>(&value)+(at-base);};
+        if(auto* p=field(0x8ec1cc,messages.peer_frame_buffer().bytes_8ec1cc))return p;
+        if(auto* p=field(0x8ee1cc,messages.peer_frame_buffer().count_8ee1cc))return p;
+        if(auto* p=field(0x67f538,c.state.send_interval_67f538))return p;
+        if(auto* p=field(0x67f714,result_image))return p;
+        if(auto* p=field(0x67dbc0,c.state.globals.menu_flag_67dbc0))return p;
+        if(auto* p=field(0x503428,c.state.globals.toggle_503428))return p;
+        if(auto* p=field(0x67dbec,event_stage.flags_67dbec()))return p;
+        if(auto* p=field(0xbd34b0,hud_history))return p;
+        if(auto* p=field(0xbd4810,hud_counter_bd4810))return p;
+        if(hud_frame_active)if(auto* p=field(hud_frame_address,hud_frame))return p;
+        if(auto* p=field(0x67dbc9,c.state.globals.flags_67dbc9))return p;
+        if(auto* p=field(scoreboard_base,scoreboard))return p;
+        if(auto* p=field(0x6e8090,squads))return p;
+        if(auto* p=field(0x67f520,c.state.globals.multiplayer_67f520))return p;
+        if(auto* p=field(0x67f528,c.state.globals.mission_67f528))return p;
+        if(auto* p=field(0x67f52c,c.state.globals.mission2_67f52c))return p;
+        if(auto* p=field(0x67f548,c.rules_67f548))return p;
+        if(auto* p=field(0x67f53c,c.state.game_type_67f53c))return p;
+        if(auto* p=field(0x67dbe8,c.state.mission_timer_67dbe8))return p;
+        if(auto* p=field(0x6e558c,c.state.globals.toggle_6e558c))return p;
+        if(auto* p=field(0x6e5590,c.state.globals.toggle_6e5590))return p;
+        if(auto* p=field(0x6e5594,c.state.globals.toggle_6e5594))return p;
         for(auto& entry:cells)if(auto* p=field(entry.first,entry.second))return p;
         for(auto& entry:listener_extra)if(auto* p=field(entry.first,entry.second))return p;
         if(auto* p=field(0x6e4760,shot_ledger))return p;
@@ -182,6 +306,16 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         bind_mission_linked_position(state);bind_mission_animations(state,animations);bind_mission_geometry(state,geometry,matrices);bind_mission_actor_collision(state,geometry,{},matrices);
         state.world.terrain=&terrain.geometry;state.world.water_level=terrain.water_height;
 
+        hud.read=[this](U at,U width){if(claims(at,width)){U value=0;for(U i=0;i<width;++i)value|=U(*source_byte(at+i))<<(8*i);return value;}return c.sound.asset_bindings().read(at,width);};
+        hud.write=[this](U at,U width,U value){if(std::uint64_t(at)<std::uint64_t(color_base)+c.terrain.color.pixels.size()&&std::uint64_t(at)+width>color_base)throw MissionTickError("Mission terrain color bytes are read only");if(claims(at,width)){for(U i=0;i<width;++i)*source_byte(at+i)=std::uint8_t(value>>(8*i));return;}c.sound.asset_bindings().write(at,width,value);};
+        hud.call=[this](U site,const std::vector<U>& args)->U{
+            if(site==0x49a620){for(U i=0;i<args.at(2);++i)hud.write(args.at(0)+i,1,args.at(1)&255u);return args.at(0);}
+            if(site==0x404d80)return mission_hud_triggered_lookup(hud,args.at(0),args.at(1));
+            if(site==0x493a80&&args.at(1)==0x4c82fc)return mission_hud_message_format_id(hud,args.at(0),args.at(1),args.at(2));
+            if(site==0x479f00){const MissionHudMessageCall call{args.at(0),args.at(1)};mission_hud_message(hud,call);return 0;}
+            return c.sound.asset_bindings().call(site,args);
+        };
+        event_host.text=[this](U id){triggered_text(id);};
         state.world.trigger_held_47a290=[this](auto row){return c.input.query_active(row);};
     player_cells.camera_mode_6ba3ec=need(h.camera_mode_6ba3ec,"Camera mode provider is not bound")();
 
@@ -281,17 +415,19 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     client_store=[&](std::size_t slot,std::uint32_t at,unsigned width,std::uint32_t value){clients.write(MissionClientLive::source_address(slot,at),width,value);};
     client_read=[&](std::size_t slot,std::uint32_t at,unsigned width){return clients.read(MissionClientLive::source_address(slot,at),width);};
     cell=[&](std::uint32_t at){
+        if(claims(at,4))return c.sound.asset_bindings().read(at,4);
         if(at==0x67f520)return state.globals.multiplayer_67f520;if(at==0x67f528)return state.globals.mission_67f528;
         if(at==0x67f53c)return state.game_type_67f53c;if(at==0x67dbe8)return state.mission_timer_67dbe8;
         if(at==0x8cfa1c)return std::uint32_t(state.tables.groups[0].size());if(at==0x8cfa18)return std::uint32_t(state.tables.groups[3].size());
         const auto found=cells.find(at);if(found==cells.end())throw MissionTickError("Logic cell has no owner "+std::to_string(at));return found->second;};
-    cell_store=[&](std::uint32_t at,std::uint32_t n){const auto found=cells.find(at);if(found==cells.end())throw MissionTickError("Logic store has no owner "+std::to_string(at));found->second=n;};
+    cell_store=[&](std::uint32_t at,std::uint32_t n){if(claims(at,4)){c.sound.asset_bindings().write(at,4,n);return;}const auto found=cells.find(at);if(found==cells.end())throw MissionTickError("Logic store has no owner "+std::to_string(at));found->second=n;};
     shared_read=[&](std::uint32_t at,unsigned width){
+        if(claims(at,width))return c.sound.asset_bindings().read(at,width);
         if(at>=0x6e9a90&&std::uint64_t(at)<0x6e9a90+17ull*mission_client_record_size){const auto key=at-0x6e9a90;return client_read(key/mission_client_record_size,key%mission_client_record_size,width);}
         for(std::uint8_t group=0;group<4;++group){const auto base=mission_actor_source_address(group,0);
             if(at>=base && std::uint64_t(at-base)<state.tables.groups[group].size()*0x114ull){const auto key=at-base;const auto image=snapshot_mission_actor(state,{group,key/0x114});std::uint32_t value=0;for(unsigned i=0;i<width;++i)value|=std::uint32_t(image.at(key%0x114+i))<<(8*i);return value;}}
         if(width!=4)throw MissionTickError("Logic scalar width is not four");return cell(at);};
-    shared_store=[&](std::uint32_t at,unsigned width,std::uint32_t n){if(width!=4)throw MissionTickError("Logic store width is not four");cell_store(at,n);};
+    shared_store=[&](std::uint32_t at,unsigned width,std::uint32_t n){if(claims(at,width)){c.sound.asset_bindings().write(at,width,n);return;}if(width!=4)throw MissionTickError("Logic store width is not four");cell_store(at,n);};
     MissionClientOutboxBindings outbox_bindings;
     outbox_bindings.client=[&](auto slot){return clients.client(slot);};outbox_bindings.cell=cell;
     outbox=std::make_unique<MissionClientOutbox>(messages,server,outbox_bindings);
@@ -309,25 +445,57 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     MissionRoundCheckBindings round_host;round_host.read=[&](auto at,auto width){if(at==0x6e5884&&width==1)return std::uint32_t(status_6e5884);return shared_read(at,width);};
     round_host.write=[&](auto at,auto width,auto value){if(at>=0x6e9a90&&std::uint64_t(at-0x6e9a90)+width<=17ull*mission_client_record_size){const auto delta=at-0x6e9a90;client_store(delta/mission_client_record_size,delta%mission_client_record_size,width,value);return;}shared_store(at,width,value);};
     round_host.enqueue_441750=[&](auto slot,auto type,auto* payload,auto length){outbox->enqueue(slot,std::int32_t(type),payload,length);};
-    round_host.call=[&](auto site,const auto& args)->std::uint32_t{if(site==0x477620)return query_isqrt_477620(args.at(0));if(site==0x4423f0){std::uint8_t payload=std::uint8_t(args.at(1));mission_round_broadcast(round_checks,args.at(0),&payload,args.at(2));return 0;}throw MissionTickError("Periodic nested body is not bound "+std::to_string(site));};
+    round_host.call=[&](auto site,const auto& args)->std::uint32_t{if(site==0x444ca0){mission_logic_request_result(result_bindings,args.at(0),result_caller_packet);return 0;}if(site==0x477620)return query_isqrt_477620(args.at(0));if(site==0x4423f0){std::uint8_t payload=std::uint8_t(args.at(1));mission_round_broadcast(round_checks,args.at(0),&payload,args.at(2));return 0;}throw MissionTickError("Periodic nested body is not bound "+std::to_string(site));};
     round_checks=mission_round_check_bindings(state,round_host);
 
     actor_message.broadcast=[&](auto type,auto& payload){mission_round_broadcast(round_checks,type,payload.data(),payload.size());};
     actor_message.read=[&](auto at,auto width){if(width!=4)throw MissionTickError("Actor phrase width is invalid");for(std::uint8_t group=0;group<4;++group){const auto base=mission_actor_source_address(group,0);if(at<base)continue;const auto delta=at-base,slot=delta/0x114,offset=delta%0x114;if(slot>=state.tables.groups[group].size()||offset+width>0x114)continue;const auto image=snapshot_mission_actor(state,{group,slot});std::uint32_t value;std::memcpy(&value,image.data()+offset,4);return offset==4?(value?definition_base+value*0x13cu:0u):value;}if(mission_extra_actor_record_base(at,width))return c.extra_memory.read(at,width);if(at>=definition_base&&std::uint64_t(at-definition_base)+width<=initial.definitions.size()*sizeof(RuntimeItemDefinition))return sound.asset_bindings().read(at,width);return sound.asset_bindings().read(at,width);};
     actor_message.positional=[&](auto id,Fixed3 position){sound.positional(id,position);};
-    message_bindings.call=[&](const auto& call){if(call.address==0x43f5a0&&call.array==GameRecordArray::players_7cca80&&call.index>=0&&call.count==1){mission_actor_message_receive(actor_message,mission_actor_source_address(3,std::uint32_t(call.index)),call.args[0]);return;}throw MissionTickError("Message live call has no owner "+std::to_string(call.address));};messages.set_live_bindings(message_bindings);
+    message_bindings.message=[this](auto id,const auto* packet,auto length){if(id!=0x15)return false;receive_scoreboard(packet,length);return true;};
+    message_bindings.call=[&](const auto& call){if(call.address==0x471010){mission_logic_receive_result(result_bindings,call.payload,call.length);return;}if(call.address==0x43f5a0&&call.array==GameRecordArray::players_7cca80&&call.index>=0&&call.count==1){mission_actor_message_receive(actor_message,mission_actor_source_address(3,std::uint32_t(call.index)),call.args[0]);return;}throw MissionTickError("Message live call has no owner "+std::to_string(call.address));};messages.set_live_bindings(message_bindings);
+    periodic.read=[&](U at,U width){
+        if(at>=periodic_source&&std::uint64_t(at-periodic_source)+width<=periodic_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(periodic_frame.at(at-periodic_source+i))<<(i*8);return n;}
+        if(at==0x8cfa18&&width==4)return U(state.tables.groups[3].size());
+        if(at==0x8cfa1c&&width==4)return U(state.tables.groups[0].size());
+        for(std::uint8_t group=0;group<4;++group){const auto base=mission_actor_source_address(group,0);if(at<base+4)continue;const auto offset=at-base;if(offset%0x114!=4||width!=4)continue;const auto slot=offset/0x114;if(slot>=state.tables.groups[group].size())continue;const auto image=snapshot_mission_actor(state,{group,slot});U index;std::memcpy(&index,image.data()+4,4);return index?definition_base+index*0x13c:0u;}
+        return c.sound.asset_bindings().read(at,width);
+    };
+    periodic.write=[&](U at,U width,U value){if(at>=periodic_source&&std::uint64_t(at-periodic_source)+width<=periodic_frame.size()){for(U i=0;i<width;++i)periodic_frame.at(at-periodic_source+i)=std::uint8_t(value>>(i*8));return;}c.sound.asset_bindings().write(at,width,value);};
+    periodic.call=[&](U site,const auto& args)->U{
+        if(site==0x446da0){mission_periodic_team_scores(periodic);return 0;}
+        if(site==0x448130)return U(mission_periodic_compare_clients(periodic,args.at(0),args.at(1)));
+        if(site==0x49a620){for(U i=0;i<args.at(2);++i)periodic.write(args.at(0)+i,1,args.at(1)&255);return args.at(0);}
+        if(site==0x4423f0||site==0x441750){
+            const auto pointer=args.at(site==0x4423f0?1:2),length=args.at(site==0x4423f0?2:3);
+            std::uint8_t* payload=nullptr;
+            if(length){if(pointer<periodic_source||std::uint64_t(pointer-periodic_source)+length>periodic_frame.size())throw MissionTickError("Periodic payload has no current owner");payload=periodic_frame.data()+pointer-periodic_source;}
+            if(site==0x4423f0)mission_round_broadcast(round_checks,args.at(0),payload,length);
+            else{const U client=args.at(0);if(client<mission_client_source_base||(client-mission_client_source_base)%mission_client_record_size)throw MissionTickError("Periodic client pointer is invalid");const auto slot=(client-mission_client_source_base)/mission_client_record_size;if(slot>=17)throw MissionTickError("Periodic client index exceeds its pool");outbox->enqueue(slot,std::int32_t(args.at(1)),payload,length);}
+            return 0;
+        }
+        if(site==0x404cf0)return c.sound.asset_bindings().call(site,args);
+        throw MissionTickError("Periodic required body is not bound "+std::to_string(site));
+    };
+    parser.read=[&](auto at,auto width){return periodic.read(at,width);};
+    parser.write=[&](auto at,auto width,auto value){periodic.write(at,width,value);};
+    parser.resolve=[this](U at,std::size_t length){auto& bytes=messages.peer_frame_buffer().bytes_8ec1cc;if(at<0x8ec1cc||std::uint64_t(at-0x8ec1cc)+length>bytes.size())throw MissionTickError("Peer parser source span has no current owner");return bytes.data()+at-0x8ec1cc;};
+    parser.client=[&](auto slot){return clients.client(slot);};
+    parser.call=[](const auto& call)->U{throw MissionTickError("Peer parser required body is not bound "+std::to_string(call.address));};
     logic.cell=cell;logic.store=cell_store;logic.client=client_read;logic.client_store=client_store;
     logic.actor=[&](auto group,auto slot,auto at,auto width){const auto image=snapshot_mission_actor(state,{std::uint8_t(group),slot});std::uint32_t n=0;for(unsigned i=0;i<width;++i)n|=std::uint32_t(image.at(at+i))<<(8*i);return n;};
     logic.actor_byte_store=[&](auto group,auto slot,auto at,auto n){auto image=snapshot_mission_actor(state,{std::uint8_t(group),slot});image.at(at)=n;apply_mission_actor_image(state,{std::uint8_t(group),slot},image);};
     logic.client_actor_flags=[&](auto slot)->std::optional<std::uint8_t>{const auto raw=client_read(slot,8,4);if(!raw)return std::nullopt;for(std::size_t index=0;index<state.tables.groups[3].size();++index)if(mission_actor_source_address(3,index)==raw)return snapshot_mission_actor(state,{3,index})[0x6c];throw MissionTickError("Client actor has no current physical owner");};
     logic.send=[&](auto id,const auto& packet){outbox->broadcast(std::int32_t(id),packet.data(),std::uint32_t(packet.size()));};
-    logic.call=[&](auto site,const auto&)->std::uint32_t{
+    logic.call=[&](auto site,const auto& args)->std::uint32_t{
+        if(site==0x444ca0){mission_logic_request_result(result_bindings,args.at(0),result_caller_packet);return 0;}
+        if(site==0x4438c0||site==0x448c30||site==0x445c80||site==0x446200||site==0x4482e0){run_periodic(site);return 0;}
         if(site==0x444630){mission_round_check_end(round_checks);return 0;}
         if(site==0x448590){mission_round_check_clients(round_checks);return 0;}
         if(site==0x447930){mission_round_publish_status(round_checks);return 0;}
         if(site==0x44a200){mission_type_counts(mission_type_count_bindings(state,types));return 0;}
         if(site==0x42eaf0){event_stage.tick();return 0;}
         if(site==0x45fd80){if(!reset_zones)throw MissionTickError("Zone reset has no owner");reset_zones();return 0;}
+        if(site==0x442ae0){mission_peer_parser_parse(*outbox,messages.table(),parser);return 0;}
         if(site==0x460e40)return mission_peer_frame_receive(messages.peer_frame_buffer(),peer);
         if(site==0x4477f0){mission_peer_timers(peer_timers);return 0;}
         if(site==0x444e30){mission_peer_budget_update(budget);return 0;}
@@ -335,6 +503,59 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         if(site==0x4421d0){outbox->tick();return 0;}
         throw MissionTickError("Logic body is not bound "+std::to_string(site));};
     logic_run=[&]{mission_logic_frame(logic);};
+    helo.read=[&](U at,U width){
+        if(at>=0x794680&&std::uint64_t(at)+width<=0x7cca80){const auto slot=(at-0x794680)/0xb4,offset=(at-0x794680)%0xb4;
+            if(offset+width>0xb4||slot>=state.people.size())throw MissionTickError("Helicopter person read has no current owner");
+            auto image=ai_person_image(state.people[slot]);const auto& extra=state.person_extra(slot);
+            std::memcpy(image.data()+0x44,&extra.field_44,4);std::memcpy(image.data()+0x6c,&extra.field_6c,4);
+            U n=0;for(U i=0;i<width;++i)n|=U(image.at(offset+i))<<(i*8);return n;
+        }
+        for(std::uint8_t group=0;group<4;++group){const auto base=mission_actor_source_address(group,0);if(at<base+0xc||width!=4)continue;const auto offset=at-base;if(offset%0x114!=0xc)continue;const auto slot=offset/0x114;if(slot>=state.tables.groups[group].size())continue;const auto person=state.tables.groups[group][slot].person_slot;if(person&&*person>=state.people.size())throw MissionTickError("Helicopter actor person has no current owner");return person?0x794680u+U(*person)*0xb4u:0u;}
+        return periodic.read(at,width);
+    };
+    helo.write=[&](U at,U width,U value){
+        if(at>=0x794680&&std::uint64_t(at)+width<=0x7cca80){const auto slot=(at-0x794680)/0xb4,offset=(at-0x794680)%0xb4;
+            if(slot>=state.people.size())throw MissionTickError("Helicopter person store has no current owner");
+            U* word=nullptr;U base=0;
+            if(offset>=0x6c&&offset+width<=0x70){word=&state.person_extra(slot).field_6c;base=0x6c;}
+            else if(offset>=0x90&&offset+width<=0x94){word=&state.people[slot].field_90;base=0x90;}
+            if(!word)throw MissionTickError("Helicopter person store needs its current field owner");
+            auto* bytes=reinterpret_cast<std::uint8_t*>(word);for(U i=0;i<width;++i)bytes[offset-base+i]=std::uint8_t(value>>(i*8));return;
+        }
+        periodic.write(at,width,value);
+    };
+    helo.call=[&](U site,const auto& args)->U{
+        if(site==0x477860)return behavior_rng_next(state.behavior);
+        if(site==0x47df40){std::int32_t x,y;std::memcpy(&x,&args.at(0),4);std::memcpy(&y,&args.at(1),4);return U(ground_height_query(terrain.geometry,x,y));}
+        if(site==0x49a620){for(U i=0;i<args.at(2);++i)helo.write(args.at(0)+i,1,args.at(1)&255);return args.at(0);}
+        throw MissionTickError("Helicopter required body is not bound "+std::to_string(site));
+    };
+    bind_mission_object_helo_move(state,helo);
+    bind_mission_object_mine_move(state,{periodic.read,periodic.write});
+
+    MissionRoundServiceBindings result_round;
+    result_round.cell=[this](auto at,auto width){return c.sound.asset_bindings().read(at,width);};
+    result_round.store=[this](auto at,auto width,auto value){c.sound.asset_bindings().write(at,width,value);};
+    result_round.client=client_read;
+    result_round.squad=[&](auto slot,auto at,auto width){return c.sound.asset_bindings().read(0x6e8090+U(slot)*0x68+at,width);};
+    result_round.squad_store=[&](auto slot,auto at,auto width,auto value){c.sound.asset_bindings().write(0x6e8090+U(slot)*0x68+at,width,value);};
+    MissionResultLiveHost result_host;
+    result_host.state.cell=cell;result_host.state.store=cell_store;result_host.state.client=client_read;result_host.state.client_store=client_store;
+    result_host.state.call=[this,result_round](auto site,const auto& args)->U{
+        if(site==0x446100){mission_round_set_client_updates(result_round,args.at(0));return 0;}
+        if(site==0x448d20){mission_round_log(result_round,args.at(0));return 0;}
+        if(site==0x446da0){mission_round_collect_squads(result_round);return 0;}
+        if(site==0x448130)return U(mission_round_compare_clients(result_round,args.at(0),args.at(1)));
+        if(site==0x43e720){c.sound.global(args.at(0));return 0;}
+        throw MissionTickError("Result required body is not bound "+std::to_string(site));
+    };
+    result_host.physical_tail=[this](const auto& ref){if(ref.group!=3||ref.index<c.state.tables.groups[3].size()||ref.index>=group3_tail.size())throw MissionTickError("Result physical tail has no current owner");return group3_tail.at(ref.index);};
+    result_host.fallback_name=[this](U){const auto& memory=c.sound.asset_bindings();const auto text=memory.call(0x404cf0,{0x4ccccc,0x4cccc0});std::string name;for(U i=0;;++i){const auto ch=memory.read(text+i,1);if(!ch)return name;name.push_back(char(ch));}};
+    result_host.store_name=[this](auto at,const auto& name){for(std::size_t i=0;i<=name.size();++i)c.sound.asset_bindings().write(at+U(i),1,i<name.size()?std::uint8_t(name[i]):0);};
+    result_host.publish=[this](auto slot,auto id,auto& packet){outbox->enqueue(slot,std::int32_t(id),packet.data(),packet.size());};
+    result_bindings=mission_result_live_bindings(state,std::move(result_host));
+    event_host.result=[this](auto mode){mission_logic_request_result(result_bindings,mode,result_caller_packet);};
+
     zone_binding=zone_owner.bindings(state.globals.mission_67f528);
     if(state.projectiles.size()!=512)throw MissionTickError("Mission session needs the initialized512slot projectile pool");spawn_cells.rules_8cf982=c.mission.header[0x7a];
 
@@ -348,7 +569,8 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     spawn_bindings.positional_sound=[&](auto&,auto id,auto position){sound.positional(id,position);};spawn_bindings.loudness=[&](auto&,auto id){return std::int32_t(sound.loudness(id));};
     spawn_bindings.alert=[&](auto&,auto position,auto radius,auto type,auto flags){mission_behavior_zone_add(zone_binding,std::uint32_t(position.x),std::uint32_t(position.y),std::uint32_t(position.z),std::uint32_t(radius),std::uint32_t(type),flags);};
     spawn=std::make_unique<MissionProjectileSpawn>(state,spawn_cells,initial.definitions,spawn_bindings);request_projectile=[&](auto owner,auto kind,auto& result){spawn->request(owner,kind,result);};
-    state.world.weapon_effect=[&](auto&,const WeaponEvent& event){if(event.kind==WeaponEventKind::sound){const auto& a=state.tables.groups[3][*state.config.local_actor];Fixed3 position;std::memcpy(&position.x,&a.position[0],4);std::memcpy(&position.y,&a.position[1],4);std::memcpy(&position.z,&a.position[2],4);sound.positional(std::uint32_t(event.value),position);return true;}if(event.kind==WeaponEventKind::sound2){sound.global(std::uint32_t(event.value));return true;}if(event.kind==WeaponEventKind::queue){messages.queue().enqueue(messages.table(),std::uint8_t(event.value),nullptr,0);return true;}throw MissionTickError("Weapon effect has no live owner "+std::to_string(unsigned(event.kind)));};
+    ai_shot=std::make_unique<MissionAiShot>(state,muzzle,*spawn);
+    state.world.weapon_effect=[&](auto&,const WeaponEvent& event){if(event.kind==WeaponEventKind::sound){const auto& a=state.tables.groups[3][*state.config.local_actor];Fixed3 position;std::memcpy(&position.x,&a.position[0],4);std::memcpy(&position.y,&a.position[1],4);std::memcpy(&position.z,&a.position[2],4);sound.positional(std::uint32_t(event.value),position);return true;}if(event.kind==WeaponEventKind::sound2){sound.global(std::uint32_t(event.value));return true;}if(event.kind==WeaponEventKind::message){if(event.value!=0)throw MissionTickError("Weapon text producer is not bound");MissionHudMessageCall call{0,hud.read(0x67db54,4)};call.text=sound.asset_bindings().call(0x404cf0,{0x4cdc38,0x4cdc2c});mission_hud_message(hud,call);return true;}if(event.kind==WeaponEventKind::queue){messages.queue().enqueue(messages.table(),std::uint8_t(event.value),nullptr,0);return true;}throw MissionTickError("Weapon effect has no live owner "+std::to_string(unsigned(event.kind)));};
     mission_behavior_zones_reset(zone_binding); //45FD80 startup clear.
     reset_zones=[&]{mission_behavior_zones_reset(zone_binding);};
     std::vector<MissionProjectileMaterialBinding> material_bindings;std::uint32_t next_material=1;for(const auto& entry:initial.models){const auto& model=cache.model(entry.name);if(model.lods.empty())throw MissionTickError("Loaded projectile model has no first LOD");MissionProjectileMaterialBinding binding;binding.model=entry.handle;for(std::size_t i=0;i<model.lods.front().materials.size();++i)binding.identities.push_back(next_material++);material_bindings.push_back(std::move(binding));}
@@ -386,10 +608,17 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     state.world.behavior_world.resolve_target=[&](auto raw)->std::optional<BehaviorTargetView>{
         for(std::size_t slot=0;slot<state.tables.groups[3].size();++slot)if(mission_actor_source_address(3,slot)==raw){const auto image=snapshot_mission_actor(state,{3,slot});const auto get=[&](auto at){std::uint32_t n;std::memcpy(&n,image.data()+at,4);return n;};BehaviorTargetView result;result.field_70=get(0x70);result.field_6c=image[0x6c];result.field_f8=get(0xf8);for(unsigned axis=0;axis<3;++axis)result.position[axis]=get(0x24+axis*4);return result;}return std::nullopt;};
     state.world.behavior_world.resolve_marker=[&](auto raw)->std::optional<std::size_t>{for(std::size_t slot=0;slot<state.tables.groups[2].size();++slot)if(mission_actor_source_address(2,slot)==raw)return slot;return std::nullopt;};
-    bind_mission_actor_queries(state,[&](const auto& ref){auto data=mission_actor_query_data(state,ref,geometry,height_bounds.front(),zone_owner.active_records(),(rules_word&0x80)!=0,matrices);data.sight_line=[&,ref](std::size_t slot){return mission_object_sight(state,ref,{3,slot},sight_bindings);};return data;},[&](const auto&,const auto& action,auto&){if(action.site==behavior_site::kRegionBit3){event_stage.set_flag_42ee30(action.args[0],action.args[1],action.args[2]);return true;}if(action.site==behavior_site::kMessage){mission_actor_message_send_index(actor_message,action.args[0],action.args[1]);return true;}if(action.site!=behavior_site::kTypeSlotMark)return false;auto binding=mission_type_count_bindings(state,types);mission_type_mark(binding,action.args[0]);return true;});
+    bind_mission_actor_queries(state,[&](const auto& ref){auto data=mission_actor_query_data(state,ref,geometry,height_bounds.front(),zone_owner.active_records(),(rules_word&0x80)!=0,matrices);data.sight_line=[&,ref](std::size_t slot){return mission_object_sight(state,ref,{3,slot},sight_bindings);};return data;},[&](const auto& ref,const auto& action,auto&){if(action.site==0x45e7a0){if(!ai_shot)throw MissionTickError("AI shot owner is not installed");ai_shot->fire(ref);return true;}if(action.site==behavior_site::kRegionBit){event_stage.set_flag_42edd0(action.args[0],action.args[1]);return true;}if(action.site==behavior_site::kRegionBit2){event_stage.set_flag_42ee00(action.args[0],action.args[1]);return true;}if(action.site==behavior_site::kRegionBit3){event_stage.set_flag_42ee30(action.args[0],action.args[1],action.args[2]);return true;}if(action.site==behavior_site::kMessage){mission_actor_message_send_index(actor_message,action.args[0],action.args[1]);return true;}if(action.site!=behavior_site::kTypeSlotMark)return false;auto binding=mission_type_count_bindings(state,types);mission_type_mark(binding,action.args[0]);return true;});
 
         input.next_command=[this](auto tick)->std::optional<MissionCommandEvent>{auto record=c.input.pop_due(tick);if(!record)return {};return MissionCommandEvent{record->id,std::int32_t(record->value)};};
         input.dispatch_command=[this](auto id,auto value){return dispatch_game_command(id,value,c.state.globals,c.state.dispatch_actor,c.input.command_table());};
+        if(!hud_input_initialized){
+            if(c.input.stage().queue().size())throw MissionTickError("Cold input initialization has queued commands");
+            mission_hud_message_clear(hud);
+            c.input.stage().activate();
+            state.globals.tick_base_bd4844=state.globals.command_tick_6e471c;
+            hud_input_initialized=true;
+        }
     }
 };
 MissionSession::MissionSession(MissionSessionContext c,MissionSessionHost h):impl_(std::make_unique<Impl>(c,std::move(h))){}
@@ -398,6 +627,8 @@ void MissionSession::install(){auto& p=*impl_;if(p.active)throw MissionTickError
 void MissionSession::uninstall() noexcept {auto& p=*impl_;if(!p.active)return;if(p.player)p.player->uninstall();using std::swap;swap(p.c.state.world,p.prior_world);for(std::size_t i=0;i<p.update_ids.size();++i)if(p.installed_updates[i])p.c.state.update_callbacks.erase(p.update_ids[i]);for(std::size_t i=0;i<p.secondary_ids.size();++i)if(p.installed_secondary[i])p.c.state.secondary_callbacks.erase(p.secondary_ids[i]);p.installed_updates.fill(false);p.installed_secondary.fill(false);p.active=false;}
 bool MissionSession::installed() const noexcept{return impl_->active;}
 MissionTickReport MissionSession::step(){if(!installed())throw MissionTickError("Mission session is not installed");return mission_tick(impl_->c.state,impl_->input);}
+void MissionSession::request_result(U mode,MissionLogicResultPacket& packet){if(!installed())throw MissionTickError("Mission result requires an installed session");mission_logic_request_result(impl_->result_bindings,mode,packet);}
+std::optional<U> MissionSession::hud_service(U site,const std::vector<U>& args){return impl_->hud_service(site,args);}
 void MissionSession::script_message(U id,const std::uint8_t* bytes,std::size_t length){if(!installed()||!impl_->outbox)throw MissionTickError("Mission script outbox is not installed");if(length>std::numeric_limits<U>::max())throw MissionTickError("Mission script message is too large");impl_->outbox->broadcast(std::int32_t(id),bytes,U(length));}
 U MissionSession::camera_yaw() const{return impl_->camera.yaw_6ba3e8;}
 

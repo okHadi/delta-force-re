@@ -440,8 +440,12 @@ ModelMatrix model_special_pivot_matrix(const std::array<std::int32_t, 3>& pivot,
         const ModelMatrix axis_matrix = model_local_matrix({0, 0, 0}, single);
         local = model_multiply_matrix(axis_matrix, local);
     }
+    const auto negate = [](std::int32_t value) {
+        const std::uint32_t bits = 0u - static_cast<std::uint32_t>(value);
+        return static_cast<std::int32_t>(bits <= 0x7fffffffu ? std::int64_t(bits) : std::int64_t(bits) - 0x100000000ll);
+    };
     const ModelMatrix back = model_local_matrix(
-        {-pivot[0], -pivot[1], -pivot[2]}, {0, 0, 0});
+        {negate(pivot[0]), negate(pivot[1]), negate(pivot[2])}, {0, 0, 0});
     return model_multiply_matrix(back, local);
 }
 

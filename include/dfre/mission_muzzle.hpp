@@ -29,6 +29,11 @@ public:
         const MissionMuzzleView& view) const; // 482D90 followed by 4847D0.
     bool animated(ProjectileHitActor actor,
         const std::function<void(ProjectileHitActor,const MuzzleResult&)>& shot);
+    // Refresh the current image after the graphic callback and before aim reads.
+    // Keep the returned slot-seven matrix alive through the refresh.
+    bool animated(ProjectileHitActor actor,
+        const std::function<void(ProjectileHitActor,const MuzzleResult&)>& shot,
+        const std::function<void(ProjectileHitActor)>& after_graphic);
     Matrix4& attachment() noexcept { return attachment_; }
     const Matrix4& attachment() const noexcept { return attachment_; }
     // Seed the shared scratch value when a callback does not write slot seven.
@@ -37,6 +42,9 @@ public:
     // Supply full mutable scratch state for other graphic callback tags.
     void set_slot_source(MissionMuzzleSlotSource source) { slot_source_=std::move(source); }
 private:
+    bool animated_body(ProjectileHitActor actor,
+        const std::function<void(ProjectileHitActor,const MuzzleResult&)>& shot,
+        const std::function<void(ProjectileHitActor)>* after_graphic);
     const Model& model(std::uint32_t handle) const;
     Fixed3 hardpoint(std::uint32_t model,std::uint32_t index) const;
     Matrix4& animated_slot(std::uint32_t graphic,const AiActorImage& actor);

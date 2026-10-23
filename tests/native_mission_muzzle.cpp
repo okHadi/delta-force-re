@@ -50,7 +50,24 @@ int main(){try{
     auto shared=dfre::matrix_identity();muzzle.set_slot_source([&](auto,const auto&)->dfre::Matrix4&{return shared;});
     muzzle.animated({&actor,42},[](auto,const auto&){});
     check(shared.m!=dfre::matrix_identity().m,"animated muzzle did not write shared slot");
+    shared=dfre::matrix_identity();
+    unsigned refreshed=0;put(actor,0x6c,0);
+    muzzle.animated({&actor,42},[&](auto,const auto& result){
+        check(refreshed==1 && result.aim.yaw==0x12345678 && result.aim.pitch==0x87654321,
+            "shot used the image from before the graphic callback");
+    },[&](auto current){++refreshed;check(current.image==&actor,"refresh changed its image owner");
+        put(actor,0x30,0x12345678);put(actor,0x34,0x87654321);
+    });
+    rejects([&]{muzzle.animated({&actor,42},[](auto,const auto&){},{});});
+    const auto before=shared.m;bool stopped=false;
+    try{muzzle.animated({&actor,42},[](auto,const auto&){throw std::runtime_error("shot reached");},
+        [&](auto){put(actor,0x34,0xabcdef01);throw std::runtime_error("refresh stopped");});}
+    catch(const std::runtime_error& error){stopped=std::string(error.what())=="refresh stopped";}
+    check(stopped && shared.m==before && actor[0x34]==1,
+        "refresh failure changed the source effect prefix");
     put(actor,0x94,0);check(!muzzle.animated({&actor,42},[](auto,const auto&){throw std::runtime_error("guard fired shot");}),"zero weapon guard changed");
+    check(!muzzle.animated({&actor,42},[](auto,const auto&){throw std::runtime_error("guard fired shot");},{}),
+        "guard required an unreached image provider");
     rejects([&]{muzzle.normal(actor,39,{});});
     std::cout<<"mission muzzle native checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

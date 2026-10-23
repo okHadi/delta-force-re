@@ -29,6 +29,7 @@
 #include "dfre/mission_line_file_runtime.hpp"
 #include "dfre/mission_localization.hpp"
 #include "dfre/mission_session.hpp"
+#include "dfre/mission_input_live.hpp"
 
 #include <array>
 #include <chrono>
@@ -170,7 +171,18 @@ public:
             ActionBindings controls{};
             for(std::size_t i=0;i<controls.size();++i)
                 controls[i]={profile_word(0x6a0+i*12),profile_word(0x6a4+i*12),profile_word(0x6a8+i*12)};
+            mission_tick_->globals.mouse_disabled_503130=std::uint32_t(settings.windowed);
+            mission_tick_->globals.mouse_scale_67f500=std::uint32_t(settings.mousescale);
+            mission_tick_->globals.toggle_67f4fc=std::uint32_t(settings.flipmouse);
             mission_input_=std::make_unique<InputBridge>(controls);
+            mission_input_sources_={};
+            mission_input_sources_.read=[this](auto at,auto width){return mission_sound_->asset_bindings().read(at,width);};
+            mission_input_sources_.window_active=[this]{return window_->active();};
+            mission_input_sources_.dispatch=[this](auto id){mission_dispatch_command(*mission_tick_,id,0,mission_input_->command_table());};
+            mission_input_->set_live_sources(
+                [this]{return mission_input_live_sources(*mission_tick_,mission_input_sources_);},
+                [this](const auto& result){mission_input_live_global(*mission_tick_,mission_input_sources_,result);},
+                [this](const auto& event){mission_input_live_chat(mission_input_sources_,event);});
             mission_input_->set_query_row_source([this](auto row){
                 return mission_session_input_query_row(*mission_sound_,row);
             });
@@ -344,6 +356,7 @@ public:
             record_store(base,offset,width,value);
         };
         bindings.service=[this](std::uint32_t site,const std::vector<std::uint32_t>& args){
+            if(mission_session_){if(const auto result=mission_session_->hud_service(site,args))return *result;}
             if(mission_scripts_){const auto result=mission_scripts_->service(site,args);if(result)return *result;}
             const auto& memory=mission_sound_->asset_bindings();
             if(mission_files_){if(const auto result=mission_files_->service(site,args))return *result;}
@@ -394,6 +407,15 @@ public:
             const auto loaded=mission_rtxt_load(memory,table.second);
             if(!loaded)throw MissionSoundAssetError("Game text table failed to load");
             memory.write(table.first,4,loaded);
+        }
+        const auto& campaign_file=mission_selection_->text_file;
+        if(!campaign_file.empty()&&mission_asset_present(assets_,campaign_file)){
+            const auto filename=memory.call(0x497f60,{std::uint32_t(campaign_file.size()+1),4,0,0});
+            for(std::size_t i=0;i<=campaign_file.size();++i)memory.write(filename+std::uint32_t(i),1,i<campaign_file.size()?std::uint8_t(campaign_file[i]):0);
+            const auto table=mission_rtxt_load(memory,filename);
+            memory.call(0x4980d0,{filename});
+            if(!table)throw MissionSoundAssetError("Campaign text table failed to load");
+            memory.write(0x503238,4,table);
         }
         for(std::size_t i=0;i<mission.header.size();++i)
             memory.write(0x8cf908+std::uint32_t(i),1,mission.header[i]);
@@ -529,6 +551,7 @@ private:
     std::unique_ptr<MissionAnimations> mission_animations_;
     std::unique_ptr<MissionGeometry> mission_geometry_;
     std::unique_ptr<MissionMuzzle> mission_muzzle_;
+    MissionInputLiveBindings mission_input_sources_;
     std::unique_ptr<InputBridge> mission_input_;
     Fixed3 mission_listener_{};
     std::uint32_t mission_listener_yaw_=0;

@@ -51,3 +51,11 @@ Probe mode `steady` reads `SCOPE CONTROL WEAPON_ID AIM_BLOCK [TOGGLE]` per
 line and prints the raw `0x484740` result. A nonzero optional toggle runs
 `0x4847C0` through the command pump first. Weapon IDs select the definition
 directly.
+
+Use `mission_dispatch_command(state, id, value, input.command_table())` for
+synchronous `477D40` calls from global-key callbacks. Keep the current input
+table alive. This entry reads the current local actor, applies each effect,
+and writes current dispatch fields back through the same helper as the queued
+command pump. An active frame receives its trace. Outside a frame, trace
+storage is local to the call. Required effects stay synchronous; exceptions
+restore the previous weapon callbacks, trigger query, and active report.

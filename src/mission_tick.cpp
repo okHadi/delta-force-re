@@ -978,37 +978,38 @@ void sync_dispatch_to_record(MissionTickState& state) {
     state.extra_for(ref).field_74 = static_cast<std::uint16_t>(state.dispatch_actor.stance_74);
 }
 
+void apply_command_result(MissionTickState& state,const DispatchResult& result,MissionTickReport& report) {
+    if(result.gated)return;
+    sync_dispatch_to_record(state);
+    std::optional<std::uint32_t> previous;
+    for(DispatchCall call:result.calls) {
+        if(call.threaded_result){
+            if(!previous || call.arguments.empty())throw MissionTickError("mission tick: missing prior dispatch result");
+            call.arguments[0]=*previous;
+        }
+        trace_plain(report,MissionTraceKind::dispatch_call,call.address,
+            call.arguments.empty()?0:call.arguments[0],call.arguments.size()>1?call.arguments[1]:0);
+        previous=apply_dispatch_call(state,call,report);
+        sync_record_to_dispatch(state);
+    }
+}
+
 void run_command_pump(MissionTickState& state, const MissionTickInputs& inputs,
                       MissionTickReport& report) {
     trace_plain(report, MissionTraceKind::external_stage, kCommandPump);
-    const auto apply_result=[&](const DispatchResult& result) {
-        if(result.gated)return;
-        sync_dispatch_to_record(state);
-        std::optional<std::uint32_t> previous;
-        for(DispatchCall call:result.calls) {
-            if(call.threaded_result){
-                if(!previous || call.arguments.empty())throw MissionTickError("mission tick: missing prior dispatch result");
-                call.arguments[0]=*previous;
-            }
-            trace_plain(report,MissionTraceKind::dispatch_call,call.address,
-                call.arguments.empty()?0:call.arguments[0],call.arguments.size()>1?call.arguments[1]:0);
-            previous=apply_dispatch_call(state,call,report);
-            sync_record_to_dispatch(state);
-        }
-    };
     if(inputs.next_command) {
         if(!inputs.dispatch_command)throw MissionTickError("mission tick: live input dispatcher missing");
         const auto tick=state.tick_67dbf4;
         while(const auto command=inputs.next_command(tick)){
             sync_record_to_dispatch(state);
-            apply_result(inputs.dispatch_command(command->id,command->value));
+            apply_command_result(state,inputs.dispatch_command(command->id,command->value),report);
         }
     } else if(inputs.dispatch_command) {
         for(const MissionCommandEvent& command:inputs.commands){
             sync_record_to_dispatch(state);
-            apply_result(inputs.dispatch_command(command.id,command.value));
+            apply_command_result(state,inputs.dispatch_command(command.id,command.value),report);
         }
-    } else for(const auto& result:inputs.dispatch)apply_result(result);
+    } else for(const auto& result:inputs.dispatch)apply_command_result(state,result,report);
 
     sync_dispatch_to_record(state);
 }
@@ -1138,6 +1139,16 @@ void run_frame(MissionTickState& state,const MissionStageProvider& stages,Missio
 }
 
 } // namespace
+
+void mission_dispatch_command(MissionTickState& state,std::uint32_t id,std::int32_t value,
+                              const CommandTable& commands) {
+    MissionTickReport local_report;
+    auto& report=state.current_report?*state.current_report:local_report;
+    WeaponEffectScope effects(state,&report);
+    sync_record_to_dispatch(state);
+    apply_command_result(state,dispatch_game_command(id,value,state.globals,state.dispatch_actor,commands),report);
+    sync_dispatch_to_record(state);
+}
 
 void mission_weapon_part(MissionTickState& state,bool trigger_held_fixture) {
     WeaponEffectScope effects(state,nullptr,false);

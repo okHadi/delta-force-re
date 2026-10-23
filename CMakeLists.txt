@@ -132,6 +132,22 @@ set(DFRE_RUNTIME_MODULES
     mission_actor_create
     mission_person_allocate
     mission_netsock_packets
+    mission_character_allocate
+    mission_netsock_queue
+    mission_scoreboard
+    mission_periodic_services
+    mission_character_init
+    mission_input_live
+    mission_ai_shot
+    mission_netsock_receiver
+    mission_result_live
+    mission_object_helo
+    mission_netsock_host_worker
+    mission_netsock_dispatch
+    mission_hud_message
+    mission_object_mine_move
+    mission_netsock_outgoing
+    mission_object_helo_update
 )
 target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp src/mission_sound_live.cpp src/mission_crt_thread.cpp src/mission_df_socket_runtime.cpp src/mission_scene_projectiles.cpp src/mission_client_live.cpp src/mission_session.cpp)
 find_package(Threads REQUIRED)
@@ -267,12 +283,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
-    foreach(dfre_adapter_test mission_scene_projectiles scene_effect_image event_reference_policy mission_client_live mission_session)
+    foreach(dfre_adapter_test mission_scene_projectiles scene_effect_image event_reference_policy mission_client_live mission_session mission_session_hud)
         add_executable(native_${dfre_adapter_test} tests/native_${dfre_adapter_test}.cpp)
         target_link_libraries(native_${dfre_adapter_test} PRIVATE dfre_core)
         add_test(NAME native_${dfre_adapter_test} COMMAND native_${dfre_adapter_test})
     endforeach()
-    set_tests_properties(native_mission_session PROPERTIES SKIP_RETURN_CODE 77)
+    set_tests_properties(native_mission_session native_mission_session_hud PROPERTIES SKIP_RETURN_CODE 77)
     add_executable(native_mission_df_socket_runtime tests/native_mission_df_socket_runtime.cpp)
     target_link_libraries(native_mission_df_socket_runtime PRIVATE dfre_core)
     add_test(NAME native_mission_df_socket_runtime COMMAND native_mission_df_socket_runtime)
@@ -318,7 +334,7 @@ if(BUILD_TESTING)
         native_mission_terrain_types native_mission_actor_insert native_mission_scene_transient native_scene_effect_image
         native_mission_actor_insert_live native_mission_line_file_runtime native_mission_type_mark native_mission_actor_message native_mission_trail_frame native_mission_animation_effect native_mission_wet_effect native_mission_client_added
         native_mission_client_admission_helpers native_mission_client_finalize native_mission_game_transport
-        native_mission_actor_create native_mission_session native_mission_person_allocate native_mission_netsock_packets)
+        native_mission_actor_create native_mission_session native_mission_session_hud native_mission_person_allocate native_mission_netsock_packets native_mission_character_allocate native_mission_netsock_queue native_mission_scoreboard native_mission_periodic_services native_mission_character_init native_mission_input_live native_mission_ai_shot native_mission_netsock_receiver native_mission_result_live native_mission_object_helo native_mission_netsock_host_worker native_mission_netsock_dispatch native_mission_hud_message native_mission_object_mine_move native_mission_netsock_outgoing native_mission_object_helo_update)
         if(MSVC)
             target_compile_options(${dfre_peer_test} PRIVATE /UNDEBUG)
         else()
