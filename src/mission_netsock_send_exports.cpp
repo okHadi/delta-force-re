@@ -1,0 +1,15 @@
+#include "dfre/mission_netsock_send_exports.hpp"
+#include "dfre/mission_netsock_queue.hpp"
+#include <stdexcept>
+namespace dfre {namespace {using U=std::uint32_t;using B=MissionNetsockSendExportBindings;
+U read(const B&b,U at,U width=4){if(!b.read)throw std::runtime_error("Send export current read is not bound");return b.read(at,width);}
+void write(const B&b,U at,U value,U width=4){if(!b.write)throw std::runtime_error("Send export current store is not bound");b.write(at,width,value);}
+struct Frame{const B&b;U site,n,at;Frame(const B&v,U s,U size,const std::vector<U>&args):b(v),site(s),n(size),at(0){if(!b.frame||!b.release)throw std::runtime_error("Send export current frame is not bound");at=b.frame(site,n,args);}~Frame(){b.release(site,at,n);}};
+U call(const B&b,U site,const std::vector<U>&args){if(b.before_call)b.before_call(site,args);if(site==0x100019e0){Frame f(b,site,8,args);return mission_netsock_send_player_lookup(b,f.at);}if(site==0x10003b20){Frame f(b,site,0x1c,args);MissionNetsockQueueBindings q;q.read=b.read;q.write=b.write;q.resolve=b.resolve;q.call=b.call;q.before_call=b.before_call;mission_netsock_queue_enqueue(q,f.at);return 0;}throw std::runtime_error("Send export source call is not bound");}
+void copy(const B&b,U to,U from,U count){U at=0;for(U i=0;i<(count>>2);++i,at+=4){const auto value=read(b,from+at);write(b,to+at,value);}for(U i=0;i<(count&3u);++i,++at){const auto value=read(b,from+at,1);write(b,to+at,value,1);}}
+U gate(const B&b){if(!read(b,0x10019880))return 1;if(!read(b,0x10019884))return 0x200;if(!read(b,0x100198ac))return 4;return 0;}
+}
+std::uint32_t mission_netsock_send_player_lookup(const B&b,U frame){const auto peer=read(b,frame+4),count=read(b,0x100198b8);const U index=peer-0x10000u;if(index>=count)return 0;const auto base=read(b,0x10019afc);const U player=base+index*0xbcu;return read(b,player+0x9c)?player:0;}
+std::uint32_t mission_netsock_send_to_client(const B&b,U frame){const auto error=gate(b);if(error)return error;const auto source=read(b,frame+4);if(!source)return 2;const auto length=read(b,frame+8);if(!length)return 2;if(read(b,0x100199b0)!=1)return 0xd;const auto peer=read(b,frame+0xc),player=call(b,0x100019e0,{peer});if(!player)return 0xb;const auto packet=read(b,0x10019c60);write(b,packet+2,length+0xc,2);write(b,packet,0x1080,2);copy(b,packet+8,source,length);const auto address=read(b,player+0xa4),port=read(b,address+0x14),ip=read(b,address+4),queued_length=read(b,packet+2,2);call(b,0x10003b20,{packet,queued_length,0x10019b20,ip,port,0});return 0;}
+std::uint32_t mission_netsock_send_to_server(const B&b,U frame){const auto error=gate(b);if(error)return error;const auto source=read(b,frame+4);if(!source)return 2;const auto length=read(b,frame+8);if(!length)return 2;if(read(b,0x100199b0)!=2)return 0xe;const auto packet=read(b,0x10019c60);write(b,packet+2,length+0xc,2);write(b,packet,0x1080,2);copy(b,packet+8,source,length);const auto raw_port=read(b,0x10019c70),ip=read(b,0x10019b38),queued_length=read(b,packet+2,2);call(b,0x10003b20,{packet,queued_length,0x10019c38,ip,raw_port&0xffffu,0});return 0;}
+} // namespace dfre

@@ -31,6 +31,7 @@
 #include "dfre/mission_localization.hpp"
 #include "dfre/mission_session.hpp"
 #include "dfre/mission_input_live.hpp"
+#include "dfre/mission_profile_memory.hpp"
 
 #include <array>
 #include <chrono>
@@ -52,6 +53,7 @@ public:
     explicit Game(const GameOptions& options)
         : options_(options), assets_(options.game_folder), menu_(assets_),
           soldier_(menu_, options.game_folder, options.save_folder),
+          profile_memory_([this](auto slot)->AssetBytes&{return soldier_.profiles().at(slot).source_bytes();},[this]{return soldier_.selected();}),
           window_(create_game_window("Delta Force RE", 640, 480)) {
         const std::array<std::pair<GameScreen, const char*>, 7> menus{{
             {GameScreen::main_menu, "menu1"}, {GameScreen::new_soldier, "NewSoldierMenu"},
@@ -128,6 +130,7 @@ public:
                 names.emplace(assets_.read(config.campaign_text_file).bytes);
             prepare_mission_sound();
             const auto& source_memory=mission_sound_->asset_bindings();
+            source_memory.write(0x68ba34,4,mission_selection_->mission);
             const auto name=profile.name();
             const auto name_at=source_memory.call(0x497f60,{std::uint32_t(name.size()+1),4,0,0});
             for(std::size_t i=0;i<=name.size();++i)source_memory.write(name_at+std::uint32_t(i),1,i<name.size()?std::uint8_t(name[i]):0);
@@ -359,6 +362,7 @@ public:
             return actor_word(actor,offset);
         };
         bindings.record_base=[this,record_base](std::uint32_t at,std::uint32_t width)->std::optional<std::uint32_t>{
+            if(const auto base=profile_memory_.record_base(at,width))return base;
             if(mission_primary_&&mission_primary_->claims(at,width)){
                 if(const auto base=mission_primary_->record_base(at,width))return base;
                 return at;
@@ -373,6 +377,7 @@ public:
         };
         bindings.record_read=[this,record_read](std::uint32_t base,std::uint32_t offset,std::uint32_t width){
             const auto at=base+offset;
+            if(profile_memory_.claims(at,width))return profile_memory_.read(at,width);
             if(mission_primary_&&mission_primary_->claims(at,width)){
                 if(const auto record=mission_primary_->record_base(at,width))
                     if(*record!=base)throw MissionTickError("Primary sound record base is not aligned");
@@ -388,6 +393,7 @@ public:
         };
         bindings.record_store=[this,record_store](std::uint32_t base,std::uint32_t offset,std::uint32_t width,std::uint32_t value){
             const auto at=base+offset;
+            if(profile_memory_.claims(at,width)){profile_memory_.write(at,width,value);return;}
             if(mission_primary_&&mission_primary_->claims(at,width)){
                 if(const auto record=mission_primary_->record_base(at,width))
                     if(*record!=base)throw MissionTickError("Primary sound record base is not aligned");
@@ -579,6 +585,7 @@ private:
     AssetStore assets_;
     MenuRuntime menu_;
     SoldierMenu soldier_;
+    MissionProfileMemory profile_memory_;
     std::unique_ptr<GameWindow> window_;
     std::unique_ptr<CampaignMenu> campaign_;
     std::unique_ptr<MissionSetupMenu> setup_;

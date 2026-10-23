@@ -28,6 +28,8 @@ public:
     static PlayerProfile decode(AssetBytes bytes,const ProfileDefaults& defaults);
     static PlayerProfile empty(const ProfileDefaults& defaults,std::string_view filename);
     const AssetBytes& raw() const noexcept{return raw_;}
+    // Source profile routines use these current bytes. Keep byte_size bytes.
+    AssetBytes& source_bytes() noexcept{return raw_;}
     std::string name() const;
     bool active() const noexcept;
     std::uint32_t portrait() const;

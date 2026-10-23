@@ -1,7 +1,9 @@
 #include "dfre/profiles.hpp"
+#include "dfre/mission_results.hpp"
 #include <chrono>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 namespace {
 void require(bool x,const char* m){if(!x)throw std::runtime_error(m);}
@@ -28,6 +30,13 @@ int main(){try{
 #endif
  dfre::ProfileStore store(game,save,defaults);require(store.at(0).active(),"First-run profile");store.create(2,"new name");store.save(2);
  require(std::filesystem::file_size(save/"player03.ply")==2704&&!std::filesystem::exists(game/"player03.ply"),"Separate saved profile");
- dfre::ProfileStore loaded(game,save,defaults);require(loaded.at(2).name()=="NEW NAME"&&loaded.first_active()==2,"Saved profile reload");loaded.erase(2);require(!loaded.at(2).active(),"Slot reset");std::filesystem::remove_all(root);
+ dfre::ProfileStore loaded(game,save,defaults);require(loaded.at(2).name()=="NEW NAME"&&loaded.first_active()==2,"Saved profile reload");
+ dfre::MissionResultImage result{};const auto result_word=[&](std::size_t at,std::uint32_t n){for(unsigned i=0;i<4;++i)result.at(at+i)=std::uint8_t(n>>(8*i));};result_word(4,1);result_word(0x28,4);result_word(0x2c,7);result_word(0x30,0x18000);
+ std::map<std::uint32_t,std::uint32_t> cells{{0x67f520,0},{0x67f528,0},{0x67f718,1},{0x68ba34,2},{0x67dbec,0x17}};bool fail_rate=false;
+ dfre::MissionProfileBindings finish;finish.cell=[&](auto at){return cells[at];};finish.store=[&](auto at,auto n){cells[at]=n;};finish.profile=[&]()->dfre::AssetBytes&{return loaded.at(2).source_bytes();};finish.result=[&]{return result;};finish.fp_control=[&]{if(fail_rate)throw dfre::AssetError("Required control provider failed");return std::uint16_t(0x37f);};
+ put(loaded.at(2).source_bytes(),0x28,1);loaded.at(2).source_bytes().at(0x300)=0xa5;dfre::mission_profile_leave(finish);require(loaded.at(2).stats().campaign_kills==4&&loaded.at(2).stats().completed_missions==1,"Source leave missed the selected profile owner");
+ fail_rate=true;rejects([&]{dfre::mission_profile_leave(finish);});require(loaded.at(2).stats().campaign_kills==8,"Source profile failure rolled back completed effects");loaded.save(2);
+ dfre::ProfileStore finished(game,save,defaults);require(finished.at(2).name()=="NEW NAME"&&finished.at(2).stats().campaign_kills==8&&finished.at(2).stats().completed_missions==1&&finished.at(2).raw().at(0x300)==0xa5,"Source profile effects did not survive save and reload");
+ loaded.erase(2);require(!loaded.at(2).active(),"Slot reset");std::filesystem::remove_all(root);
  std::cout<<"profile checks passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
