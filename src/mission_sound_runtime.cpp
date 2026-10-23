@@ -1,3 +1,5 @@
+#include "dfre/mission_owner_cleanup.hpp"
+#include "dfre/mission_heap.hpp"
 #include "dfre/mission_sound_runtime.hpp"
 #include "dfre/mission_audio_cache.hpp"
 #include "dfre/mission_audio_playback.hpp"
@@ -46,27 +48,66 @@ public:
             std::copy_n(raw.begin()+offset,length,image.begin()+rva);
         }
         blocks_[0x21000000].resize(0x10000);
+        heap_.read=[this](U at,U width){return read(at,width);};
+        heap_.write=[this](U at,U width,U value){write(at,width,value);};
+        heap_.call=[this](U site,const std::vector<U>& args)->U{
+            if(site==0x49a620){for(U i=0;i<args.at(2);++i)write(args.at(0)+i,1,args.at(1)&255u);return args.at(0);}
+            if(site==0x49dc80){
+                const auto size=args.at(0);check(arena_extent_==0,"Sound arena backend is already allocated");
+                if(!size||size>0x8000000)return 0;
+                arena_.reserve(size);arena_extent_=size;return arena_base;
+            }
+            check(bool(heap_callback_),"Heap release callback has no current owner");return heap_callback_(site,args);
+        };
+        //401050 publishes this main-arena budget before497E20.
+        write(0xcc0870,4,0x1800000);
+        check(mission_heap_initialize(heap_)==0,"Sound main arena initialization failed");
     }
     void bind(U at,std::uint8_t* bytes,std::size_t size){views_.push_back({at,bytes,size});}
     std::uint8_t* pointer(U at,std::size_t size){
         for(const auto& view:views_)if(at>=view.at&&std::uint64_t(at-view.at)+size<=view.size)return view.bytes+(at-view.at);
+        if(at>=arena_base){
+            check(std::uint64_t(at-arena_base)+size<=arena_extent_,"Sound arena access exceeds its storage");
+            const auto end=std::size_t(at-arena_base)+size;
+            if(end>arena_.size())arena_.resize(end);
+            return arena_.data()+at-arena_base;
+        }
         auto it=blocks_.upper_bound(at);check(it!=blocks_.begin(),"Sound address has no storage");--it;
         check(std::uint64_t(at-it->first)+size<=it->second.size(),"Sound access exceeds its storage");return it->second.data()+(at-it->first);
     }
     U read(U at,U width=4){check(width==1||width==2||width==4,"Invalid sound read width");U n=0;for(U i=0;i<width;++i)n|=U(*pointer(at+i,1))<<(8*i);return n;}
-    void write(U at,U width,U n){check(width==1||width==2||width==4,"Invalid sound write width");for(U i=0;i<width;++i)*pointer(at+i,1)=std::uint8_t(n>>(8*i));}
-    U allocate(U size){check(size<0x8000000,"Sound allocation exceeds owner limit");U base=next_;std::uint64_t end=std::uint64_t(base)+size+32;
-        // Keep the DF socket scratch, lookup and default work heap separate.
-        if(base<0x28000000u&&end>0x23000000u){base=0x28000000u;end=std::uint64_t(base)+size+32;}
-        check(end<0xf0000000,"Sound allocation handles are full");next_=U((end+15)&~std::uint64_t(15));blocks_[base].resize(std::size_t(size)+16);++allocations;return base+16;}
-    void release(U pointer){const auto found=blocks_.find(pointer-16);check(found!=blocks_.end()&&pointer>=0x22000010,"Sound release does not name a live allocation");blocks_.erase(found);}
-    std::size_t remaining(U at){auto it=blocks_.upper_bound(at);check(it!=blocks_.begin(),"Sample allocation is missing");--it;check(at-it->first<=it->second.size(),"Sample address exceeds allocation");return it->second.size()-(at-it->first);}
+    void write(U at,U width,U n){
+        check(width==1||width==2||width==4,"Invalid sound write width");
+        std::array<std::uint8_t*,4> bytes{};
+        for(U i=0;i<width;++i)bytes[i]=pointer(at+i,1);
+        for(U i=0;i<width;++i)*bytes[i]=std::uint8_t(n>>(8*i));
+    }
+    U allocate(U size,U alignment=4,U unused=0,U label=0){
+        HeapFrame frame(*this);write(frame.at+0x20,4,size);write(frame.at+0x24,4,alignment);
+        write(frame.at+0x28,4,unused);write(frame.at+0x2c,4,label);
+        const auto payload=mission_heap_allocate(heap_,frame.at,0);if(payload)++allocations;return payload;
+    }
+    U release(U payload){HeapFrame frame(*this);write(frame.at+8,4,payload);return mission_heap_release(heap_,frame.at);}
+    void callback(std::function<U(U,const std::vector<U>&)> current){heap_callback_=std::move(current);}
+    std::size_t remaining(U at){
+        if(at>=arena_base){check(std::uint64_t(at-arena_base)<=arena_extent_,"Sample address exceeds arena");return arena_extent_-(at-arena_base);}
+        auto it=blocks_.upper_bound(at);check(it!=blocks_.begin(),"Sample allocation is missing");--it;
+        check(at-it->first<=it->second.size(),"Sample address exceeds allocation");return it->second.size()-(at-it->first);
+    }
     std::string text(U at){std::string s;for(U i=0;i<4096;++i){const auto c=read(at+i,1);if(!c)return s;s+=char(c);}throw std::runtime_error("Sound name has no end byte");}
     void text(U at,const std::string& s){for(std::size_t i=0;i<=s.size();++i)write(at+U(i),1,i<s.size()?std::uint8_t(s[i]):0);}
     std::size_t allocations=0;
 private:
     struct View {U at;std::uint8_t* bytes;std::size_t size;};
-    std::map<U,dfre::AssetBytes> blocks_;std::vector<View> views_;U next_=0x22000000;
+    static constexpr U arena_base=0x28000000;
+    std::map<U,dfre::AssetBytes> blocks_;std::vector<View> views_;
+    AssetBytes arena_;U arena_extent_=0,heap_depth_=0;
+    MissionPeriodicBindings heap_;std::function<U(U,const std::vector<U>&)> heap_callback_;
+    struct HeapFrame {
+        Memory& owner;U at;
+        explicit HeapFrame(Memory& value):owner(value),at(0x21000000+value.heap_depth_*0x40){check(value.heap_depth_<64,"Heap frame nesting exceeds scratch storage");++owner.heap_depth_;}
+        ~HeapFrame(){--owner.heap_depth_;}
+    };
 };
 constexpr U archive=0x21001000,height_base=0x15000000;
 std::int32_t si(U n){return n<=0x7fffffffu?std::int32_t(n):std::int32_t(std::int64_t(n)-0x100000000LL);}
@@ -89,6 +130,7 @@ struct MissionSoundRuntime::Impl {
         memory.bind(mission_audio_voice_base,voices.records_4a16d2.data(),voices.records_4a16d2.size());
         memory.bind(0x4a2ae0,reinterpret_cast<std::uint8_t*>(&voices.generation_4a2ae0),4);
         memory.bind(0x4a2716,reinterpret_cast<std::uint8_t*>(&voices.master_4a2716),4);
+        memory.bind(0x4a2712,reinterpret_cast<std::uint8_t*>(&voices.disabled_4a2712),4);
         memory.bind(0x6e06a8,reinterpret_cast<std::uint8_t*>(&f.listener_6e06a8),12);
         memory.bind(0x6e06b4,reinterpret_cast<std::uint8_t*>(&f.yaw_6e06b4),4);
         memory.bind(0x4f7ea8,reinterpret_cast<std::uint8_t*>(&f.counter_4f7ea8),4);
@@ -101,6 +143,7 @@ struct MissionSoundRuntime::Impl {
         voice_bindings.pcm_byte=[this](U at){return std::uint8_t(read(at,1));};voice_bindings.static_byte=voice_bindings.pcm_byte;
         voice_bindings.completed=[this](U at,U token,U sample){check(bool(host.completed),"Sound completion host is not bound");host.completed(at,token,sample);};
         playback.initialize();
+        memory.callback([this](U site,const std::vector<U>& args){return foreign(site,args);});
         assets.read=cache.read=banks.read=[this](U at,U width){return read(at,width);};
         assets.write=cache.write=banks.write=[this](U at,U width,U n){write(at,width,n);};
         assets.call=cache.call=banks.call=[this](U site,const std::vector<U>& args){return call(site,args);};
@@ -125,8 +168,8 @@ struct MissionSoundRuntime::Impl {
     U call(U site,const std::vector<U>& a){
         switch(site){
         case 0x49a620:for(U i=0;i<a.at(2);++i)write(a.at(0)+i,1,a.at(1)&255u);return a.at(0);
-        case 0x497f60:return memory.allocate(a.at(0));
-        case 0x4980d0:if(!a.at(0))return 0xffffffffu;memory.release(a.at(0));return 0;
+        case 0x497f60:return memory.allocate(a.at(0),a.at(1),a.at(2),a.at(3));
+        case 0x4980d0:return memory.release(a.at(0));
         case 0x499040:return exists(a.at(0));
         case 0x499120:return mission_sound_file_open(assets,a.at(0));
         case 0x4992d0:return mission_audio_cache_seek(cache,a.at(0),a.at(1));
@@ -137,6 +180,7 @@ struct MissionSoundRuntime::Impl {
         case 0x494c50:return mission_audio_cache_convert(cache,a.at(0));
         case 0x499410:return load_file(a.at(0));
         case 0x498230:return mission_audio_cache_tag(cache,a.at(0),a.at(1));
+        case 0x4a2aed:check(a.empty(),"Playback initialization takes no arguments");playback.initialize();return 0;
         case 0x495160:playback.register_completion(a.at(0));return 0;
         case 0x494dd0:return playback.play(a.at(0),a.at(1),a.at(2),a.at(3));
         case 0x494e80:return playback.play_channel(a.at(0),a.at(1),a.at(2),a.at(3),a.at(4));
@@ -158,16 +202,19 @@ struct MissionSoundRuntime::Impl {
         case 0x4565f0:return tokenize(a.at(0),a.at(1));
         case 0x49e630:{check(a.at(1)==archive,"Sound open archive handle differs");try{file=store.read(memory.text(a.at(0))).bytes;}catch(const AssetError&){write(archive+0xac,4,1);return 0xffffffffu;}position=0;write(archive+0xac,4,0);return 0;}
         case 0x49e6e0:{check(a.at(2)==archive,"Sound seek archive handle differs");check(a.at(1)<=2,"Sound seek origin is invalid");const auto origin=a.at(1)==0?0:a.at(1)==1?std::int64_t(position):std::int64_t(file.size());const auto next=origin+si(a.at(0));check(next>=0&&std::uint64_t(next)<=file.size(),"Sound seek exceeds supplied file bytes");position=std::size_t(next);return U(position);}
-        case 0x49e6b0:{check(a.at(2)==archive,"Sound read archive handle differs");const auto count=std::min<std::size_t>(a.at(1),file.size()-position);std::copy_n(file.begin()+position,count,memory.pointer(a.at(0),count));position+=count;return U(count);}
-        case 0x49e750:{check(a.at(1)==archive,"Sound load archive handle differs");AssetBytes bytes;try{bytes=store.read(memory.text(a.at(0))).bytes;}catch(const AssetError& e){if(std::string(e.what()).find("Missing asset: ")!=0)throw;write(archive+0xac,4,1);return 0;}const auto out=memory.allocate(U(bytes.size()));std::copy(bytes.begin(),bytes.end(),memory.pointer(out,bytes.size()));write(archive+0xac,4,0);return out;}
+        case 0x49e6b0:{check(a.at(2)==archive,"Sound read archive handle differs");const auto count=std::min<std::size_t>(a.at(1),file.size()-position);for(std::size_t i=0;i<count;++i)write(a.at(0)+U(i),1,file[position+i]);position+=count;return U(count);}
+        case 0x49e750:{check(a.at(1)==archive,"Sound load archive handle differs");AssetBytes bytes;try{bytes=store.read(memory.text(a.at(0))).bytes;}catch(const AssetError& e){if(std::string(e.what()).find("Missing asset: ")!=0)throw;write(archive+0xac,4,1);return 0;}const auto out=memory.allocate(U(bytes.size()));for(std::size_t i=0;i<bytes.size();++i)write(out+U(i),1,bytes[i]);write(archive+0xac,4,0);return out;}
         default:return foreign(site,a);
         }
     }
-    bool equal(U first,U second){for(U i=0;i<4096;++i){const auto a=char(read(first+i,1)),b=char(read(second+i,1));if(upper(a)!=upper(b))return false;if(!a)return true;}throw MissionSoundAssetError("Sound comparison has no end byte");}
+    template<class First,class Second> bool equal_bytes(const First& first,const Second& second){for(U i=0;i<4096;++i){const auto a=char(first(i));const auto b=char(second(i));if(upper(a)!=upper(b))return false;if(!a)return true;}throw MissionSoundAssetError("Sound comparison has no end byte");}
+    bool equal(U first,U second){return equal_bytes([&](U i){return read(first+i,1);},[&](U i){return read(second+i,1);});}
     void extension(U name,U suffix){const auto size=U(memory.text(name).size());U index=0;while(index<size&&read(name+index,1)!='.')++index;if(index==size)write(name+index,1,'.');const auto out=name+index+1;U i=0;for(;i<memory.text(suffix).size();++i){check(i<4096,"Sound extension alias has no bounded end");const auto value=read(suffix+i,1);write(out+i,1,value);}write(out+i,1,0);}
     U number(U at){const auto s=memory.text(at);std::size_t i=0;while(i<s.size()&&(s[i]==' '||s[i]=='\t'||s[i]=='\r'||s[i]=='\n'||s[i]=='\v'||s[i]=='\f'))++i;bool negative=false;if(i<s.size()&&(s[i]=='+'||s[i]=='-'))negative=s[i++]=='-';U n=0;while(i<s.size()&&s[i]>='0'&&s[i]<='9')n=n*10+U(s[i++]-'0');return negative?0u-n:n;}
     U find_ambient(U name){U row=read(0x6e06c4),i=0;while(si(i)<si(read(0x6e06c8))){if(equal(name,row))return row;row+=40;++i;}return 0;}
-    U definition_id(U name){if(read(name,1))for(U index=1;index<512;++index)if(equal(name,0x4f2edau+(index-1)*40))return index;return 0;}
+    template<class Name> U definition_id_bytes(const Name& name){if(name(0))for(U index=1;index<512;++index)if(equal_bytes(name,[&](U i){return read(0x4f2edau+(index-1)*40+i,1);}))return index;return 0;}
+    U definition_id(U name){return definition_id_bytes([&](U i){return read(name+i,1);});}
+    U definition_id(std::string_view name){check(name.size()<4096,"Sound name exceeds its source boundary");const std::string query(name);return definition_id_bytes([&](U i){return i<query.size()?U(std::uint8_t(query[i])):0u;});}
     U ambient_line(U record,bool fill){
         if(!record)return 0;
         if(equal(read(record+4),0x4cc0a0)){write(0x6e06cc,4,number(read(record+8)));return 0;}
@@ -191,8 +238,8 @@ struct MissionSoundRuntime::Impl {
     U parse(U name,U callback,U key){
         if(!exists(name))return 1;
         auto data=store.read(memory.text(name)).bytes;check(!data.empty(),"Original empty script parser has no bounded line");
-        const auto base=memory.allocate(U(data.size())+2);std::copy(data.begin(),data.end(),memory.pointer(base,data.size()));
-        if(key){std::reverse(data.begin(),data.end());for(auto& n:data){key+=(key<<11)|(key>>21);key=((key<<4)|(key>>28))^1u;n^=std::uint8_t(key);}std::copy(data.begin(),data.end(),memory.pointer(base,data.size()));}
+        const auto base=memory.allocate(U(data.size())+2);for(std::size_t i=0;i<data.size();++i)write(base+U(i),1,data[i]);
+        if(key){std::reverse(data.begin(),data.end());for(auto& n:data){key+=(key<<11)|(key>>21);key=((key<<4)|(key>>28))^1u;n^=std::uint8_t(key);}for(std::size_t i=0;i<data.size();++i)write(base+U(i),1,data[i]);}
         Stack stack(*this);U cursor=base,line=1,result=0;const auto end=base+U(data.size());
         while(!result){if(cursor>=end){result=call(callback,{0,line});break;}U stop=cursor;while(stop<end&&!(read(stop,1)=='\r'&&read(stop+1,1)=='\n'))++stop;if(stop>=end)--stop;write(stop,1,0);tokenize(cursor,stack.at);cursor=stop+2;if(read(stack.at)&&read(read(stack.at+4),1)!='/')result=call(callback,{stack.at,line});++line;}
         memory.release(base);return result;
@@ -253,7 +300,9 @@ void MissionSoundRuntime::positional(U id,Fixed3 p){Impl::Stack stack(*impl_);mi
 void MissionSoundRuntime::attach(U actor,U id,U scale,U ceiling){mission_sound_attach(impl_->banks,actor,id,scale,ceiling);}
 void MissionSoundRuntime::stop(U actor,U scale){mission_sound_stop(impl_->banks,actor,scale);}
 U MissionSoundRuntime::loudness(U id){return mission_sound_loudness(impl_->banks,id);}
-U MissionSoundRuntime::definition_id(std::string_view name){if(name.empty()||!name.front())return 0;return impl_->definition_id(impl_->text(name));}
+U MissionSoundRuntime::definition_id(std::string_view name){if(name.empty()||!name.front())return 0;return impl_->definition_id(name);}
+void MissionSoundRuntime::cleanup(){const auto& b=impl_->assets;mission_sound_cleanup({b.read,b.write,b.call});}
+void MissionSoundRuntime::release_banks(U context){auto& p=*impl_;Impl::Stack stack(p);p.write(stack.at,4,context);const auto& b=p.assets;mission_sound_bank_cleanup({b.read,b.write,b.call},stack.at,stack.at+16);}
 void MissionSoundRuntime::frame(){impl_->frame();}
 void MissionSoundRuntime::publish(){impl_->playback.publish();}
 void MissionSoundRuntime::advance_frames(U frames){impl_->playback.advance_frames(frames);}

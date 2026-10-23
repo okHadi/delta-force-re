@@ -36,6 +36,8 @@ public:
     void stop(std::uint32_t raw_actor,std::uint32_t scale); //43F020
     std::uint32_t loudness(std::uint32_t id);
     std::uint32_t definition_id(std::string_view name); //43F490
+    void cleanup(); //43E6D0, keep script and playback owners alive
+    void release_banks(std::uint32_t context); //49DB20
     void frame(); //43F0B0
     void publish();
     void advance_frames(std::uint32_t actual_sample_frames);

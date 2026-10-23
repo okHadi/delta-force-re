@@ -1,3 +1,4 @@
+#include "dfre/mission_peer_leave.hpp"
 #include "dfre/mission_session.hpp"
 #include "dfre/mission_round_checks.hpp"
 #include "dfre/mission_event_actor_flags.hpp"
@@ -146,6 +147,8 @@ struct MissionSession::Impl {
     MissionLogicFrameBindings logic;
     MissionLogicResultBindings result_bindings;
     MissionLogicResultPacket result_caller_packet{};
+    static constexpr U peer_leave_source=0x1b001500;
+    MissionLogicResultPacket peer_leave_packet{};
     std::unique_ptr<MissionResultImage> owned_result_image;
     MissionResultImage& result_image;
     MissionBehaviorZones zone_owner;MissionBehaviorZoneBindings zone_binding;
@@ -305,6 +308,7 @@ struct MissionSession::Impl {
         if(auto* p=field(0x8ee1cc,messages.peer_frame_buffer().count_8ee1cc))return p;
         if(auto* p=field(0x67f538,c.state.send_interval_67f538))return p;
         if(auto* p=field(0x67f714,result_image))return p;
+        if(auto* p=field(peer_leave_source,peer_leave_packet))return p;
         if(auto* p=field(0x67dbc0,c.state.globals.menu_flag_67dbc0))return p;
         if(auto* p=field(0x503428,c.state.globals.toggle_503428))return p;
         if(auto* p=field(0x67dbec,event_stage.flags_67dbec()))return p;
@@ -517,13 +521,16 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     };
     periodic.write=[&](U at,U width,U value){if(at>=periodic_source&&std::uint64_t(at-periodic_source)+width<=periodic_frame.size()){for(U i=0;i<width;++i)periodic_frame.at(at-periodic_source+i)=std::uint8_t(value>>(i*8));return;}c.sound.asset_bindings().write(at,width,value);};
     periodic.call=[&](U site,const auto& args)->U{
+        if(site==0x4403c0){if(args.at(0)!=peer_leave_source)throw MissionTickError("Peer result frame has no current owner");mission_logic_build_result(result_bindings,peer_leave_packet);return 0;}
+        if(site==0x460e40||site==0x442ae0||site==0x4421d0)return logic.call(site,args);
+        if(site==0x490880)return need(h.pump_490880,"Mission leave pump is not bound")()?0u:1u;
         if(site==0x446da0){mission_periodic_team_scores(periodic);return 0;}
         if(site==0x448130)return U(mission_periodic_compare_clients(periodic,args.at(0),args.at(1)));
         if(site==0x49a620){for(U i=0;i<args.at(2);++i)periodic.write(args.at(0)+i,1,args.at(1)&255);return args.at(0);}
         if(site==0x4423f0||site==0x441750){
             const auto pointer=args.at(site==0x4423f0?1:2),length=args.at(site==0x4423f0?2:3);
             std::uint8_t* payload=nullptr;
-            if(length){if(pointer<periodic_source||std::uint64_t(pointer-periodic_source)+length>periodic_frame.size())throw MissionTickError("Periodic payload has no current owner");payload=periodic_frame.data()+pointer-periodic_source;}
+            if(length){if(pointer>=peer_leave_source&&std::uint64_t(pointer-peer_leave_source)+length<=peer_leave_packet.size())payload=peer_leave_packet.data()+pointer-peer_leave_source;else{if(pointer<periodic_source||std::uint64_t(pointer-periodic_source)+length>periodic_frame.size())throw MissionTickError("Periodic payload has no current owner");payload=periodic_frame.data()+pointer-periodic_source;}}
             if(site==0x4423f0)mission_round_broadcast(round_checks,args.at(0),payload,length);
             else{const U client=args.at(0);if(client<mission_client_source_base||(client-mission_client_source_base)%mission_client_record_size)throw MissionTickError("Periodic client pointer is invalid");const auto slot=(client-mission_client_source_base)/mission_client_record_size;if(slot>=17)throw MissionTickError("Periodic client index exceeds its pool");outbox->enqueue(slot,std::int32_t(args.at(1)),payload,length);}
             return 0;
@@ -847,6 +854,12 @@ void MissionSession::uninstall() noexcept {auto& p=*impl_;if(!p.active)return;if
 bool MissionSession::installed() const noexcept{return impl_->active;}
 MissionTickReport MissionSession::step(){if(!installed())throw MissionTickError("Mission session is not installed");return mission_tick(impl_->c.state,impl_->input);}
 void MissionSession::request_result(U mode,MissionLogicResultPacket& packet){if(!installed())throw MissionTickError("Mission result requires an installed session");mission_logic_request_result(impl_->result_bindings,mode,packet);}
+std::optional<U> MissionSession::leave_service(U site,const std::vector<U>& args){
+    if(site!=0x403a50&&site!=0x4401e0)return {};
+    if(!installed()||!args.empty())throw MissionTickError("Peer leave requires an installed Session and no arguments");
+    if(site==0x403a50)return mission_peer_leave_drain(impl_->periodic);
+    mission_peer_reset(impl_->periodic,Impl::peer_leave_source);return 0;
+}
 void MissionSession::end_events(){if(!installed())throw MissionTickError("Mission end events require an installed Session");impl_->event_stage.run_bit2_events();}
 std::optional<U> MissionSession::hud_service(U site,const std::vector<U>& args){return impl_->hud_service(site,args);}
 void MissionSession::script_message(U id,const std::uint8_t* bytes,std::size_t length){if(!installed()||!impl_->outbox)throw MissionTickError("Mission script outbox is not installed");if(length>std::numeric_limits<U>::max())throw MissionTickError("Mission script message is too large");impl_->outbox->broadcast(std::int32_t(id),bytes,U(length));}

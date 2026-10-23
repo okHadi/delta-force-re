@@ -1,3 +1,4 @@
+#include "dfre/mission_owner_cleanup.hpp"
 #include "dfre/mission_debrief_format.hpp"
 #include "dfre/mission_parameter.hpp"
 #include "dfre/game.hpp"
@@ -424,9 +425,12 @@ public:
         };
         bindings.service=[this](std::uint32_t site,const std::vector<std::uint32_t>& args){
             if(site==0x42eba0){if(!args.empty()||!mission_session_)throw MissionTickError("Mission end events require the current Session");mission_session_->end_events();return 0u;}
-            if(mission_session_){if(const auto result=mission_session_->hud_service(site,args))return *result;}
+            if(mission_session_){if(const auto result=mission_session_->leave_service(site,args))return *result;if(const auto result=mission_session_->hud_service(site,args))return *result;}
             if(mission_scripts_){const auto result=mission_scripts_->service(site,args);if(result)return *result;}
             const auto& memory=mission_sound_->asset_bindings();
+            if(site==0x43e6d0){if(!args.empty())throw MissionTickError("Sound cleanup takes no arguments");mission_sound_->cleanup();return 0u;}
+            if(site==0x49db20){if(args.size()!=1)throw MissionTickError("Bank cleanup needs its current context");mission_sound_->release_banks(args[0]);return 0u;}
+            if(site==0x402d40){if(!args.empty())throw MissionTickError("Resource cleanup takes no arguments");mission_resource_cleanup_global({memory.read,memory.write,memory.call});return 0u;}
             if(site==0x493a80)return mission_debrief_format({memory.read,memory.write,{}},args);
             if(site==0x4c4f40){if(args.size()!=2)throw MissionTickError("Parameter setter needs two arguments");return mission_parameter_set({memory.read,memory.write,{}},args[0],args[1]);}
             if(site==0x4c4f60){if(args.size()!=1)throw MissionTickError("Parameter getter needs one argument");return mission_parameter_get({memory.read,memory.write,{}},args[0]);}

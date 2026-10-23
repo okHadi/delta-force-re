@@ -104,7 +104,7 @@ int main(int argc,char** argv){try{
     sound_host.actor_word=[&,base_actor](auto actor,auto offset){if(actor>=0x822e80&&actor<0x867e80){if(!extra_memory||offset>0x110||mission_extra_actor_record_base(actor,1)!=actor)throw MissionTickError("Extra sound actor range is invalid");return extra_memory->read(actor+offset,4);}return base_actor(actor,offset);};
     sound_host.service=[&](auto site,const auto& args)->std::uint32_t{
         if(site==0x42eba0){if(!args.empty()||!current_session)throw MissionTickError("End events lost their current Session");current_session->end_events();return 0;}
-        if(current_session)if(const auto value=current_session->hud_service(site,args))return *value;
+        if(current_session){if(const auto value=current_session->leave_service(site,args))return *value;if(const auto value=current_session->hud_service(site,args))return *value;}
         if(line_owner)if(const auto value=line_owner->service(site,args))return *value;
         if(registry){if(const auto value=registry->service(site,args))return *value;}
         if(site==0x499f1f)return mission_rtxt_load(sound_owner->asset_bindings(),args.at(0));
@@ -217,6 +217,16 @@ int main(int argc,char** argv){try{
     std::cout<<"session_result mode1 rows "<<session.read(0x67f71c,4)<<" source_projectile_ring "<<shots_before_result<<std::endl;
     sound_memory.call(0x42eba0,{});
     std::cout<<"session_end_events current_live_owners selected "<<std::count_if(resources.mission.events.begin(),resources.mission.events.end(),[](const auto& event){return (event.words[0]&4u)!=0;})<<"\n";
+    if(sound_memory.call(0x403a50,{})!=0)throw MissionTickError("Single-player leave drain differs");
+    std::uint32_t reset_client=0;for(std::size_t slot=0;slot<17;++slot){const auto base=MissionClientLive::source_address(slot,0);if(clients.read(base+0x18c,1)){reset_client=base;break;}}
+    if(!reset_client)throw MissionTickError("Peer reset has no active source client");
+    clients.write(reset_client+0x1c4,2,3); // Explicit source client phase reaches result build/enqueue.
+    const auto reset_sequence=clients.read(reset_client+0x1b8,4);
+    sound_memory.call(0x4401e0,{});
+    if(clients.read(reset_client+0x1b8,4)!=(reset_sequence==32000?1u:reset_sequence+1))throw MissionTickError("Peer reset did not enqueue its current result packet");
+    if(clients.read(reset_client+0x1c4,2)!=0)throw MissionTickError("Peer reset lost the result build/enqueue phase");
+    for(std::size_t slot=0;slot<17;++slot){const auto base=MissionClientLive::source_address(slot,0);if(clients.read(base+8,4)||clients.read(base+0x8c,4)||clients.read(base+0x194,4))throw MissionTickError("Peer reset lost current client fields");}
+    std::cout<<"session_peer_leave current_clients_squads_packet\n";
     state.update_callbacks.emplace(0x0badf00e,[](auto&,const auto&,const auto&){});
     session.uninstall();current_session=nullptr;if(state.update_callbacks.size()!=prior_updates+1||state.secondary_callbacks.size()!=prior_secondary||!state.update_callbacks.count(0x0badf00d)||!state.update_callbacks.count(0x0badf00e))throw MissionTickError("Session removed another callback owner");if(session.installed())throw MissionTickError("Session did not uninstall");
     bool stopped_end_events=false;try{session.end_events();}catch(const MissionTickError&){stopped_end_events=true;}if(!stopped_end_events)throw MissionTickError("End events used an uninstalled Session");

@@ -24,6 +24,8 @@ Seagull updates and movement use that same primary owner, including all 1,024 ph
 
 Game routes the closed Debrief `493A80` formats through current sound memory after HUD formatting. Parameter set/get `4C4F40/4C4F60` use the current table pointer and shared return cell. Keep parameter allocation and initialization with their source owner.
 
+Route `leave_service` before the sound fallback for `403A50` and `4401E0`. Keep Session installed through these calls. The reset uses current clients, squads, result builder and outbox with its own 206-byte packet.
+
 Route `hud_service` before the sound service fallback. HUD history uses the shared frame timers. Campaign text uses the current RTXT table at `503238`.
 
 Keep installed callback slots under session control. `uninstall` restores the previous world bindings and removes the callback IDs it installed. Other callback IDs remain present. Each reached foreign body needs a real provider.
