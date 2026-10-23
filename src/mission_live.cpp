@@ -58,6 +58,21 @@ std::uint32_t& mission_player_burst(MissionTickState& state){
 void bind_mission_player_burst(MissionTickState& state){
     state.weapons.burst_storage=[&state]()->std::uint32_t&{return mission_player_burst(state);};
 }
+void bind_mission_linked_position(MissionTickState& state){
+    state.world.linked_position=[&state](std::uint32_t source,const std::array<std::int32_t,3>& position){
+        constexpr std::array<std::size_t,4> capacities{1024,1024,512,256};
+        for(std::uint8_t group=0;group<4;++group){
+            const auto base=mission_actor_source_address(group,0);if(source<base)continue;
+            const auto delta=source-base;if(delta%0x114u)continue;const auto slot=delta/0x114u;
+            if(slot>=capacities[group])continue;
+            if(slot>=state.tables.groups[group].size())throw MissionTickError("Linked position source exceeds its current table");
+            auto& actor=state.tables.groups[group][slot];
+            for(std::size_t axis=0;axis<3;++axis)actor.position[axis]=std::uint32_t(position[axis]);
+            return;
+        }
+        throw MissionTickError("Linked position needs a physical source address");
+    };
+}
 void bind_mission_geometry(MissionTickState& state,const MissionGeometry& geometry,
     MissionGeometryMatrixSource matrices){
     state.world.bounds=[&geometry](std::uint32_t handle){return geometry.bounds(handle);};

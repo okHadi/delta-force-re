@@ -12,6 +12,8 @@ void apply_mission_actor_image(MissionTickState& state,const AiActorRef& ref,con
 // Resolve the local actor's current person +6C for every weapon access.
 std::uint32_t& mission_player_burst(MissionTickState& state);
 void bind_mission_player_burst(MissionTickState& state);
+// Copy linked positions through current physical actor records, including inactive rows.
+void bind_mission_linked_position(MissionTickState& state);
 void bind_mission_geometry(MissionTickState& state,const MissionGeometry& geometry,
     MissionGeometryMatrixSource matrices={});
 using MissionCollisionEffect = std::function<std::optional<std::uint32_t>(

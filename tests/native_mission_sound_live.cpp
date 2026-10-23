@@ -1,0 +1,40 @@
+#include "dfre/mission_sound_live.hpp"
+#include "dfre/mission_actor_lifecycle.hpp"
+#include <fstream>
+#include <iostream>
+#include <iterator>
+using namespace dfre;
+namespace {
+using U=std::uint32_t;
+void check(bool ok,const char* text){if(!ok)throw MissionTickError(text);}
+template<class F>void fails(F f){bool failed=false;try{f();}catch(const std::exception&){failed=true;}check(failed,"Invalid sound record access was accepted");}
+constexpr std::array<U,4> bases{0x7dde80,0x867e80,0x8ace80,0x7cca80};
+constexpr std::array<std::size_t,4> caps{1024,1024,512,256};
+void initialize(MissionTickState& state,bool full=false){AiActorTables tables;for(U g=0;g<4;++g){tables.groups[g].resize(full?caps[g]:2);for(auto& a:tables.groups[g]){a.active=true;a.definition_index=1;}}init_mission_tick(state,{},std::move(tables),AiItemDefinitionTable(std::vector<AiItemDefinition>(2)),{},123);state.projectiles.resize(full?512:2);for(auto& p:state.projectiles)p.item_main=1;}
+}
+int main(int argc,char** argv){try{
+ MissionTickState state;U key=3;auto b=mission_sound_live_bindings(state,[&]{return key;});check(!b.completed&&!b.service,"Foreign sound services need caller bindings");check(b.script_key()==3,"Script key is not current");key=7;check(b.script_key()==7,"Script key was copied");
+ check(!b.record_base(0x503228,4),"Static address was claimed as a record");fails([&]{b.record_base(bases[0],4);});fails([&]{b.record_base(0x9f3098,4);});initialize(state);
+ for(U g=0;g<4;++g){const U base=bases[g];check(b.record_base(base+0x1d,2)==base,"Actor record has no current base");b.record_store(base,0x24,4,0x12345678+g);check(state.tables.groups[g][0].position[0]==0x12345678+g,"Store missed actor state");state.tables.groups[g][0].position[0]=0xa1b2c3d4+g;check(b.actor_word(base,0x24)==0xa1b2c3d4+g,"Actor read is stale");b.record_store(base,0x25,2,0x7788);check(b.record_read(base,0x24,4)==(0xa17788d4u+g),"Actor widths do not share bytes");b.record_store(base,0x1c,4,0x6e0700);check(snapshot_mission_actor(state,{std::uint8_t(g),0})[0x1d]==7,"Stored image missed sound link");
+  b.record_store(base,0x113,1,0x5a);check(b.record_read(base,0x112,2)==0x5a00,"Actor final byte was lost");b.record_store(base,0x110,4,0x11223344);check(b.record_read(base,0x113,1)==0x11,"Actor final word widths differ");
+  fails([&]{b.record_read(base+1,0,4);});fails([&]{b.record_store(base+1,0,1,0);});fails([&]{b.record_base(base+0x113,2);});fails([&]{b.record_base(base+2*0x114,1);});fails([&]{b.record_read(base+2*0x114,0,4);});
+ }
+ const U pbase=0x9f3098;b.record_store(pbase,0x24,4,0x87654321);check(U(state.projectiles[0].position.x)==0x87654321,"Projectile position store missed state");state.projectiles[0].position.x=0x12345678;check(b.actor_word(pbase,0x24)==0x12345678,"Projectile read is stale");b.record_store(pbase,0x25,2,0xbeef);check(b.record_read(pbase,0x24,4)==0x12beef78,"Projectile widths do not share bytes");b.record_store(pbase,0x1d,2,0xcdef);check(b.record_read(pbase,0x1c,4)==0x00cdef00,"Projectile reserved sound link was lost");b.record_store(pbase,0x113,1,0x9a);check(snapshot_projectile_record(state.projectiles[0])[0x113]==0x9a,"Projectile tail store was lost");
+ b.record_store(pbase,0xf8,4,bases[3]);check(state.projectiles[0].owner_slot==0,"Projectile owner slot zero was lost");b.record_store(pbase,0xf8,4,0);check(state.projectiles[0].owner_slot==-1,"Projectile null owner was lost");
+ ProjectileRecordImage full{};for(std::size_t i=0;i<full.size();++i)full[i]=std::uint8_t(i*73+11);for(unsigned i=0xf8;i<0xfc;++i)full[i]=0;apply_projectile_record(state.projectiles[1],full);const U second=pbase+0x114;
+ for(U i=0;i<full.size();++i)check(b.record_read(second,i,1)==full[i],"Full projectile byte read missed canonical storage");
+ for(U i=0;i<full.size();++i)if(i<0xf8||i>=0xfc){full[i]^=0x5a;b.record_store(second,i,1,full[i]);}check(snapshot_projectile_record(state.projectiles[1])==full,"Full projectile byte stores missed canonical storage");
+ for(U width:{0u,3u,5u,0xffffffffu}){fails([&]{b.record_base(bases[0],width);});fails([&]{b.record_read(bases[0],0,width);});fails([&]{b.record_store(pbase,0,width,0);});}
+ for(U offset:{0x111u,0x112u,0x113u,0x114u,0xffffffffu}){fails([&]{b.record_read(bases[0],offset,4);});fails([&]{b.record_store(pbase,offset,4,0);});}
+ fails([&]{b.record_read(0x1234,0,4);});fails([&]{b.record_store(0x1234,0,1,0);});fails([&]{b.record_base(bases[3]-1,2);});fails([&]{b.record_base(pbase-1,2);});fails([&]{b.record_base(0xffffffff,4);});fails([&]{b.actor_word(bases[0]+1,0);});fails([&]{b.record_base(0x822e80,4);});
+ // Existing bindings follow a new table allocation and exact physical limits.
+ initialize(state,true);for(U g=0;g<4;++g){const auto last=bases[g]+U(caps[g]-1)*0x114;check(b.record_base(last+0x113,1)==last,"Last actor physical row is missing");b.record_store(last,0x113,1,0xab);check(b.record_read(last,0x113,1)==0xab,"Last actor physical row store failed");fails([&]{b.record_base(last+0x113,2);});}
+ const U lastp=pbase+511*0x114;check(b.record_base(lastp+0x113,1)==lastp,"Last projectile is missing");b.record_store(lastp,0x113,1,0x98);check(b.record_read(lastp,0x113,1)==0x98,"Last projectile tail store failed");check(!b.record_base(pbase+512*0x114,1),"Projectile extent was enlarged");state.projectiles.resize(513);fails([&]{b.record_base(pbase,1);});state.projectiles.resize(512);state.tables.groups[3].resize(257);fails([&]{b.record_base(bases[3],1);});initialize(state);
+ if(argc==1)return 0;check(argc==2,"Use: native_mission_sound_live [GAME_FOLDER]");
+ const std::filesystem::path game(argv[1]);AssetStore assets(game);std::ifstream input(game/"Df.exe",std::ios::binary);AssetBytes executable((std::istreambuf_iterator<char>(input)),{});Fixed3 listener{};U yaw=0;MissionAudioFrameCells frame{7,listener,yaw};TerrainGeometry flat(AssetBytes(1024*1024,0),AssetBytes(1024*1024),std::vector<U>(65536));const TerrainGeometry* terrain=&flat;
+ // Factory is created before initialization; runtime retains these bindings.
+ MissionTickState live_state;U live_key=0x04960552;auto live=mission_sound_live_bindings(live_state,[&]{return live_key;});MissionSoundRuntime sound(assets,executable,frame,terrain,std::move(live));sound.initialize_definitions("LOOP.DEF");const auto& memory=sound.asset_bindings();const std::string mission="C05M07.BMS";for(U i=0;i<=mission.size();++i)memory.write(0x8cf96c+i,1,i<mission.size()?std::uint8_t(mission[i]):0);sound.resolve_definitions("SNIPER.PWF","NEW.PWF");initialize(live_state);
+ U ambient=0;for(U id=1;id<512;++id)if(memory.read(0x4f2ea4+id*40+36,1)&2){ambient=id;break;}check(ambient!=0,"Supplied ambient definition is missing");sound.attach(bases[3],ambient,255,255);check(frame.registrations_6e0700[0].actor==bases[3]&&memory.read(bases[3]+0x1c,4)==0x6e0700,"Real attach missed canonical storage");check(snapshot_mission_actor(live_state,{3,0})[0x1d]==7,"Attach store missed actor image");
+ live_state.tables.groups[3][0].position[0]=1;check(memory.read(bases[3]+0x24,4)==1,"Sound owner missed actor mutation");memory.write(bases[3]+0x25,1,2);check(live_state.tables.groups[3][0].position[0]==513,"Sound raw write missed actor state");sound.frame();check(frame.counter_4f7ea8==0&&frame.handles_6e06e8[0]!=0,"Real ambient frame did not start a software voice");sound.publish();sound.advance_frames(100);
+ MissionAnimations animations(std::vector<MissionAnimationBinding>{});MissionActorLifecycle lifecycle(live_state,animations,frame.registrations_6e0700,{});lifecycle.unregister_audio({3,0});check(frame.registrations_6e0700[0].actor==0,"Lifecycle did not clear the shared registration");for(unsigned i=0;i<8;++i)sound.frame();check(frame.handles_6e06e8[0]==0,"Scheduler kept an unregistered voice");check(memory.read(0xd08940,4)==1,"Software sound engine is disabled");std::cout<<"live_sound_attach_frame_unregister passed device_output0\n";return 0;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

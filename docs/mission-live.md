@@ -32,6 +32,10 @@ address. The collision join resolves it before it sends typed IDs to effects.
 The physical table limits for groups 0–3 are 1024, 1024, 512, and 256 rows.
 The separate pool at `0x822E80` requires its own binding.
 
+Call `bind_mission_linked_position` after mission setup. Carried actors receive
+the current carrier position at the end of each actor update. See
+[linked actor position](mission-linked-position.md).
+
 Call `bind_mission_player_burst` after player setup. Weapons read and write the
 local actor's current person counter. Use `mission_player_burst` as the storage
 provider for full player weapon calls.

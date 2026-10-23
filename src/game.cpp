@@ -16,6 +16,7 @@
 #include "dfre/input_config.hpp"
 #include "dfre/mission_live.hpp"
 #include "dfre/mission_muzzle.hpp"
+#include "dfre/mission_sound_live.hpp"
 
 #include <array>
 #include <cstring>
@@ -107,13 +108,15 @@ public:
             std::optional<RtxtTable> names;
             if (!config.campaign_text_file.empty() && mission_asset_present(assets_, config.campaign_text_file))
                 names.emplace(assets_.read(config.campaign_text_file).bytes);
+            prepare_mission_sound();
             mission_runtime_ = std::make_unique<MissionRuntimeState>(assemble_mission_runtime(
                 *mission_resources_, mission_assets_->items(), world_->terrain.geometry,
-                names ? &*names : nullptr, config));
+                names ? &*names : nullptr, config,
+                [this](std::string_view name){return mission_sound_->definition_id(name);}));
             if (!mission_runtime_->local_player || !mission_runtime_->actors)
                 throw std::runtime_error("Mission has no local player actor");
-            mission_tick_ = std::make_unique<MissionTickState>();
             init_mission_tick(*mission_tick_,{},*mission_runtime_,0);
+            bind_mission_linked_position(*mission_tick_);
             mission_tick_->weapons=std::move(weapons);
             mission_animations_=std::make_unique<MissionAnimations>(*mission_runtime_,*mission_assets_);
             mission_geometry_=std::make_unique<MissionGeometry>(*mission_runtime_,*mission_assets_,assets_);
@@ -147,6 +150,9 @@ public:
         world.leave = [this] {
             mission_scene_.reset();
             mission_input_.reset();
+            mission_sound_.reset();
+            mission_audio_frame_.reset();
+            mission_sound_terrain_=nullptr;
             mission_tick_.reset();
             mission_muzzle_.reset();
             mission_geometry_.reset();
@@ -169,6 +175,26 @@ public:
         end.render = [this] { if (!frame_.empty()) window_->present(frame_); };
     }
 
+    void prepare_mission_sound() {
+        mission_tick_=std::make_unique<MissionTickState>();
+        mission_sound_terrain_=&world_->terrain.geometry;
+        mission_listener_={};mission_listener_yaw_=0;
+        mission_audio_frame_=std::make_unique<MissionAudioFrameCells>(
+            MissionAudioFrameCells{0,mission_listener_,mission_listener_yaw_});
+        std::ifstream executable_file(options_.game_folder/"Df.exe",std::ios::binary);
+        if(!executable_file)throw std::runtime_error("Original Df.exe is missing");
+        const AssetBytes executable((std::istreambuf_iterator<char>(executable_file)),{});
+        auto bindings=mission_sound_live_bindings(*mission_tick_,[this]{return mission_script_key_503228_;});
+        mission_sound_=std::make_unique<MissionSoundRuntime>(assets_,executable,
+            *mission_audio_frame_,mission_sound_terrain_,std::move(bindings));
+        mission_sound_->initialize_definitions("LOOP.DEF");
+        const auto& path=mission_selection_->filename;
+        if(path.size()>=80)throw std::runtime_error("Mission sound path exceeds its source buffer");
+        const auto& memory=mission_sound_->asset_bindings();
+        for(std::size_t i=0;i<=path.size();++i)
+            memory.write(0x8cf96c+std::uint32_t(i),1,i<path.size()?std::uint8_t(path[i]):0);
+        mission_sound_->resolve_definitions("SNIPER.PWF","NEW.PWF");
+    }
     void draw_mission(bool report_gaps) {
         const auto slot=mission_tick_->config.local_actor;
         if(!slot)throw std::runtime_error("Mission has no live local actor");
@@ -293,6 +319,12 @@ private:
     std::unique_ptr<MissionGeometry> mission_geometry_;
     std::unique_ptr<MissionMuzzle> mission_muzzle_;
     std::unique_ptr<InputBridge> mission_input_;
+    Fixed3 mission_listener_{};
+    std::uint32_t mission_listener_yaw_=0;
+    std::uint32_t mission_script_key_503228_=0x04960552;
+    const TerrainGeometry* mission_sound_terrain_=nullptr;
+    std::unique_ptr<MissionAudioFrameCells> mission_audio_frame_;
+    std::unique_ptr<MissionSoundRuntime> mission_sound_;
     StateLoop loop_;
     std::map<GameScreen, GameState> states_;
     GameScreen screen_ = GameScreen::main_menu;

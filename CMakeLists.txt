@@ -101,13 +101,18 @@ set(DFRE_RUNTIME_MODULES
     mission_object_generic
     mission_object_wood_large
     mission_type_counts
+    mission_object_destruction
+    mission_round_checks
+    mission_event_person
 )
-target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp)
+target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp src/mission_sound_live.cpp)
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
     add_executable(${dfre_module}_probe tools/${dfre_module}_probe.cpp)
     target_link_libraries(${dfre_module}_probe PRIVATE dfre_core)
 endforeach()
+add_executable(mission_linked_position_probe tools/mission_linked_position_probe.cpp)
+target_link_libraries(mission_linked_position_probe PRIVATE dfre_core)
 add_executable(mission_profile_probe tools/mission_profile_probe.cpp)
 target_link_libraries(mission_profile_probe PRIVATE dfre_core)
 add_executable(mission_sound_stock_probe tools/mission_sound_stock_probe.cpp)
@@ -229,6 +234,12 @@ endif()
 
 include(CTest)
 if(BUILD_TESTING)
+    add_executable(native_mission_sound_live tests/native_mission_sound_live.cpp)
+    target_link_libraries(native_mission_sound_live PRIVATE dfre_core)
+    add_test(NAME native_mission_sound_live COMMAND native_mission_sound_live)
+    add_executable(native_mission_linked_position tests/native_mission_linked_position.cpp)
+    target_link_libraries(native_mission_linked_position PRIVATE dfre_core)
+    add_test(NAME native_mission_linked_position COMMAND native_mission_linked_position)
     add_executable(native_mission_combat_live tests/native_mission_combat_live.cpp)
     target_link_libraries(native_mission_combat_live PRIVATE dfre_core)
     add_test(NAME native_mission_combat_live COMMAND native_mission_combat_live)
@@ -256,7 +267,8 @@ if(BUILD_TESTING)
         native_mission_object_cactus native_mission_object_sight native_mission_event_actor_orders
         native_mission_sound_runtime native_mission_object_sound native_mission_event_actor_flags
         native_mission_object_update native_mission_object_wood_small native_mission_object_generic
-        native_mission_object_wood_large native_mission_type_counts)
+        native_mission_object_wood_large native_mission_type_counts native_mission_object_destruction
+        native_mission_round_checks native_mission_event_person)
         if(MSVC)
             target_compile_options(${dfre_peer_test} PRIVATE /UNDEBUG)
         else()
