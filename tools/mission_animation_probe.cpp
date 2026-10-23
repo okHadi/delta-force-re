@@ -13,7 +13,7 @@ int main(int argc,char** argv){try{
     if(!start)throw std::runtime_error("Mission has no single-player start");
     MissionInitConfig config;config.mode=mission_theme(resources.mission);
     config.night=mission_night(resources.mission);config.player_object_id=start->marker_object_id;
-    const auto state=assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,config);
+    const auto state=assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,config,{},[&](std::string_view name)->const dfre::Model&{return cache.model(name);});
     MissionAnimations animations(state,cache);
     std::size_t active=0,updates=0,changed=0;
     for(std::size_t slot=0;slot<state.character_instances.size();++slot){

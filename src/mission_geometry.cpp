@@ -259,6 +259,12 @@ std::optional<std::vector<ActorCollisionMesh>> MissionGeometry::collision_state(
 
 std::optional<MissionGroundEntity> MissionGeometry::ground_entity(const AiActorImage& actor,
     const std::array<std::int32_t,3>& query, const MissionGeometryMatrixSource& matrices) const {
+    return ground_entity(actor, query, matrices, {});
+}
+
+std::optional<MissionGroundEntity> MissionGeometry::ground_entity(const AiActorImage& actor,
+    const std::array<std::int32_t,3>& query, const MissionGeometryMatrixSource& matrices,
+    const std::function<void(std::int32_t)>& accepted_surface) const {
     const auto flags = word(actor, 0x6c);
     const bool alternate = (flags & 8) && word(actor, 0x14);
     const auto handle = word(actor, alternate ? 0x14 : 0x10);
@@ -327,6 +333,7 @@ std::optional<MissionGroundEntity> MissionGeometry::ground_entity(const AiActorI
                                 auto surface = point;
                                 surface[2] = plane_height(normal, box.plane_constant, point);
                                 volume.height = model_transform_point(state.matrices[mesh_index], surface)[2];
+                                if (accepted_surface) accepted_surface(volume.height);
                             }
                         }
                     }

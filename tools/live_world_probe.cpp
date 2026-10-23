@@ -20,7 +20,7 @@ int main(int argc,char** argv) {
         config.mode=dfre::mission_theme(resources.mission);
         config.night=dfre::mission_night(resources.mission);
         config.player_object_id=start->marker_object_id;
-        auto state=dfre::assemble_mission_runtime(resources,cache.items(),terrain.terrain.geometry,nullptr,config);
+        auto state=dfre::assemble_mission_runtime(resources,cache.items(),terrain.terrain.geometry,nullptr,config,{},[&](std::string_view name)->const dfre::Model&{return cache.model(name);});
         auto seed=dfre::seed_mission_actors(state);
         std::size_t slots=0;
         for(std::size_t group=0;group<4;++group)for(std::size_t slot=0;slot<seed.images[group].size();++slot){

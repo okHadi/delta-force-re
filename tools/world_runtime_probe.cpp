@@ -326,7 +326,7 @@ int run_audit(const std::string& folder, const Options& options) {
             people.emplace(assets.read(config.campaign_text_file).bytes);
         }
         const auto state = dfre::assemble_mission_runtime(resources, cache.items(), terrain.geometry,
-                                                          people ? &*people : nullptr, config);
+                                                          people ? &*people : nullptr, config,{},[&](std::string_view name)->const dfre::Model&{return cache.model(name);});
         print_audit_row(mission, state);
         ++done;
     }
@@ -345,7 +345,7 @@ int run_state(const std::string& folder, const std::string& mission, const Optio
         people.emplace(assets.read(config.campaign_text_file).bytes);
     }
     const auto state = dfre::assemble_mission_runtime(resources, cache.items(), terrain.geometry,
-                                                      people ? &*people : nullptr, config);
+                                                      people ? &*people : nullptr, config,{},[&](std::string_view name)->const dfre::Model&{return cache.model(name);});
     print_state(mission, state);
     return 0;
 }
@@ -357,7 +357,7 @@ int run_defs(const std::string& folder, const std::string& mission, const Option
     const auto config = make_config(mission, options, resources.mission);
     const auto terrain = dfre::load_terrain_runtime(assets, mission, 32);
     const auto state = dfre::assemble_mission_runtime(resources, cache.items(), terrain.geometry,
-                                                      nullptr, config);
+                                                      nullptr, config,{},[&](std::string_view name)->const dfre::Model&{return cache.model(name);});
     for (std::size_t i = 0; i < state.definitions.size(); ++i) {
         const auto& def = state.definitions[i];
         std::cout << i << ' ' << def.id << ' ' << unsigned(def.flags) << ' ' << def.type << ' '

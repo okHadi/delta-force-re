@@ -128,7 +128,7 @@ int main(int argc,char** argv){try{
     WeaponState starting_weapons;starting_weapons.loadout({profile_word(0x680),profile_word(0x684),profile_word(0x688)});starting_weapons.select_slot(3);config.weapon_slot_value=starting_weapons.current_weapon();
     std::cout<<"profile new_stock_default loadout "<<profile_word(0x680)<<','<<profile_word(0x684)<<','<<profile_word(0x688)<<" weapon "<<unsigned(starting_weapons.current_weapon())<<std::endl;
     config.player_object_id=sound.asset_bindings().read(0x50133c,4);std::cout<<"local_peer_identity "<<config.player_object_id<<std::endl;
-    auto initial=assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,config,sound_resolver);
+    auto initial=assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,config,sound_resolver,[&](std::string_view name)->const Model&{return cache.model(name);});
     current_initial=&initial;
     std::size_t ambient_bound=0;for(const auto& item:initial.definitions)for(auto handle:item.ambient_handles)ambient_bound+=handle!=0;std::cout<<"ambient_bound "<<ambient_bound<<std::endl;if(!ambient_bound)throw MissionTickError("Stock ambient item names have no bindings");
 

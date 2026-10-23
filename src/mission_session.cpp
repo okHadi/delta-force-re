@@ -49,6 +49,8 @@
 #include "dfre/mission_object_mine_update.hpp"
 #include "dfre/mission_object_helo_update.hpp"
 #include "dfre/mission_object_helo_condition.hpp"
+#include "dfre/mission_object_helo_home.hpp"
+#include "dfre/mission_projectile_owner.hpp"
 #include "dfre/world_hits.hpp"
 #include "dfre/mission_logic.hpp"
 #include "dfre/mission_client_outbox.hpp"
@@ -192,6 +194,9 @@ struct MissionSession::Impl {
     static constexpr U helo_condition_source=0x1b004100;
     std::array<std::uint8_t,16> helo_condition_frame{};
     bool helo_condition_active=false;
+    static constexpr U helo_altitude_source=0x1b004200;
+    std::array<std::uint8_t,0x40> helo_altitude_frame{};
+    bool helo_altitude_active=false;
     static constexpr U barrel_source=0x1b003000;
     std::array<std::uint8_t,24> barrel_frame{};
     bool running_periodic=false;
@@ -531,6 +536,7 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     helo.read=[&](U at,U width){
         if(at>=helo_source&&std::uint64_t(at-helo_source)+width<=helo_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(helo_frame.at(at-helo_source+i))<<(i*8);return n;}
         if(at>=helo_condition_source&&std::uint64_t(at-helo_condition_source)+width<=helo_condition_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(helo_condition_frame.at(at-helo_condition_source+i))<<(i*8);return n;}
+        if(at>=helo_altitude_source&&std::uint64_t(at-helo_altitude_source)+width<=helo_altitude_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(helo_altitude_frame.at(at-helo_altitude_source+i))<<(i*8);return n;}
         if(at>=0x78f280&&std::uint64_t(at)+width<=0x793680){
             const U slot=(at-0x78f280)/0x88,offset=(at-0x78f280)%0x88;
             if(offset+width>0x88||slot>=state.world.behavior_world.lists.size())throw MissionTickError("Helicopter marker list has no current owner");
@@ -563,6 +569,7 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     helo.write=[&](U at,U width,U value){
         if(at>=helo_source&&std::uint64_t(at-helo_source)+width<=helo_frame.size()){for(U i=0;i<width;++i)helo_frame.at(at-helo_source+i)=std::uint8_t(value>>(i*8));return;}
         if(at>=helo_condition_source&&std::uint64_t(at-helo_condition_source)+width<=helo_condition_frame.size()){for(U i=0;i<width;++i)helo_condition_frame.at(at-helo_condition_source+i)=std::uint8_t(value>>(i*8));return;}
+        if(at>=helo_altitude_source&&std::uint64_t(at-helo_altitude_source)+width<=helo_altitude_frame.size()){for(U i=0;i<width;++i)helo_altitude_frame.at(at-helo_altitude_source+i)=std::uint8_t(value>>(i*8));return;}
         if(at>=0x794680&&std::uint64_t(at)+width<=0x7cca80){const auto slot=(at-0x794680)/0xb4,offset=(at-0x794680)%0xb4;
             if(slot>=state.people.size())throw MissionTickError("Helicopter person store has no current owner");
             U* word=nullptr;U base=0;
@@ -591,6 +598,32 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         periodic.write(at,width,value);
     };
     helo.call=[&](U site,const auto& args)->U{
+        if(site==0x486fd0){
+            const auto signed_word=[](U word){std::int32_t n;std::memcpy(&n,&word,4);return n;};
+            const std::array<std::int32_t,3> point{signed_word(helo.read(args.at(1),4)),signed_word(helo.read(args.at(1)+4,4)),signed_word(helo.read(args.at(1)+8,4))};
+            auto height=ground_height_query(terrain.geometry,point[0],point[1]);
+            const auto ref=mission_projectile_owner_source_ref(state,args.at(0));
+            state.runtime_for(ref).ground_100=0;
+            const auto& actor=*state.actor_at(ref);if(signed_word(actor.field_108)<=0)return U(height);
+            const auto start=actor.field_104;
+            for(U index=0;signed_word(index)<signed_word(actor.field_108);++index){
+                const auto slot=std::uint64_t(start)+index;if(slot>=state.ai.target_list.size())throw MissionTickError("Helicopter ground target has no current owner");
+                const auto target=state.ai.target_list[std::size_t(slot)];const auto image=snapshot_mission_actor(state,target);
+                geometry.ground_entity(image,point,matrices,[&](std::int32_t surface){
+                    if(surface<height||signed_word(U(point[2])+args.at(2))<surface)return;
+                    state.runtime_for(ref).ground_100=actor_handle(target.group,target.index);height=surface;
+                });
+            }
+            return U(height);
+        }
+        if(site==0x4509f0)return mission_object_helo_home(helo,args.at(0));
+        if(site==0x450100){
+            if(helo_altitude_active)throw MissionTickError("Helicopter altitude frame is already active");
+            helo_altitude_active=true;struct Scope{bool& active;~Scope(){active=false;}} scope{helo_altitude_active};
+            for(U i=0;i<4;++i)helo.write(helo_altitude_source+0x30+i*4,4,args.at(i));
+            mission_object_helo_altitude(helo,helo_altitude_source);return 0;
+        }
+        if(site==0x477820){const U index=args.at(0)>>21;helo.write(args.at(1),4,U(kSineTableQ22[index]));helo.write(args.at(2),4,U(kSineTableQ22[index+512]));return 0;}
         if(site==0x450ae0){
             if(helo_condition_active)throw MissionTickError("Helicopter condition frame is already active");
             helo_condition_active=true;struct Scope{bool& active;~Scope(){active=false;}} scope{helo_condition_active};
@@ -601,6 +634,7 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         if(site==0x477770)return query_angle_477770(args.at(0),args.at(1));
         if(site==0x477670){std::array<std::int32_t,3> n{};for(U i=0;i<3;++i)std::memcpy(&n[i],&args.at(i),4);return U(collision_approximate_length(n[0],n[1],n[2]));}
         if(site==0x43ef80){sound.attach(args.at(0),args.at(1),args.at(2),args.at(3));return 0;}
+        if(site==0x43f020){sound.stop(args.at(0),args.at(1));return 0;}
         if(site==0x477860)return behavior_rng_next(state.behavior);
         if(site==0x47df40){std::int32_t x,y;std::memcpy(&x,&args.at(0),4);std::memcpy(&y,&args.at(1),4);return U(ground_height_query(terrain.geometry,x,y));}
         if(site==0x49a620){for(U i=0;i<args.at(2);++i)helo.write(args.at(0)+i,1,args.at(1)&255);return args.at(0);}

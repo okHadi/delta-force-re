@@ -14,7 +14,7 @@ int main(int argc,char** argv){try{
     if(!start)throw std::runtime_error("Mission has no single-player start");
     MissionInitConfig config;config.mode=mission_theme(resources.mission);config.night=mission_night(resources.mission);
     config.player_object_id=start->marker_object_id;
-    const auto initial=assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,config);
+    const auto initial=assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,config,{},[&](std::string_view name)->const dfre::Model&{return cache.model(name);});
     MissionAnimations animations(initial,cache);MissionGeometry geometry(initial,cache,store);
     MissionMuzzle muzzle(initial,cache,animations);
     for(std::uint32_t index=0;index<kWeaponCount;++index){

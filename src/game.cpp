@@ -140,7 +140,8 @@ public:
             mission_runtime_ = std::make_unique<MissionRuntimeState>(assemble_mission_runtime(
                 *mission_resources_, mission_assets_->items(), world_->terrain.geometry,
                 names ? &*names : nullptr, config,
-                [this](std::string_view name){return mission_sound_->definition_id(name);}));
+                [this](std::string_view name){return mission_sound_->definition_id(name);},
+                [this](std::string_view name)->const Model&{return mission_assets_->model(name);}));
             if (!mission_runtime_->local_player || !mission_runtime_->actors)
                 throw std::runtime_error("Mission has no local player actor");
             for(const auto& spawn:mission_runtime_->spawns)

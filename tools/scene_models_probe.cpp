@@ -20,7 +20,7 @@ int main(int argc,char** argv) {
         config.mode=dfre::mission_theme(resources.mission);
         config.night=dfre::mission_night(resources.mission);
         config.player_object_id=start->marker_object_id;
-        auto state=dfre::assemble_mission_runtime(resources,cache.items(),terrain.terrain.geometry,nullptr,config);
+        auto state=dfre::assemble_mission_runtime(resources,cache.items(),terrain.terrain.geometry,nullptr,config,{},[&](std::string_view name)->const dfre::Model&{return cache.model(name);});
         dfre::MissionScene32 renderer(state,cache,terrain,gamma_bytes);
         if(!state.local_player || !state.actors)throw std::runtime_error("Mission has no local player");
         const auto& actor=state.actors->actor(state.local_player->actor);

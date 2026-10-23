@@ -49,7 +49,8 @@ void check_group_limits(const MissionData& mission) {
 }
 
 // 0x45D6F0 handles: the first load per item and kind wins, models by filename.
-void fill_definition_handles(MissionRuntimeState& state, const MissionRuntimeResources& resources) {
+void fill_definition_handles(MissionRuntimeState& state, const MissionRuntimeResources& resources,
+                             const ItemModelResolver& model) {
     std::map<std::string, std::uint32_t> model_by_name;
     for (std::size_t i = 0; i < resources.models.size(); ++i) {
         ModelBinding binding;
@@ -104,6 +105,23 @@ void fill_definition_handles(MissionRuntimeState& state, const MissionRuntimeRes
         }
         }
     }
+    if(model)for(std::size_t item=0;item<state.definitions.size();++item){
+        auto& definition=state.definitions[item];
+        if(definition.type!=8||!definition.model||!graphic_done[item])continue;
+        const auto index=definition.model-kModelHandleBase;
+        if(index>=state.models.size())throw AssetError("Effect model handle exceeds loaded resources");
+        const auto& loaded=model(state.models[index].name);
+        if(loaded.lods.empty())continue;
+        const auto& header=loaded.lods.front().raw_header;
+        if(header.size()<0x5c)throw AssetError("Effect first LOD header is incomplete");
+        const auto upper=[&](std::size_t offset){
+            const auto high=std::uint32_t(header[offset+2])|(std::uint32_t(header[offset+3])<<8);
+            return (high&0x8000u)?high|0xffff0000u:high;
+        };
+        const auto height=upper(0x58),width=upper(0x40);
+        definition.effect_count=height*width;
+    }
+
 }
 
 std::uint32_t make_character_instance(MissionRuntimeState& state, std::size_t item_index) {
@@ -388,6 +406,16 @@ MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& reso
                                              const RtxtTable* people_names,
                                              const MissionInitConfig& config,
                                              const ItemSoundResolver& sound) {
+    return assemble_mission_runtime(resources,items,terrain,people_names,config,sound,{});
+}
+
+MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& resources,
+                                             const ItemCatalog& items,
+                                             const TerrainGeometry& terrain,
+                                             const RtxtTable* people_names,
+                                             const MissionInitConfig& config,
+                                             const ItemSoundResolver& sound,
+                                             const ItemModelResolver& model) {
     check_group_limits(resources.mission);
     MissionRuntimeState state;
     state.mission = resources.mission;
@@ -395,7 +423,7 @@ MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& reso
     // Original 0x4011C0: bind the AI/MOVE callback ids and ambient lookups
     // before any 0x449710 conversion reads definitions +0x84/+0x90.
     bind_runtime_item_callbacks(state.definitions,sound);
-    fill_definition_handles(state, resources);
+    fill_definition_handles(state, resources, model);
     state.resource_calls = resources.plan.calls.size();
     state.resource_steps = resources.plan.steps.size();
     state.null_lookups = resources.plan.null_lookups;
@@ -473,7 +501,8 @@ MissionRuntimeState initialize_mission(const AssetStore& assets, std::string_vie
         people.emplace(assets.read(config.campaign_text_file).bytes);
     }
     return assemble_mission_runtime(resources, cache.items(), terrain.geometry,
-                                    people ? &*people : nullptr, config);
+                                    people ? &*people : nullptr, config,{},
+                                    [&cache](std::string_view name)->const Model&{return cache.model(name);});
 }
 
 } // namespace dfre

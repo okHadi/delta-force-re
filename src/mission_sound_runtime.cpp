@@ -4,6 +4,7 @@
 #include "dfre/mission_sound_definitions.hpp"
 #include "dfre/mission_sound_registration.hpp"
 #include "dfre/mission_positional_sound.hpp"
+#include "dfre/mission_sound_stop.hpp"
 #include <algorithm>
 #include <cstring>
 #include <map>
@@ -123,6 +124,7 @@ struct MissionSoundRuntime::Impl {
     U foreign(U site,const std::vector<U>& args){check(bool(host.service),"Sound foreign service is not bound");return host.service(site,args);}
     U call(U site,const std::vector<U>& a){
         switch(site){
+        case 0x49a620:for(U i=0;i<a.at(2);++i)write(a.at(0)+i,1,a.at(1)&255u);return a.at(0);
         case 0x497f60:return memory.allocate(a.at(0));
         case 0x4980d0:if(!a.at(0))return 0xffffffffu;memory.release(a.at(0));return 0;
         case 0x499040:return exists(a.at(0));
@@ -249,6 +251,7 @@ void MissionSoundRuntime::resolve_definitions(std::string_view primary,std::stri
 void MissionSoundRuntime::global(U id){Impl::Stack stack(*impl_);mission_sound_global_request(impl_->banks,id,stack.at);}
 void MissionSoundRuntime::positional(U id,Fixed3 p){Impl::Stack stack(*impl_);mission_sound_positional_request(impl_->banks,id,U(p.x),U(p.y),U(p.z),stack.at);}
 void MissionSoundRuntime::attach(U actor,U id,U scale,U ceiling){mission_sound_attach(impl_->banks,actor,id,scale,ceiling);}
+void MissionSoundRuntime::stop(U actor,U scale){mission_sound_stop(impl_->banks,actor,scale);}
 U MissionSoundRuntime::loudness(U id){return mission_sound_loudness(impl_->banks,id);}
 U MissionSoundRuntime::definition_id(std::string_view name){if(name.empty()||!name.front())return 0;return impl_->definition_id(impl_->text(name));}
 void MissionSoundRuntime::frame(){impl_->frame();}

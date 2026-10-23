@@ -1,0 +1,19 @@
+#include "dfre/mission_object_helo_home.hpp"
+#include "dfre/mission_live.hpp"
+#include "dfre/actor_queries.hpp"
+#include "dfre/world_hits.hpp"
+#include "dfre/motion_queries.hpp"
+#include <cassert>
+using namespace dfre;using U=std::uint32_t;
+int main(){
+ MissionTickState state;AiActorTables tables;tables.groups[0].resize(1);auto& actor=tables.groups[0][0];actor.active=true;actor.definition_index=1;actor.person_slot=0;init_mission_tick(state,{},std::move(tables),AiItemDefinitionTable(std::vector<AiItemDefinition>(2)),std::vector<AiPersonState>(1),0);state.people[0].position[0]=0x600000;
+ constexpr U A=0x7dde80,P=0x794680,F=0x1d000000;std::array<std::uint8_t,64> frame{};TerrainGeometry terrain(AssetBytes(1024*1024,0),AssetBytes(1024*1024),std::vector<U>(65536));MissionObjectHeloBindings b;unsigned altitude_calls=0,ground_calls=0;bool move_during_ground=true;
+ auto put_frame=[&](U at,U n){for(U i=0;i<4;++i)frame.at(at-F+i)=std::uint8_t(n>>(i*8));};
+ b.read=[&](U at,U width)->U{U n=0;if(at==A+0xc){assert(width==4);return P;}if(at>=A&&at+width<=A+0x114){const auto image=snapshot_mission_actor(state,{0,0});for(U i=0;i<width;++i)n|=U(image.at(at-A+i))<<(i*8);return n;}if(at>=P&&at+width<=P+0xb4){auto image=ai_person_image(state.people[0]);for(U i=0;i<4;++i)image.at(0x2c+i)=std::uint8_t(state.person_extra(0).field_2c>>(8*i));for(U i=0;i<width;++i)n|=U(image.at(at-P+i))<<(i*8);return n;}if(at>=F&&at+width<=F+frame.size()){for(U i=0;i<width;++i)n|=U(frame.at(at-F+i))<<(i*8);return n;}throw MissionTickError("Unowned native helicopter memory");};
+ b.write=[&](U at,U width,U n){assert(width==4);if(at>=A&&at+4<=A+0x114){auto image=snapshot_mission_actor(state,{0,0});for(U i=0;i<4;++i)image.at(at-A+i)=std::uint8_t(n>>(i*8));apply_mission_actor_image(state,{0,0},image);return;}if(at==P+0x2c){state.person_extra(0).field_2c=n;return;}if(at>=F&&at+4<=F+frame.size()){put_frame(at,n);return;}throw MissionTickError("Unowned native helicopter store");};
+ b.call=[&](U site,const std::vector<U>& args)->U{if(site==0x477770)return query_angle_477770(std::int32_t(args.at(0)),std::int32_t(args.at(1)));if(site==0x477670)return U(collision_approximate_length(std::int32_t(args.at(0)),std::int32_t(args.at(1)),std::int32_t(args.at(2))));if(site==0x477820){const U index=args.at(0)>>21;b.write(args.at(1),4,U(kSineTableQ22.at(index)));b.write(args.at(2),4,U(kSineTableQ22.at(index+512)));return 0;}if(site==0x47df40){++ground_calls;if(move_during_ground)++state.tables.groups[0][0].position[0];return U(ground_height_query(terrain,std::int32_t(args.at(0)),std::int32_t(args.at(1))));}if(site==0x450100){++altitude_calls;for(U i=0;i<4;++i)put_frame(F+0x30+i*4,args.at(i));mission_object_helo_altitude(b,F);return 0;}throw MissionTickError("Required helicopter terrain-object query is not bound");};
+ assert(mission_object_helo_home(b,A)==1&&altitude_calls==1&&ground_calls==7);assert(b.read(A+0x88,4)==0xf0000&&b.read(A+0x8c,4)==0&&b.read(A+0xb0,4)==0x100&&b.read(A+0xb4,4)==0&&b.read(F+0x38,4)==0x40400);assert(state.tables.groups[0][0].position[0]==7);
+ state.people[0].position[0]=7;const auto force=b.read(A+0xb0,4);assert(mission_object_helo_home(b,A)==0&&altitude_calls==1&&b.read(A+0x88,4)==0&&b.read(A+0xb0,4)==force);
+ state.person_extra(0).field_2c=63;state.tables.groups[0][0].position[2]=0x50000;bool failed=false;try{mission_object_helo_altitude(b,F);}catch(const MissionTickError&){failed=true;}assert(failed&&state.person_extra(0).field_2c==0&&b.read(F,4)==7&&b.read(F+4,4)==0&&b.read(F+8,4)==0x20000&&ground_calls==7);
+ auto missing=b;missing.call={};failed=false;try{mission_object_helo_home(missing,A);}catch(const MissionTickError&){failed=true;}assert(failed);move_during_ground=false;state.tables.groups[0][0].position[2]=0;b.write(A+0xd4,4,12);put_frame(F+0x34,0);put_frame(F+0x38,0);put_frame(F+0x3c,0);mission_object_helo_altitude(b,F);assert(b.read(A+0xb0,4)==0xfffffeccu);
+}

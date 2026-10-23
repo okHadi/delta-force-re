@@ -14,6 +14,8 @@ Keep source x87 control in the session. Startup `490EEF` calls the CPU initializ
 
 Helicopter conditions use current people, marker lists, type speeds and event flags. Keep their sixteen-byte caller frame separate from the helicopter update frame. Current actor pointers select targets by their source address and identity.
 
+Helicopter altitude uses its own 64-byte caller frame. Ground queries use the current target list, model geometry and terrain. Publish each accepted surface to the same actor ground handle before processing the next face. Keep geometry inputs stable during publication.
+
 Route `hud_service` before the sound service fallback. HUD history uses the shared frame timers. Campaign text uses the current RTXT table at `503238`.
 
 Keep installed callback slots under session control. `uninstall` restores the previous world bindings and removes the callback IDs it installed. Other callback IDs remain present. Each reached foreign body needs a real provider.

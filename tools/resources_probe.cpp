@@ -13,7 +13,7 @@ int main(int argc,char** argv){
                 const auto before_calls=resources.plan.calls.size(),before_models=resources.models.size();
                 cache.load_projectile_runtime(resources);
                 const auto terrain=dfre::load_terrain_runtime(assets,name);
-                const auto state=dfre::assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,{});
+                const auto state=dfre::assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,{},{},[&](std::string_view name)->const dfre::Model&{return cache.model(name);});
                 std::cout<<"{\"mission\":\""<<name<<"\",\"before_models\":"<<before_models<<",\"models\":"<<resources.models.size()<<",\"loads\":[";
                 for(std::size_t i=0;i<3;++i){const auto& call=resources.plan.calls.at(before_calls+i);
                     const auto& definition=state.definitions.at(call.item_index);

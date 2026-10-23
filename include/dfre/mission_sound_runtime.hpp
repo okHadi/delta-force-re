@@ -33,6 +33,7 @@ public:
     void global(std::uint32_t id); //43E720
     void positional(std::uint32_t id,Fixed3);
     void attach(std::uint32_t raw_actor,std::uint32_t id,std::uint32_t scale,std::uint32_t ceiling);
+    void stop(std::uint32_t raw_actor,std::uint32_t scale); //43F020
     std::uint32_t loudness(std::uint32_t id);
     std::uint32_t definition_id(std::string_view name); //43F490
     void frame(); //43F0B0

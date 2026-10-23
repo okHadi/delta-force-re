@@ -86,6 +86,11 @@ public:
     std::optional<MissionGroundEntity> ground_entity(const AiActorImage& actor,
         const std::array<std::int32_t,3>& query,
         const MissionGeometryMatrixSource& matrices = {}) const;
+    // Publish each accepted face immediately. Keep geometry inputs stable during the callback.
+    std::optional<MissionGroundEntity> ground_entity(const AiActorImage& actor,
+        const std::array<std::int32_t,3>& query,
+        const MissionGeometryMatrixSource& matrices,
+        const std::function<void(std::int32_t)>& accepted_surface) const;
     MissionGroundEntities ground_entities(const std::vector<MissionGeometryActor>& actors,
         const std::array<std::int32_t,3>& query,
         const MissionGeometryMatrixSource& matrices = {}) const;

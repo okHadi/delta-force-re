@@ -170,6 +170,16 @@ MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& reso
                                              const MissionInitConfig& config,
                                              const ItemSoundResolver& sound);
 
+// Asset-backed assembly reads effect metadata from the same loaded model.
+using ItemModelResolver = std::function<const Model&(std::string_view)>;
+MissionRuntimeState assemble_mission_runtime(const MissionRuntimeResources& resources,
+                                             const ItemCatalog& items,
+                                             const TerrainGeometry& terrain,
+                                             const RtxtTable* people_names,
+                                             const MissionInitConfig& config,
+                                             const ItemSoundResolver& sound,
+                                             const ItemModelResolver& model);
+
 // Load the mission and its terrain, then assemble. One empty cache per call.
 MissionRuntimeState initialize_mission(const AssetStore& assets, std::string_view mission_file,
                                        const MissionInitConfig& config);
