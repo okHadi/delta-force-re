@@ -26,6 +26,11 @@ def compare(probe,mode,rows,expected):
 def run(args):
     source=(args.game/'Df.exe').read_bytes();assert hashlib.sha256(source).hexdigest()==HASH
     rig=Replay(source);rng=random.Random(0x4601a0);rows=[];expected=[]
+    startup_controls=[*CONTROLS,0x127f]
+    for control in startup_controls:
+        rig.u.reg_write(UC_X86_REG_FPCW,control)
+        rig.call(0x4a11d2)
+        assert rig.u.reg_read(UC_X86_REG_FPCW)==0x037f
     divisors=[n for n in range(1,6553601) if 6553600%n==0]
     corpus=set(EDGES)
     for n in [*range(1,513),*divisors]:corpus.update((n,(-n)&0xffffffff))
@@ -87,7 +92,7 @@ def run(args):
         output += [rig.u.mem_read(PERSON+slot*0xb4,0xb4).hex() for slot in range(3)]
         output.append(state['trace']);expected.append(' '.join(output));kind_counts[str(kind)]=kind_counts.get(str(kind),0)+1
     rig.u.hook_del(hook);compare(args.probe,'body',rows,expected)
-    report={'source_sha256':HASH,'rate_cases':rate_cases,'body_cases':len(rows),'differences':0,'kind_counts':kind_counts,'x87_controls':CONTROLS,'comparison':'Full action, nine actor and three person records, current counts, ordered width-specific reads/writes; real 49BAE6 instructions and restored CW.','fixtures':['4FB2CC 16-word table values','Read boundaries can change action operand, subtype, person pointer, or current count.'],'source_functions':['45FF20','4601A0']}
+    report={'source_sha256':HASH,'rate_cases':rate_cases,'body_cases':len(rows),'differences':0,'kind_counts':kind_counts,'x87_controls':CONTROLS,'startup_reset_cases':len(startup_controls),'startup_x87_control':0x037f,'comparison':'Full action, nine actor and three person records, current counts, ordered width-specific reads/writes; real 49BAE6 instructions and restored CW.','fixtures':['4FB2CC 16-word table values','Read boundaries can change action operand, subtype, person pointer, or current count.'],'source_functions':['45FF20','4601A0','4A11D2']}
     if args.report:args.report.write_text(json.dumps(report,indent=2)+'\n')
     print(json.dumps(report))
 

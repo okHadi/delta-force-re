@@ -38,6 +38,7 @@ struct MissionSessionContext {
     Fixed3& camera_position_6ba3d0;
 };
 struct MissionSessionHost {
+    bool primary_source_records=false;
     std::function<bool()> pump_490880;
     std::function<std::uint64_t()> rdtsc;
     std::function<std::uint32_t()> elapsed_audio_frames;

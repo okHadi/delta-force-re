@@ -1,5 +1,6 @@
 #include "dfre/mission_projectile_live.hpp"
 #include "dfre/collision.hpp"
+#include "dfre/mission_projectile_owner.hpp"
 #include <exception>
 #include <map>
 #include <memory>
@@ -123,17 +124,16 @@ public:
 private:
     std::uint32_t owner_identity(std::int32_t slot)const{
         if(slot==-1)return 0;
-        if(slot<0||std::size_t(slot)>=live_.tables.groups[3].size())throw MissionTickError("Projectile owner slot exceeds group 3");
-        return actor_handle(3,std::size_t(slot));
+        const auto ref=mission_projectile_owner_ref(live_,slot);return actor_handle(ref.group,ref.index);
     }
     AiActorRef decode(std::uint32_t id)const{
         if(id<kActorHandleBase)throw MissionTickError("Projectile actor identity is invalid");
         const auto key=id-kActorHandleBase,group=key/0x10000u,slot=key%0x10000u;
-        if(group>=4||slot>=live_.tables.groups[group].size())throw MissionTickError("Projectile actor identity exceeds its table");
-        return {std::uint8_t(group),slot};
+        if(group>4)throw MissionTickError("Projectile actor identity group is invalid");
+        const AiActorRef ref{std::uint8_t(group),slot};(void)mission_projectile_owner_index(live_,ref);return ref;
     }
     ProjectileHitActor record(const AiActorRef& ref){
-        if(ref.group>=4||!live_.actor_at(ref))throw MissionTickError("Projectile actor exceeds its table");
+        (void)mission_projectile_owner_index(live_,ref);
         const auto id=actor_handle(ref.group,ref.index);auto found=records_.find(id);
         if(found==records_.end())found=records_.emplace(id,RawActor{ref,snapshot_mission_actor(live_,ref)}).first;
         return {&found->second.image,id};

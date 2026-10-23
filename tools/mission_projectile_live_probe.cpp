@@ -34,10 +34,11 @@ int main(int argc,char** argv){try{
         std::uint32_t threshold,material_base;in>>p.class_flags>>p.ttl>>p.field_80>>threshold>>material_base;
         if(!in)throw std::invalid_argument("probe row incomplete");
         p.field_84=std::uint32_t(p.ttl);p.item_main=1;p.owner_slot=-1;
-        if(in>>p.owner_slot){
-            if(p.owner_slot!=0&&p.owner_slot!=-1)throw std::invalid_argument("probe owner must be slot zero or null");
+        in>>p.owner_slot;
+        if(p.owner_slot>=0){
+            unsigned g=3,slot=unsigned(p.owner_slot);if(slot>=3328){g=2;slot-=3328;}else if(slot>=2304){g=1;slot-=2304;}else if(slot>=1280){g=4;slot-=1280;}else if(slot>=256){g=0;slot-=256;}
+            auto owner=actor;owner.position[0]=0x7000000;auto& rows=g==4?tables.extra:tables.groups[g];rows.resize(slot+1);rows[slot]=owner;
         }
-        if(p.owner_slot==0){auto owner=actor;owner.position[0]=0x7000000;tables.groups[3]={owner};}
         std::vector<dfre::AiItemDefinition> defs(2);defs[1].field_84=0x6000000;
         dfre::MissionTickState state;dfre::init_mission_tick(state,{},std::move(tables),dfre::AiItemDefinitionTable(defs),{},123);
         state.globals.mission_67f528=1;state.world.world_center={0x4000000,0x4000000,0};state.extra_for({std::uint8_t(group),0}).field_74=100;

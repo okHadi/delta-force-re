@@ -21,6 +21,7 @@
 #include "dfre/mission_script_registry.hpp"
 #include "dfre/mission_rtxt.hpp"
 #include "dfre/mission_actor_insert_live.hpp"
+#include "dfre/mission_primary_actor_live.hpp"
 #include "dfre/mission_scene_transient.hpp"
 #include "dfre/mission_scene_projectiles.hpp"
 #include "dfre/mission_client_live.hpp"
@@ -147,6 +148,28 @@ public:
                     mission_actor_source_address(3,spawn.actor));
             init_mission_tick(*mission_tick_,{},*mission_runtime_,0);
             mission_tick_->projectiles.assign(512,ProjectileEntity{});
+            MissionPrimaryActorLiveBindings primary_memory;
+            primary_memory.delegated.read=[this](auto at,auto width){return mission_sound_->asset_bindings().read(at,width);};
+            primary_memory.delegated.write=[this](auto at,auto width,auto value){mission_sound_->asset_bindings().write(at,width,value);};
+            primary_memory.initial_definition=[this](auto slot){
+                const auto image=snapshot_mission_actor(*mission_tick_,{0,slot});
+                std::uint32_t index;std::memcpy(&index,image.data()+4,4);
+                return index?definition_base+index*std::uint32_t(runtime_item_size):0u;
+            };
+            primary_memory.definition_index=[this](auto pointer){
+                const auto offset=pointer-definition_base;
+                if(pointer<definition_base||offset%runtime_item_size||offset/runtime_item_size>=mission_runtime_->definitions.size())
+                    throw MissionTickError("Primary actor definition is outside its current table");
+                return std::uint32_t(offset/runtime_item_size);
+            };
+            primary_memory.definition_address=[this](auto index){
+                if(index>=mission_runtime_->definitions.size())throw MissionTickError("Primary definition index exceeds its current table");
+                return definition_base+index*std::uint32_t(runtime_item_size);
+            };
+            if(mission_tick_->tables.groups[0].size()>1024)throw MissionTickError("Primary actor count exceeds its physical pool");
+            //449620 clears the full physical pool before this fresh mission loads its counted prefix.
+            mission_primary_=std::make_unique<MissionPrimaryActorLive>(*mission_tick_,std::move(primary_memory),
+                std::vector<AiActorImage>(1024-mission_tick_->tables.groups[0].size()));
             prepare_mission_extra_actor_pool(*mission_tick_);
             MissionActorInsertBindings extra_memory;
             extra_memory.read=[this](auto at,auto width){return mission_sound_->asset_bindings().read(at,width);};
@@ -196,6 +219,7 @@ public:
             }
             const auto audio_origin=std::chrono::steady_clock::now();
             MissionSessionHost session_host;
+            session_host.primary_source_records=true;
             session_host.pump_490880=[this]{return poll_mission_input();};
             session_host.rdtsc=[](){return std::uint64_t(__rdtsc());};
             session_host.elapsed_audio_frames=[audio_origin,previous=std::uint64_t(0)]()mutable{
@@ -238,6 +262,7 @@ public:
             mission_scripts_.reset();
             mission_script_cells_.reset();
             mission_extra_memory_={};
+            mission_primary_.reset();
             mission_files_.reset();
             mission_sockets_.reset();
             mission_sound_.reset();
@@ -318,6 +343,12 @@ public:
         const auto record_store=bindings.record_store;
         const auto actor_word=bindings.actor_word;
         bindings.actor_word=[this,actor_word](std::uint32_t actor,std::uint32_t offset){
+            if(mission_primary_){
+                if(const auto base=mission_primary_->record_base(actor,1)){
+                    if(*base!=actor||offset>0x110)throw MissionTickError("Primary sound actor needs a complete current word");
+                    return mission_primary_->read(actor+offset,4);
+                }
+            }
             if(mission_extra_memory_.read){
                 if(const auto base=mission_extra_actor_record_base(actor,1)){
                     if(*base!=actor||offset>0x110)throw MissionTickError("Extra sound actor needs a complete current word");
@@ -327,6 +358,10 @@ public:
             return actor_word(actor,offset);
         };
         bindings.record_base=[this,record_base](std::uint32_t at,std::uint32_t width)->std::optional<std::uint32_t>{
+            if(mission_primary_&&mission_primary_->claims(at,width)){
+                if(const auto base=mission_primary_->record_base(at,width))return base;
+                return at;
+            }
             if(mission_session_&&mission_session_->claims(at,width))return at;
             if(mission_clients_->claims(at,width))return at;
             if(mission_sockets_&&mission_sockets_->claims(at,width))return at;
@@ -337,6 +372,11 @@ public:
         };
         bindings.record_read=[this,record_read](std::uint32_t base,std::uint32_t offset,std::uint32_t width){
             const auto at=base+offset;
+            if(mission_primary_&&mission_primary_->claims(at,width)){
+                if(const auto record=mission_primary_->record_base(at,width))
+                    if(*record!=base)throw MissionTickError("Primary sound record base is not aligned");
+                return mission_primary_->read(at,width);
+            }
             if(mission_session_&&mission_session_->claims(at,width))return mission_session_->read(at,width);
             if(mission_clients_->claims(at,width))return mission_clients_->read(at,width);
             if(mission_sockets_&&mission_sockets_->claims(at,width))return mission_sockets_->read(at,width);
@@ -347,6 +387,11 @@ public:
         };
         bindings.record_store=[this,record_store](std::uint32_t base,std::uint32_t offset,std::uint32_t width,std::uint32_t value){
             const auto at=base+offset;
+            if(mission_primary_&&mission_primary_->claims(at,width)){
+                if(const auto record=mission_primary_->record_base(at,width))
+                    if(*record!=base)throw MissionTickError("Primary sound record base is not aligned");
+                mission_primary_->write(at,width,value);return;
+            }
             if(mission_session_&&mission_session_->claims(at,width)){mission_session_->write(at,width,value);return;}
             if(mission_clients_->claims(at,width)){mission_clients_->write(at,width,value);return;}
             if(mission_sockets_&&mission_sockets_->claims(at,width)){mission_sockets_->write(at,width,value);return;}
@@ -546,6 +591,7 @@ private:
     std::unique_ptr<MissionTickState> mission_tick_;
     static constexpr std::uint32_t definition_base=0x18000000;
     MissionActorInsertBindings mission_extra_memory_;
+    std::unique_ptr<MissionPrimaryActorLive> mission_primary_;
     std::uint32_t mission_extra_count_8cfa14_=0;
     std::uint32_t mission_rules_67f548_=0;
     std::unique_ptr<MissionAnimations> mission_animations_;

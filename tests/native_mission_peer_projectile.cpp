@@ -42,4 +42,13 @@ int main(){
     requests.read=[](U a,U width){assert(a==0x6e5570&&width==4);return 100u;};std::array<std::uint8_t,15> packet{};
     call={};call.address=0x445b80;call.count=1;call.payload_argument=0;call.payload=packet.data();call.length=15;assert(adapter.call(call)==0&&cells.ring_index==1);
     call.address=0x123456;failed=false;try{adapter.call(call);}catch(const dfre::MissionTickError&){failed=true;}assert(failed&&!dfre::MissionPeerProjectile::owns(call.address));
+    effects=false;cls.field_30=0x80;cls.field_20=0;
+    call={};call.address=0x462f20;call.count=3;call.args[2]=3;call.payload_argument=0;call.payload=pose;call.length=20;
+    for(const auto group:{0u,1u,2u,4u}){
+        auto& rows=group==4?state.tables.extra:state.tables.groups[group];rows.resize(1);
+        call.args[1]=group==4?0x822e80:dfre::mission_actor_source_address(group,0);
+        adapter.call(call);assert(state.projectiles[cells.ring_index].owner_slot==std::int32_t((call.args[1]-0x7cca80)/0x114));
+    }
+    call.args[1]=0x7cca80;
+
 }

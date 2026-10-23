@@ -9,11 +9,11 @@ std::string hex(const ProjectileRecordImage& a){std::ostringstream s;s<<std::hex
 void put(ProjectileRecordImage& a,unsigned at,std::uint32_t value){for(unsigned i=0;i<4;++i)a[at+i]=std::uint8_t(value>>(8*i));}
 }
 int main(){unsigned seed;while(std::cin>>seed){
- MissionTickState state;state.projectiles.resize(512);state.tables.groups[3].resize(32);MissionProjectileSpawnCells cells;
+ MissionTickState state;state.projectiles.resize(512);for(auto& g:state.tables.groups)g.resize(1024);state.tables.groups[3].resize(256);state.tables.groups[2].resize(512);state.tables.extra.resize(1024);MissionProjectileSpawnCells cells;
  cells.ring_index=std::array<std::uint32_t,4>{0,511,0xffffffff,1000}[seed%4];const auto selected=(cells.ring_index+1)&511;
  for(unsigned i=0;i<512;++i){ProjectileRecordImage image;for(unsigned j=0;j<image.size();++j)image[j]=std::uint8_t(seed+i+j);put(image,0xf8,0);apply_projectile_record(state.projectiles[i],image);}
  std::array<std::uint32_t,6> position{};std::uint32_t random=seed+1;for(auto& p:position){random=random*1664525u+1013904223u;p=random;}
- const auto owner=seed%5?0x7cca80u+(seed%32)*0x114u:0u;
+ const auto owner=seed%5?0x7cca80u+std::array<std::uint32_t,10>{0,255,256,259,1279,1280,2303,2304,3328,3839}[seed%10]*0x114u:0u;
  const auto speed=std::array<std::uint32_t,8>{0,1,63,64,0x7fffffff,0x80000000,0xffffffff,0x100000}[seed%8];
  std::vector<std::string> calls;unsigned call=0;MissionFragmentSpawnBindings b;b.sincos_4776c0=[&](auto angle,auto& sine,auto& cosine){
   std::ostringstream log;log<<'['<<angle<<','<<cells.ring_index<<",\""<<hex(snapshot_projectile_record(state.projectiles[selected]))<<"\"]";calls.push_back(log.str());++call;

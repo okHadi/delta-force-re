@@ -23,7 +23,7 @@ python tools/check_mission_projectile_live_original.py Df.exe PROBE --models MOD
 Model fixtures supply clear terrain. Foreign handlers record calls without audio. Model callbacks, face selection, damage,
 and impact branches run from the original instructions.
 
-Set `ProjectileEntity::owner_slot` to the group 3 slot, or -1 for no owner.
+Set `ProjectileEntity::owner_slot` to the physical actor index from `7CCA80`, or -1 for no owner.
 Slot 0 is valid. The live query maps this slot to the same actor identity for
 ray exclusion, damage ownership, team checks, and impact effects.
 
@@ -33,3 +33,5 @@ the surface. Each call reads the current terrain binding.
 
 Add `--game GAME_FOLDER` to the checker command to compare terrain queries
 for each stock mission with the original instructions.
+
+Use the shared [physical owner codec](mission-projectile-owner.md) to check each current actor binding.

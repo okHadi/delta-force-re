@@ -1,5 +1,6 @@
 #include "dfre/mission_peer_projectile.hpp"
 #include "dfre/motion_queries.hpp"
+#include "dfre/mission_projectile_owner.hpp"
 namespace dfre {
 namespace {
 std::int32_t si(std::uint32_t n){return n<=0x7fffffffu?std::int32_t(n):std::int32_t(std::int64_t(n)-0x100000000LL);}
@@ -18,9 +19,7 @@ std::uint32_t MissionPeerProjectile::call(const MissionPeerParserCall& c){
     case 0x462f20:{
         count(c,3);payload(c,0,20);std::uint32_t owner=0;
         if(c.args[1]){
-            const auto base=mission_actor_source_address(3,0);if(c.args[1]<base)throw MissionTickError("Peer projectile owner is outside group three");
-            const auto offset=c.args[1]-base;if(offset%0x114u)throw MissionTickError("Peer projectile owner is not aligned to an actor record");
-            const auto slot=offset/0x114u;if(slot>=state_.tables.groups[3].size())throw MissionTickError("Peer projectile owner exceeds group three");owner=actor_handle(3,slot);
+            const auto ref=mission_projectile_owner_source_ref(state_,c.args[1]);owner=actor_handle(ref.group,ref.index);
         }
         return spawn_.spawn_view(owner,c.args[2],c.payload,c.length);
     }

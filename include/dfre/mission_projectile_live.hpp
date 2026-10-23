@@ -36,7 +36,7 @@ struct MissionProjectileLiveBindings {
 // Base terrain47E390: clear is1; preserve all original hit return values.
 std::int32_t mission_projectile_terrain_query(const MissionTickState& state,
     const ProjectileEntity& projectile,const Fixed3& step,std::int32_t length);
-// Projectile owner_slot is a group 3 index: -1 means no owner; slot 0 is valid.
+// Projectile owner_slot is the physical index from7CCA80: -1 is null; 0 is valid.
 // Keep all referenced owners alive. Damage stores the external A158C0/A158BC
 // cells. Actor images flush before foreign calls and refresh after return/errors.
 ProjectileQuery mission_projectile_live_query(MissionTickState& state,const MissionGeometry& geometry,

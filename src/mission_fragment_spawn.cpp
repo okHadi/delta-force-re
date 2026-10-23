@@ -1,5 +1,6 @@
 #include "dfre/mission_fragment_spawn.hpp"
 #include <utility>
+#include "dfre/mission_projectile_owner.hpp"
 namespace dfre {
 namespace {
 std::int32_t si(std::uint32_t n){return n<=0x7fffffffu?std::int32_t(n):std::int32_t(std::int64_t(n)-0x100000000LL);}
@@ -25,9 +26,7 @@ std::uint32_t MissionFragmentSpawn::spawn(const std::array<std::uint32_t,6>& pos
     output.item_main=0;output.item_alt=0;output.item_field=0;output.position.z=si(z);
     if(!owner)output.owner_slot=-1;
     else{
-        const auto offset=owner-0x7cca80u;
-        if(owner<0x7cca80u||offset%0x114u||offset/0x114u>=state_.tables.groups[3].size())throw MissionTickError("Fragment owner exceeds the current player table");
-        output.owner_slot=std::int32_t(offset/0x114u);
+        output.owner_slot=mission_projectile_owner_index(state_,mission_projectile_owner_source_ref(state_,owner));
     }
     return cells_.ring_index;
 }

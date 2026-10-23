@@ -28,7 +28,7 @@ def main():
    image=bytearray((seed+index+at)&255 for at in range(0x114));struct.pack_into('<I',image,0xf8,0);pool.extend(image)
   rig.u.mem_write(ENTITY,bytes(pool));put(ENTITY_INDEX,ring);rng=seed+1;position=[]
   for _ in range(6):rng=(rng*1664525+1013904223)&0xffffffff;position.append(rng)
-  rig.u.mem_write(vector,struct.pack('<6I',*position));owner=0x7cca80+(seed%32)*0x114 if seed%5 else 0;speed=(0,1,63,64,0x7fffffff,0x80000000,0xffffffff,0x100000)[seed%8]
+  rig.u.mem_write(vector,struct.pack('<6I',*position));owner=0x7cca80+(0,255,256,259,1279,1280,2303,2304,3328,3839)[seed%10]*0x114 if seed%5 else 0;speed=(0,1,63,64,0x7fffffff,0x80000000,0xffffffff,0x100000)[seed%8]
   rig.call(0x463200,vector,owner,speed);result=rig.u.reg_read(UC_X86_REG_EAX);checksum=2166136261
   for byte in rig.u.mem_read(ENTITY,512*0x114):checksum=((checksum^byte)*16777619)&0xffffffff
   want=dict(result=result,ring=get(ENTITY_INDEX),record=bytes(rig.u.mem_read(ENTITY+selected*0x114,0x114)).hex(),checksum=checksum,input=list(struct.unpack('<6I',rig.u.mem_read(vector,24))),calls=current['calls'])

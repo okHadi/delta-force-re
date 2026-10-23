@@ -76,6 +76,7 @@ def main():
   return data.hex()
  errors=[];counts={};faults=0
  for (mode,seed),port in zip(cases,ports):
+  OWNER=0x7cca80+(0,256,259,1280,2304,3328)[seed%6]*0x114
   view=mode=='view';v=seed if view else seed//8;g=seed%8;ring=511 if seed%5==0 else seed%512;fx=seed%11!=10 if view else bool(v&4);count=0 if view else 100 if g==4 else 99 if g==5 else 0;row=0x6e4760+min(count,99)*36
   state.clear();state.update(view=view,v=v,phase=False,pose=SCRATCH+0x2000,wire=b'',calls=[],fx=fx,row=row);pending.clear();item_setup();reset_owners();put(0xbd5284,LOW);put(0x8cf982,0,1);put(0x67dbc9,0,1)
   u.mem_write(ENTITY,bytes(0x22800));put(ENTITY_INDEX,511);cls(4,0x80,44,0);predicted=bytes(0x114).hex();pose=bytes((0,))*20

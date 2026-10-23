@@ -1,5 +1,6 @@
 #include "dfre/mission_projectile_spawn.hpp"
 #include <limits>
+#include "dfre/mission_projectile_owner.hpp"
 
 namespace dfre {
 namespace {
@@ -24,8 +25,9 @@ MissionProjectileSpawn::MissionProjectileSpawn(MissionTickState& state,MissionPr
 AiActorRef MissionProjectileSpawn::owner_ref(std::uint32_t handle) const {
     if(handle<kActorHandleBase)throw MissionTickError("Projectile owner handle is invalid");
     const auto key=handle-kActorHandleBase;
-    if(key/0x10000u!=3||key%0x10000u>=state_.tables.groups[3].size())throw MissionTickError("Projectile owner exceeds group three");
-    return {3,key%0x10000u};
+    if(key/0x10000u>4)throw MissionTickError("Projectile owner group is invalid");
+    const AiActorRef ref{std::uint8_t(key/0x10000u),key%0x10000u};
+    (void)mission_projectile_owner_index(state_,ref);return ref;
 }
 void MissionProjectileSpawn::request(std::uint32_t owner,std::uint32_t kind,MuzzleResult& muzzle){
     // Original clears caller bytes before 47DF40 and reads the caller again
@@ -36,7 +38,7 @@ void MissionProjectileSpawn::request(std::uint32_t owner,std::uint32_t kind,Muzz
     muzzle.origin.z=signed_bits(bits(muzzle.origin.z)&0xffffff00u);
     const auto height=need(bindings_.ground,"Projectile terrain height is not bound")(state_,muzzle.origin.x,muzzle.origin.y);
     const auto delta=bits(muzzle.origin.z)-bits(height);
-    auto r=build_spawn_record({},muzzle.aim,std::uint16_t((mission_actor_source_address(ref.group,ref.index)-0x7cca80u)/0x114u),std::uint8_t(kind),[](auto,auto){return 0;});
+    auto r=build_spawn_record({},muzzle.aim,std::uint16_t(mission_projectile_owner_index(state_,ref)),std::uint8_t(kind),[](auto,auto){return 0;});
     r.packed_x=bits(muzzle.origin.x)|((delta>>16)&0xffu);r.packed_y=bits(muzzle.origin.y)|((delta>>8)&0xffu);
     auto bytes=packet(r);
     if(state_.globals.mission_67f528)need(bindings_.host_message,"Projectile host delivery is not bound")(state_,bytes);
@@ -54,14 +56,13 @@ void MissionProjectileSpawn::receive(std::uint8_t* bytes,std::size_t length){
     std::int32_t height=0;
     auto decoded=decode_spawn_record(input,[&](auto x,auto y){height=need(bindings_.ground,"Projectile terrain height is not bound")(state_,x,y);return 0;});
     decoded.origin.z=signed_bits(bits(decoded.origin.z)+bits(height));
-    if(signed_slot<0||std::size_t(signed_slot)>=state_.tables.groups[3].size())throw MissionTickError("Projectile packet owner exceeds group three");
-    const auto slot=std::size_t(signed_slot);
+    const auto ref=mission_projectile_owner_ref(state_,signed_slot);
     MuzzleResult muzzle{decoded.origin,{read(bytes,10,2)<<16,read(bytes,12,2)<<16,0}};
-    if(!state_.tables.groups[3][slot].active){
+    if(!state_.actor_at(ref)->active){
         const auto current_slot=read(bytes,8,2);
         need(bindings_.queue,"Projectile message queue is not bound")(state_,0x17,{std::uint8_t(current_slot),std::uint8_t(current_slot>>8)});
     }
-    spawn(actor_handle(3,slot),bytes[14],muzzle);
+    spawn(actor_handle(ref.group,ref.index),bytes[14],muzzle);
 }
 std::uint32_t MissionProjectileSpawn::spawn(std::uint32_t owner,std::uint32_t kind,MuzzleResult& muzzle){
     return spawn_current(owner,kind,[&muzzle]{return muzzle;});
@@ -75,7 +76,7 @@ std::uint32_t MissionProjectileSpawn::spawn_current(std::uint32_t owner,std::uin
     if(state_.projectiles.size()!=512)throw MissionTickError("Projectile pool size changed");
     const auto ref=owner?std::optional<AiActorRef>(owner_ref(owner)):std::nullopt;
     auto& cls=cells_.classes[kind];const auto index=(cells_.ring_index+1u)&511u;cells_.ring_index=index;
-    const auto team=ref?state_.tables.groups[3][ref->index].field_70:0u;
+    const auto team=ref?state_.actor_at(*ref)->field_70:0u;
     const auto color=team==1?0xb9a0a0ffu:team==2?0xb9ffa0a0u:0xffffffffu;
     const auto f=cls.field_30;
     std::array<std::int32_t,2> items{};std::int32_t model=0;std::optional<unsigned> choice;
@@ -83,7 +84,7 @@ std::uint32_t MissionProjectileSpawn::spawn_current(std::uint32_t owner,std::uin
     if(choice){const auto item=item_indexes_[*choice];items={std::int32_t(item),std::int32_t(item)};model=signed_bits(definitions_[item].model);}
     const auto initial=current();
     state_.projectiles[index]=spawn_projectile(initial.origin,initial.aim,{cls.field_0c,cls.field_10,cls.field_14,cls.field_18,f},items,model,
-        ref?std::int32_t(ref->index):-1,color,(cells_.rules_8cf982&0x10)!=0);
+        ref?mission_projectile_owner_index(state_,*ref):-1,color,(cells_.rules_8cf982&0x10)!=0);
     if(choice&&*choice==2){
         const auto& item=definitions_[item_indexes_[2]];
         if(item.ambient_handles[0])need(bindings_.attached_sound,"Projectile attached sound is not bound")(state_,index,item.ambient_handles[0],item.ambient_sound[0],0);

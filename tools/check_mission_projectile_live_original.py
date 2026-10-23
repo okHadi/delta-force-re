@@ -102,16 +102,17 @@ for name in ['CRATE1.3DI','CRATE2.3DI','BRIDGE.3DI','HOUSE7.3DI','BARAK.3DI','OI
    point=[sum(struct.unpack_from('<3h',verts,(vb+i)*8)[axis] for i in ids)*256//3 for axis in range(3)]
    for group in (0,1):rows.append([group,0,0,0,0,0,0,point[0],point[1],point[2]+65536,0,0,-131072,0,10,3,0,MATERIAL])
   vb+=vc;fb+=fc
- for index,row in enumerate(rows):row.append(0 if index%2 else -1)
+ for index,row in enumerate(rows):row.append((-1,0,257,2305,3328,1280)[index%6])
  result=subprocess.run([str(args.probe.resolve()),str(path)],input=''.join(' '.join(map(str,row))+'\n' for row in rows),text=True,capture_output=True,check=True)
  native=[list(map(int,line.split())) for line in result.stdout.splitlines()]
  assert len(native)==len(rows)
  hits=0
  for index,(row,got) in enumerate(zip(rows,native)):
   group=row[0];actor=0x867e80 if group==1 else 0x7dde80
-  u.mem_write(0x7dde80,bytes(0x114));u.mem_write(0x867e80,bytes(0x114));u.mem_write(0x7cca80,bytes(0x114))
-  w(0x8cf904,int(group==1));w(0x8cfa1c,int(group==0));w(0x8cfa20,int(row[18]==0))
-  if row[18]==0:w(0x7cca80,DEFINITION);w(0x7cca80+0x24,0x7000000)
+  for base in (0x7dde80,0x867e80,0x7cca80,0x822e80,0x8ace80):u.mem_write(base,bytes(2*0x114))
+  owner=0 if row[18]<0 else 0x7cca80+row[18]*0x114
+  w(0x8cf904,max(int(group==1),2 if row[18]==2305 else 0));w(0x8cfa1c,max(int(group==0),2 if row[18]==257 else 0));w(0x8cfa20,int(row[18]==0))
+  if owner:w(owner,DEFINITION);w(owner+4,DEFINITION);w(owner+0x24,0x7000000)
   u.mem_write(actor,bytes(0x114));w(actor,DEFINITION);w(actor+4,DEFINITION);w(actor+0x10,MODEL);w(actor+0x110,CALLBACK);w(actor+0x74,100)
   for at,v in zip((0x24,0x28,0x2c),row[1:4]):w(actor+at,v)
   for at,v in zip((0x30,0x34,0x38),row[4:7]):w(actor+at,v)
@@ -119,10 +120,10 @@ for name in ['CRATE1.3DI','CRATE2.3DI','BRIDGE.3DI','HOUSE7.3DI','BARAK.3DI','OI
   u.mem_write(ENTITY,bytes(0x22800));w(ENTITY,1)
   for at,v in zip((0x24,0x28,0x2c),row[7:10]):w(ENTITY+at,v)
   for at,v in zip((0x3c,0x40,0x44),row[10:13]):w(ENTITY+at,v)
-  for at,v in ((0x6c,row[13]),(0xfc,row[14]),(0x84,row[14]),(0x80,row[15]),(0xf8,0x7cca80 if row[18]==0 else 0)):w(ENTITY+at,v)
+  for at,v in ((0x6c,row[13]),(0xfc,row[14]),(0x84,row[14]),(0x80,row[15]),(0xf8,owner)):w(ENTITY+at,v)
   for at,v in ((0x67f528,1),(0x67f520,0),(0x67f548,0),(0x67f549,0),(0xbd5248,0),(0xc23820,0),(0xa158c0,0),(0xa158bc,0),(0x6e4708,0x4000000),(0x6e4704,0x4000000),(0x6e4700,0)):w(at,v)
   records.clear();original.call(0x464eb0,[])
-  want=[sg(r(ENTITY+at)) for at in (0x24,0x28,0x2c,0x3c,0x40,0x44,0xfc)]+[r(ENTITY),r(actor+0x74)&0xffff,r(0xa158c0),r(0xa158bc),0x76030000 if r(actor+0xf8)==0x7cca80 else r(actor+0xf8),len(records)//2,*records]
+  want=[sg(r(ENTITY+at)) for at in (0x24,0x28,0x2c,0x3c,0x40,0x44,0xfc)]+[r(ENTITY),r(actor+0x74)&0xffff,r(0xa158c0),r(0xa158bc),((0x76000000+({0:3,257:0,2305:1,3328:2,1280:4}[row[18]])*0x10000+(1 if row[18] in (257,2305) else 0)) if owner and r(actor+0xf8)==owner else r(actor+0xf8)),len(records)//2,*records]
   if r(actor+0x74)!=100:hits+=1
   if got!=want:
    report['mismatches'].append({'model':name,'row':index,'input':row,'native':got,'original':want})
@@ -171,7 +172,7 @@ if args.game:
    terrain_report['cases']+=len(rows);terrain_report['missions'].append({'name':entry.name,'height_sha256':hashlib.sha256(heights).hexdigest(),'cases':len(rows),'hits':hit_count})
    print(entry.name,len(rows),'terrain cases',hit_count,'hits')
  report['terrain']=terrain_report
-report['owner_slots']=[-1,0]
+report['owner_slots']=[-1,0,257,2305,3328,1280]
 report['foreign_calls']=counts
 if args.report:args.report.write_text(json.dumps(report,indent=2)+'\n')
 print(report['cases'],'cases',len(report['mismatches']),'mismatches')

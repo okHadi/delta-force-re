@@ -45,6 +45,11 @@
 #include "dfre/mission_hud_message.hpp"
 #include "dfre/mission_object_helo.hpp"
 #include "dfre/mission_object_mine_move.hpp"
+#include "dfre/mission_object_barrel.hpp"
+#include "dfre/mission_object_mine_update.hpp"
+#include "dfre/mission_object_helo_update.hpp"
+#include "dfre/mission_object_helo_condition.hpp"
+#include "dfre/world_hits.hpp"
 #include "dfre/mission_logic.hpp"
 #include "dfre/mission_client_outbox.hpp"
 #include "dfre/mission_peer_frame.hpp"
@@ -94,9 +99,11 @@ struct SessionEventHost : dfre::EventHost {
 }
 struct MissionSession::Impl {
     MissionSessionContext c; MissionSessionHost h;
+    //490EEF ->4A123C ->4A1217 resets the source x87 control with FNINIT.
+    std::uint16_t fp_control_word=0x037f;
     MissionTickWorld prior_world; bool active=false;
     std::map<U,MissionTickState::ActorCallback> prior_updates,prior_secondary;
-    inline static constexpr std::array<U,8> update_ids{0x429bc0,0x4519a0,0x4534a0,0x45c3a0,0x45c340,0x453810,0x4533f0,0x453930};
+    inline static constexpr std::array<U,11> update_ids{0x429bc0,0x4519a0,0x4534a0,0x45c3a0,0x45c340,0x453810,0x4533f0,0x453930,0x45bf80,0x451d40,0x450e40};
     inline static constexpr std::array<U,4> secondary_ids{0x429ea0,0x451cb0,0x451590,0x451dd0};
     std::array<bool,update_ids.size()> installed_updates{};
     std::array<bool,secondary_ids.size()> installed_secondary{};
@@ -175,6 +182,18 @@ struct MissionSession::Impl {
     static constexpr U periodic_source=0x1b001000;
     std::array<std::uint8_t,0x500> periodic_frame{};
     MissionPeriodicBindings periodic;
+    MissionObjectBarrelBindings barrel;
+    MissionObjectMineUpdateBindings mine_update;
+    std::function<void(const AiActorRef&,U,U)> dispatch_object;
+    static constexpr U mine_source=0x1b003100;
+    std::array<std::uint8_t,8> mine_frame{};
+    static constexpr U helo_source=0x1b004000;
+    std::array<std::uint8_t,0x44> helo_frame{};
+    static constexpr U helo_condition_source=0x1b004100;
+    std::array<std::uint8_t,16> helo_condition_frame{};
+    bool helo_condition_active=false;
+    static constexpr U barrel_source=0x1b003000;
+    std::array<std::uint8_t,24> barrel_frame{};
     bool running_periodic=false;
     void run_periodic(U site){
         if(running_periodic)throw MissionTickError("Periodic frame is already active");
@@ -382,7 +401,7 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         return std::nullopt;
     };
     event_stage.load(c.mission);event_host.fired_reference=[&](auto index){return event_fired_reference(event_stage,index,h.event_references,h.event_diagnostic);};
-    event_host.person_edit=[&](auto index){auto& action=event_stage.action(index);auto binding=mission_event_person_bindings(state,action,0x27000000,[&](auto address){return sound.asset_bindings().read(address,4);},[]()->std::uint16_t{throw MissionTickError("Current source x87 control has no owner");});mission_event_person_edits(binding,0x27000000);};
+    event_host.person_edit=[&](auto index){auto& action=event_stage.action(index);auto binding=mission_event_person_bindings(state,action,0x27000000,[&](auto address){return sound.asset_bindings().read(address,4);},[this]{return fp_control_word;});mission_event_person_edits(binding,0x27000000);};
     order_binding=mission_event_actor_order_bindings(state);event_host.orders=[&](auto side,auto list){mission_event_actor_orders(order_binding,std::int32_t(side),list);};
 
 
@@ -435,7 +454,13 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     MissionActorLifecycleBindings lifecycle_bindings;lifecycle_bindings.sincos_4776c0=[](auto angle,auto& sine,auto& cosine){sincos_q22(angle,sine,cosine);};
     lifecycle_bindings.terrain_47df40=[&](auto x,auto y){if(!state.world.terrain)throw MissionTickError("Lifecycle terrain has no owner");std::int32_t sx,sy;std::memcpy(&sx,&x,4);std::memcpy(&sy,&y,4);return std::uint32_t(ground_height_query(*state.world.terrain,sx,sy));};
     lifecycle=std::make_unique<MissionActorLifecycle>(state,animations,audio.registrations_6e0700,lifecycle_bindings);
-    flag_bindings=mission_event_actor_flag_bindings(*lifecycle,*outbox,[&](const auto& ref,auto callback,auto message){if(callback==0x453930)mission_object_wood_large(state,ref,object,message);else mission_object_update(state,ref,callback,message,object);});
+    dispatch_object=[&](const auto& ref,U callback,U message){
+        if(callback==0x45bf80){mission_object_barrel(barrel,mission_actor_source_address(ref.group,ref.index),barrel_source,message);return;}
+        if(callback==0x451d40){mission_object_mine_update(mine_update,mission_actor_source_address(ref.group,ref.index),mine_source);return;}
+        if(callback==0x450e40){mission_object_helo_update(helo,mission_actor_source_address(ref.group,ref.index),message,helo_source,helo_frame.size());return;}
+        mission_object_update(state,ref,callback,message,object);
+    };
+    flag_bindings=mission_event_actor_flag_bindings(*lifecycle,*outbox,[&](const auto& ref,auto callback,auto message){dispatch_object(ref,callback,message);});
     event_host.flags=[&](auto side){mission_event_actor_flags(state,side,shared_damage.last_damage,flag_bindings);};
     event_host.remove=[&](auto side){mission_event_actor_remove(state,side,flag_bindings);};
     peer={cell,cell_store,{}};peer_timers.read=cell;peer_timers.write=cell_store;
@@ -457,7 +482,7 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         if(at>=periodic_source&&std::uint64_t(at-periodic_source)+width<=periodic_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(periodic_frame.at(at-periodic_source+i))<<(i*8);return n;}
         if(at==0x8cfa18&&width==4)return U(state.tables.groups[3].size());
         if(at==0x8cfa1c&&width==4)return U(state.tables.groups[0].size());
-        for(std::uint8_t group=0;group<4;++group){const auto base=mission_actor_source_address(group,0);if(at<base+4)continue;const auto offset=at-base;if(offset%0x114!=4||width!=4)continue;const auto slot=offset/0x114;if(slot>=state.tables.groups[group].size())continue;const auto image=snapshot_mission_actor(state,{group,slot});U index;std::memcpy(&index,image.data()+4,4);return index?definition_base+index*0x13c:0u;}
+        for(std::uint8_t group=0;group<4;++group){const auto base=mission_actor_source_address(group,0);if(at<base+4)continue;const auto offset=at-base;if(offset%0x114!=4||width!=4)continue;const auto slot=offset/0x114;if(slot>=state.tables.groups[group].size())continue;if(group==0&&h.primary_source_records)return c.sound.asset_bindings().read(at,width);const auto image=snapshot_mission_actor(state,{group,slot});U index;std::memcpy(&index,image.data()+4,4);return index?definition_base+index*0x13c:0u;}
         return c.sound.asset_bindings().read(at,width);
     };
     periodic.write=[&](U at,U width,U value){if(at>=periodic_source&&std::uint64_t(at-periodic_source)+width<=periodic_frame.size()){for(U i=0;i<width;++i)periodic_frame.at(at-periodic_source+i)=std::uint8_t(value>>(i*8));return;}c.sound.asset_bindings().write(at,width,value);};
@@ -504,34 +529,101 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         throw MissionTickError("Logic body is not bound "+std::to_string(site));};
     logic_run=[&]{mission_logic_frame(logic);};
     helo.read=[&](U at,U width){
+        if(at>=helo_source&&std::uint64_t(at-helo_source)+width<=helo_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(helo_frame.at(at-helo_source+i))<<(i*8);return n;}
+        if(at>=helo_condition_source&&std::uint64_t(at-helo_condition_source)+width<=helo_condition_frame.size()){U n=0;for(U i=0;i<width;++i)n|=U(helo_condition_frame.at(at-helo_condition_source+i))<<(i*8);return n;}
+        if(at>=0x78f280&&std::uint64_t(at)+width<=0x793680){
+            const U slot=(at-0x78f280)/0x88,offset=(at-0x78f280)%0x88;
+            if(offset+width>0x88||slot>=state.world.behavior_world.lists.size())throw MissionTickError("Helicopter marker list has no current owner");
+            const auto& list=state.world.behavior_world.lists[slot];std::array<U,34> words{};words[0]=list.flags;words[1]=list.count;std::copy(list.indices.begin(),list.indices.end(),words.begin()+2);
+            U n=0;const auto* bytes=reinterpret_cast<const std::uint8_t*>(words.data());for(U i=0;i<width;++i)n|=U(bytes[offset+i])<<(i*8);return n;
+        }
+        if(at>=0x793680&&std::uint64_t(at)+width<=0x794680){U n=0;for(U i=0;i<width;++i)n|=U(types.bytes.at(at-0x793680+i))<<(i*8);return n;}
         if(at>=0x794680&&std::uint64_t(at)+width<=0x7cca80){const auto slot=(at-0x794680)/0xb4,offset=(at-0x794680)%0xb4;
             if(offset+width>0xb4||slot>=state.people.size())throw MissionTickError("Helicopter person read has no current owner");
             auto image=ai_person_image(state.people[slot]);const auto& extra=state.person_extra(slot);
-            std::memcpy(image.data()+0x44,&extra.field_44,4);std::memcpy(image.data()+0x6c,&extra.field_6c,4);
+            std::memcpy(image.data()+0x28,&extra.field_28,4);
+            std::memcpy(image.data()+0x2c,&extra.field_2c,4);
+            std::memcpy(image.data()+0x30,&extra.field_30,4);
+            std::memcpy(image.data()+0x34,&extra.field_34,4);
+            std::memcpy(image.data()+0x38,&extra.field_38,4);
+            std::memcpy(image.data()+0x3c,&extra.field_3c,4);
+            std::memcpy(image.data()+0x40,&extra.field_40,4);
+            std::memcpy(image.data()+0x44,&extra.field_44,4);
+            std::memcpy(image.data()+0x48,&extra.field_48,4);
+            std::memcpy(image.data()+0x4c,&extra.field_4c,4);
+            std::memcpy(image.data()+0x50,&extra.field_50,4);
+            std::memcpy(image.data()+0x6c,&extra.field_6c,4);
+            std::memcpy(image.data()+0xa0,&extra.field_a0,4);
+            std::memcpy(image.data()+0xa4,&extra.field_a4,4);
             U n=0;for(U i=0;i<width;++i)n|=U(image.at(offset+i))<<(i*8);return n;
         }
         for(std::uint8_t group=0;group<4;++group){const auto base=mission_actor_source_address(group,0);if(at<base+0xc||width!=4)continue;const auto offset=at-base;if(offset%0x114!=0xc)continue;const auto slot=offset/0x114;if(slot>=state.tables.groups[group].size())continue;const auto person=state.tables.groups[group][slot].person_slot;if(person&&*person>=state.people.size())throw MissionTickError("Helicopter actor person has no current owner");return person?0x794680u+U(*person)*0xb4u:0u;}
         return periodic.read(at,width);
     };
     helo.write=[&](U at,U width,U value){
+        if(at>=helo_source&&std::uint64_t(at-helo_source)+width<=helo_frame.size()){for(U i=0;i<width;++i)helo_frame.at(at-helo_source+i)=std::uint8_t(value>>(i*8));return;}
+        if(at>=helo_condition_source&&std::uint64_t(at-helo_condition_source)+width<=helo_condition_frame.size()){for(U i=0;i<width;++i)helo_condition_frame.at(at-helo_condition_source+i)=std::uint8_t(value>>(i*8));return;}
         if(at>=0x794680&&std::uint64_t(at)+width<=0x7cca80){const auto slot=(at-0x794680)/0xb4,offset=(at-0x794680)%0xb4;
             if(slot>=state.people.size())throw MissionTickError("Helicopter person store has no current owner");
             U* word=nullptr;U base=0;
-            if(offset>=0x6c&&offset+width<=0x70){word=&state.person_extra(slot).field_6c;base=0x6c;}
+            auto& extra=state.person_extra(slot);
+            if(offset>=0x28&&offset+width<=0x2c){word=&extra.field_28;base=0x28;}
+            else if(offset>=0x2c&&offset+width<=0x30){word=&extra.field_2c;base=0x2c;}
+            else if(offset>=0x30&&offset+width<=0x34){word=&extra.field_30;base=0x30;}
+            else if(offset>=0x34&&offset+width<=0x38){word=&extra.field_34;base=0x34;}
+            else if(offset>=0x38&&offset+width<=0x3c){word=&extra.field_38;base=0x38;}
+            else if(offset>=0x3c&&offset+width<=0x40){word=&extra.field_3c;base=0x3c;}
+            else if(offset>=0x40&&offset+width<=0x44){word=&extra.field_40;base=0x40;}
+            else if(offset>=0x44&&offset+width<=0x48){word=&extra.field_44;base=0x44;}
+            else if(offset>=0x48&&offset+width<=0x4c){word=&extra.field_48;base=0x48;}
+            else if(offset>=0x4c&&offset+width<=0x50){word=&extra.field_4c;base=0x4c;}
+            else if(offset>=0x50&&offset+width<=0x54){word=&extra.field_50;base=0x50;}
+            else if(offset>=0x6c&&offset+width<=0x70){word=&extra.field_6c;base=0x6c;}
+            else if(offset>=0xa0&&offset+width<=0xa4){word=&extra.field_a0;base=0xa0;}
+            else if(offset>=0xa4&&offset+width<=0xa8){word=&extra.field_a4;base=0xa4;}
+            else if(offset>=0xac&&offset+width<=0xb0){word=&state.people[slot].field_ac;base=0xac;}
+            else if(offset>=0xb0&&offset+width<=0xb4){word=&state.people[slot].field_b0;base=0xb0;}
+            else if(offset>=0x54&&offset+width<=0x60&&(offset-0x54)%4+width<=4){base=0x54+(offset-0x54)/4*4;word=&state.people[slot].position[(offset-0x54)/4];}
             else if(offset>=0x90&&offset+width<=0x94){word=&state.people[slot].field_90;base=0x90;}
             if(!word)throw MissionTickError("Helicopter person store needs its current field owner");
-            auto* bytes=reinterpret_cast<std::uint8_t*>(word);for(U i=0;i<width;++i)bytes[offset-base+i]=std::uint8_t(value>>(i*8));return;
+            auto* bytes=reinterpret_cast<std::uint8_t*>(word);for(U i=0;i<width;++i)bytes[offset-base+i]=std::uint8_t(value>>(i*8));if(base==0xa4)state.people[slot].tail_flag=*word!=0;return;
         }
         periodic.write(at,width,value);
     };
     helo.call=[&](U site,const auto& args)->U{
+        if(site==0x450ae0){
+            if(helo_condition_active)throw MissionTickError("Helicopter condition frame is already active");
+            helo_condition_active=true;struct Scope{bool& active;~Scope(){active=false;}} scope{helo_condition_active};
+            return mission_object_helo_condition(helo,args.at(0),helo_condition_source,helo_condition_frame.size());
+        }
+        if(site==0x45c6a0)return mission_object_helo_marker(helo,args.at(0),args.at(1),args.at(2),args.at(3),args.at(4));
+        if(site==0x42ee30){event_stage.set_flag_42ee30(args.at(0),args.at(1),args.at(2));return 0;}
+        if(site==0x477770)return query_angle_477770(args.at(0),args.at(1));
+        if(site==0x477670){std::array<std::int32_t,3> n{};for(U i=0;i<3;++i)std::memcpy(&n[i],&args.at(i),4);return U(collision_approximate_length(n[0],n[1],n[2]));}
+        if(site==0x43ef80){sound.attach(args.at(0),args.at(1),args.at(2),args.at(3));return 0;}
         if(site==0x477860)return behavior_rng_next(state.behavior);
         if(site==0x47df40){std::int32_t x,y;std::memcpy(&x,&args.at(0),4);std::memcpy(&y,&args.at(1),4);return U(ground_height_query(terrain.geometry,x,y));}
         if(site==0x49a620){for(U i=0;i<args.at(2);++i)helo.write(args.at(0)+i,1,args.at(1)&255);return args.at(0);}
         throw MissionTickError("Helicopter required body is not bound "+std::to_string(site));
     };
     bind_mission_object_helo_move(state,helo);
+    bind_mission_object_helo_update(state,helo,helo_source,helo_frame.size());
     bind_mission_object_mine_move(state,{periodic.read,periodic.write});
+    barrel.read=[&](U at,U width){if(at>=barrel_source&&std::uint64_t(at-barrel_source)+width<=barrel_frame.size()){U value=0;for(U i=0;i<width;++i)value|=U(barrel_frame.at(at-barrel_source+i))<<(i*8);return value;}return periodic.read(at,width);};
+    barrel.write=[&](U at,U width,U value){if(at>=barrel_source&&std::uint64_t(at-barrel_source)+width<=barrel_frame.size()){for(U i=0;i<width;++i)barrel_frame.at(at-barrel_source+i)=std::uint8_t(value>>(8*i));return;}periodic.write(at,width,value);};
+    barrel.call=[&](U site,const auto& args)->U{
+        if(site==0x4471d0){for(std::uint8_t group=0;group<4;++group)for(std::size_t slot=0;slot<state.tables.groups[group].size();++slot)if(mission_actor_source_address(group,slot)==args.at(0)){mission_event_actor_remove_one(state,{group,slot},flag_bindings);return 0;}throw MissionTickError("Barrel removal actor has no current physical owner");}
+        throw MissionTickError("Barrel required body is not bound "+std::to_string(site));
+    };
+    bind_mission_object_barrel(state,barrel,barrel_source);
+    mine_update.read=[&](U at,U width){if(at>=mine_source&&std::uint64_t(at-mine_source)+width<=mine_frame.size()){U value=0;for(U i=0;i<width;++i)value|=U(mine_frame.at(at-mine_source+i))<<(8*i);return value;}return periodic.read(at,width);};
+    mine_update.write=[&](U at,U width,U value){if(at>=mine_source&&std::uint64_t(at-mine_source)+width<=mine_frame.size()){for(U i=0;i<width;++i)mine_frame.at(at-mine_source+i)=std::uint8_t(value>>(8*i));return;}periodic.write(at,width,value);};
+    mine_update.call=[&](U site,const auto& args)->U{
+        if(site==0x477820){const U index=args.at(0)>>21;mine_update.write(args.at(1),4,U(kSineTableQ22.at(index)));mine_update.write(args.at(2),4,U(kSineTableQ22.at(index+512)));return 0;}
+        if(site==0x45da30){for(std::uint8_t group=0;group<4;++group)for(std::size_t slot=0;slot<state.tables.groups[group].size();++slot)if(mission_actor_source_address(group,slot)==args.at(0)){lifecycle->remove(AiActorRef{group,slot});return 0;}throw MissionTickError("Mine removal actor has no current physical owner");}
+        throw MissionTickError("Mine update required body is not bound "+std::to_string(site));
+    };
+    bind_mission_object_mine_update(state,mine_update,mine_source);
 
     MissionRoundServiceBindings result_round;
     result_round.cell=[this](auto at,auto width){return c.sound.asset_bindings().read(at,width);};
@@ -582,7 +674,7 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     animation_effect.read=[&](auto at,auto width)->std::uint64_t{if(at==0xbd5248&&width==4)return std::uint32_t(state.world.water_level);if(at==0x4ccb2c&&width==8){const auto memory=sound.asset_bindings();const auto low=memory.read(at,4);const auto high=memory.read(at+4,4);return std::uint64_t(low)|(std::uint64_t(high)<<32);}if((at>=0xbd5334&&at<0xbd5434)||at==0xbd52ac||(at>=color_base&&std::uint64_t(at-color_base)+width<=terrain.color.pixels.size()))return mark.read(at,width);return actor_message.read(at,width);};
     animation_effect.call=[&](auto site,const auto& args){if(site!=0x43e7d0)throw MissionTickError("Animation effect required body is not bound "+std::to_string(site));Fixed3 position;std::memcpy(&position.x,&args[1],4);std::memcpy(&position.y,&args[2],4);std::memcpy(&position.z,&args[3],4);sound.positional(args[0],position);};
     MissionProjectileLiveBindings projectile_live;projectile_live.globals=[&](const auto& current){MissionProjectileLiveGlobals globals;globals.rules_67f549=std::uint8_t(rules_word>>8);globals.alternate_move_filter=current.globals.multiplayer_67f520?(rules_word&1)!=0:(globals.rules_67f549&0x10)!=0;return globals;};
-    projectile_live.update=[&](auto& current,const auto& ref,auto callback,auto message){mission_object_update(current,ref,callback,message,object);};
+    projectile_live.update=[&](auto&,const auto& ref,auto callback,auto message){dispatch_object(ref,callback,message);};
     projectile_live.move=[&](auto&,auto& current,const auto& event){const std::array<std::uint32_t,7> args{std::uint32_t(event.from.x),std::uint32_t(event.from.y),std::uint32_t(event.from.z),std::uint32_t(event.position.x),std::uint32_t(event.position.y),std::uint32_t(event.position.z),current.color};mission_projectile_trail_record(trail_bindings,args);};
     projectile_live.world_edge=[&](auto&,auto&,const auto& event){sound.positional(0x41,event.position);};
     projectile_live.impact=[&](auto&,auto&,const auto& effect){if(effect.site==ProjectileImpactSite::terrain_mark){mission_terrain_mark(state,effect.position,mark);return;}throw MissionTickError("Reached projectile impact body is not bound "+std::to_string(std::uint32_t(effect.site)));};

@@ -1,5 +1,6 @@
 #include "dfre/mission_projectile_spawn.hpp"
 #include <stdexcept>
+#include "dfre/mission_projectile_owner.hpp"
 #include <string>
 #include <iostream>
 using namespace dfre;
@@ -57,5 +58,31 @@ void effects_and_errors(){
     check(rejected&&state.extra_for({3,0}).field_74==92&&cells.ring_index==19);
     state.projectiles.resize(1);rejected=false;try{MissionProjectileSpawn bad(state,cells,items,b);}catch(const MissionTickError&){rejected=true;}check(rejected);
 }
+void physical_owners(){
+    MissionTickState state;AiActorTables tables;for(auto& g:tables.groups)g.resize(1);tables.extra.resize(1);
+    init_mission_tick(state,{},std::move(tables),AiItemDefinitionTable(std::vector<AiItemDefinition>(2)),{},0);state.projectiles.resize(512);state.globals.mission_67f528=0;
+    auto items=definitions();MissionProjectileSpawnCells cells;cells.classes[3].field_30=2;cells.classes[3].field_20=0;
+    MissionProjectileSpawnBindings b;b.ground=[](auto&,auto,auto){return 0;};MissionSpawnPacket packet{};
+    b.queue=[&](auto&,auto id,const auto& bytes){check(id==9);std::copy(bytes.begin(),bytes.end(),packet.begin());};b.loudness=[](auto&,auto){return 0;};
+    MissionProjectileSpawn spawn(state,cells,items,b);
+    for(const auto ref:{AiActorRef{3,0},AiActorRef{0,0},AiActorRef{4,0},AiActorRef{1,0},AiActorRef{2,0}}){
+        auto& actor=*state.actor_at(ref);actor.active=true;actor.definition_index=1;actor.field_70=2;
+        const auto index=mission_projectile_owner_index(state,ref);const auto source=0x7cca80u+std::uint32_t(index)*0x114u;
+        const auto resolved=mission_projectile_owner_source_ref(state,source);check(resolved.group==ref.group&&resolved.index==0);
+        MuzzleResult m{};spawn.request(actor_handle(ref.group,0),3,m);check(packet[8]+(std::uint32_t(packet[9])<<8)==std::uint32_t(index));
+        check(state.projectiles[cells.ring_index].owner_slot==index&&state.extra_for(ref).field_6d==0x48);
+        check(state.projectiles[cells.ring_index].color==0xb9ffa0a0);spawn.receive(packet);check(state.projectiles[cells.ring_index].owner_slot==index);
+        const auto image=snapshot_projectile_record(state.projectiles[cells.ring_index]);check(image[0xf8]==std::uint8_t(source)&&image[0xfb]==0);
+    }
+    for(const auto source:{0u,0x7cca7fu,0x7cca81u,0x8cf680u,0xffffffffu}){bool fail=false;try{mission_projectile_owner_source_ref(state,source);}catch(const MissionTickError&){fail=true;}check(fail);}
+    for(const auto index:{-2,-1,1,3840,0x7fffffff}){bool fail=false;try{mission_projectile_owner_ref(state,index);}catch(const MissionTickError&){fail=true;}check(fail);}
+    for(unsigned group=0;group<5;++group){
+        const unsigned cap=group==3?256:group==2?512:1024;auto& rows=group==4?state.tables.extra:state.tables.groups[group];rows.resize(cap+1);
+        const AiActorRef last{std::uint8_t(group),cap-1};const auto index=mission_projectile_owner_index(state,last);const auto ref=mission_projectile_owner_ref(state,index);check(ref.group==group&&ref.index==cap-1);
+        bool fail=false;try{mission_projectile_owner_index(state,{std::uint8_t(group),cap});}catch(const MissionTickError&){fail=true;}check(fail);
+    }
+    bool fail=false;try{mission_projectile_owner_index(state,{5,0});}catch(const MissionTickError&){fail=true;}check(fail);
 }
-int main(){try{request_and_receive();effects_and_errors();}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}return 0;}
+
+}
+int main(){try{request_and_receive();effects_and_errors();physical_owners();}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}return 0;}

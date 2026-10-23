@@ -19,7 +19,7 @@ def run(args):
         for case in range(args.cases):
             origin=[rng.randrange(-0x4000000,0x4000000)&0xffffffff for _ in range(3)]
             aim=[rng.getrandbits(32) for _ in range(3)]
-            slot,kind=rng.randrange(16),rng.randrange(28)
+            slot,kind=(rng.choice([0,1,255,256,259,260,1279,1280,2303,2304,3327,3328,3839]) if args.physical_owners else rng.randrange(16)),rng.randrange(28)
             flags=rng.choice([0,1,2,4,0x10,0x40,0x50,0x41,0x80,0x86,0xc0,0xd0,0xff])
             speed=rng.choice([0,20,250,950,1200]);f10,f14,f18=[rng.randrange(65536) for _ in range(3)]
             sound,host,ra,rb,team,ring,mutation=rng.randrange(4),rng.randrange(2),rng.randrange(256),rng.randrange(256),rng.choice([0,1,2,0xffff]),rng.randrange(512),rng.randrange(64)
@@ -46,7 +46,7 @@ def run(args):
                 x,y=args_call(2);trace.append(f'G,{x},{y};')
                 if mutation&1:
                     if mode=='receive':
-                        rig.u.mem_write(PAYLOAD+8,bytes([slot^1]));rig.u.mem_write(PAYLOAD+10,struct.pack('<H',((aim[0]>>16)+1)&0xffff))
+                        rig.u.mem_write(PAYLOAD+8,bytes([(slot^1)&255]));rig.u.mem_write(PAYLOAD+10,struct.pack('<H',((aim[0]>>16)+1)&0xffff))
                     else:
                         rig.poke(vector,u(vector)^0x7f);rig.poke(vector+8,u(vector+8)+0x123);rig.poke(vector+12,u(vector+12)+0x10000)
                 rig.finish(height)
@@ -88,4 +88,4 @@ def run(args):
     print(json.dumps(report))
 
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('game',type=Path);p.add_argument('probe',type=Path);p.add_argument('--cases',type=int,default=500);p.add_argument('--report',type=Path);run(p.parse_args())
+    p=argparse.ArgumentParser();p.add_argument('game',type=Path);p.add_argument('probe',type=Path);p.add_argument('--cases',type=int,default=500);p.add_argument('--physical-owners',action='store_true');p.add_argument('--report',type=Path);run(p.parse_args())

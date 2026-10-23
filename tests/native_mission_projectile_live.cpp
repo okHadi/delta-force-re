@@ -1,5 +1,6 @@
 #include "dfre/mission_projectile_live.hpp"
 #include <stdexcept>
+#include "dfre/mission_projectile_owner.hpp"
 #include <iostream>
 namespace {
 using namespace dfre;
@@ -174,5 +175,22 @@ void group_order(){
     tick_projectile(p,state.world.world_center,q,events);
     check(state.extra_for({1,0}).field_74==92&&state.extra_for({0,0}).field_74==100,"physical group mapping changed selected damage");
 }
+void physical_owner_damage(){
+    for(const auto owner_ref:{AiActorRef{0,1},AiActorRef{1,1},AiActorRef{2,0},AiActorRef{3,0},AiActorRef{4,0}}){
+        MissionTickState initial;init(initial,true);AiActorTables tables;tables.groups[0]=initial.tables.groups[0];
+        auto owner=tables.groups[0][0];owner.person_slot=1;owner.position[0]=0x100000;owner.field_70=2;
+        auto& rows=owner_ref.group==4?tables.extra:tables.groups[owner_ref.group];rows.resize(owner_ref.index+1);rows[owner_ref.index]=owner;
+        std::vector<AiItemDefinition> defs(2);defs[1].field_28=3;defs[1].field_84=0x1234;
+        MissionTickState state;init_mission_tick(state,{},std::move(tables),AiItemDefinitionTable(defs),std::vector<AiPersonState>(2),123);
+        state.globals.mission_67f528=1;state.world.world_center={0x4000000,0x4000000,0};state.extra_for({0,0}).field_74=100;
+        auto m=model();auto shape=geometry(m);MissionAnimations a(std::vector<MissionAnimationBinding>{});ProjectileDamageState d;
+        MissionProjectileLiveBindings b;b.globals=[](const auto&){return MissionProjectileLiveGlobals{};};b.terrain=[](auto&,const auto&,const auto&,auto){return 1;};unsigned updates=0;
+        b.update=[&](auto& live,const auto& ref,auto,auto){++updates;check(ref.group==0&&ref.index==0,"wrong target scope");check(live.extra_for(ref).field_f8==actor_handle(owner_ref.group,owner_ref.index),"physical owner identity changed");};
+        b.alert=[](auto&,auto,auto){};b.impact=[](auto&,auto&,const auto&){};b.move=[](auto&,auto&,const auto&){};
+        auto q=mission_projectile_live_query(state,shape,a,resources(),d,b);auto p=projectile();p.owner_slot=mission_projectile_owner_index(state,owner_ref);std::vector<ProjectileEvent> events;
+        tick_projectile(p,state.world.world_center,q,events);check(updates==1&&state.extra_for({0,0}).field_74==92,"physical owner damage did not reach canonical target");
+    }
 }
-int main(){try{test(false,false);test(false,true);test(true,false);test(true,true);missing();group_order();owner_contract(false);owner_contract(true);self_damage();live_terrain();effect_mutation(false);effect_mutation(true);alert_error();std::cout<<"mission projectile live checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+
+}
+int main(){try{physical_owner_damage();test(false,false);test(false,true);test(true,false);test(true,true);missing();group_order();owner_contract(false);owner_contract(true);self_damage();live_terrain();effect_mutation(false);effect_mutation(true);alert_error();std::cout<<"mission projectile live checks passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
