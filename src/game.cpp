@@ -13,12 +13,15 @@
 #include "dfre/state_loop.hpp"
 #include "dfre/soldier_menu.hpp"
 #include "dfre/input_bridge.hpp"
+#include "dfre/input_config.hpp"
 #include "dfre/mission_live.hpp"
 #include "dfre/mission_muzzle.hpp"
 
 #include <array>
 #include <cstring>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <stdexcept>
 
@@ -76,6 +79,16 @@ public:
             if (!player_) throw std::runtime_error("Mission has no single-player start");
             const auto& profile = soldier_.profiles().at(soldier_.selected());
             MissionInitConfig config;
+            auto settings=default_game_config(0);
+            std::ifstream settings_file(options_.game_folder/"df.cfg",std::ios::binary);
+            if(settings_file){
+                const std::string text((std::istreambuf_iterator<char>(settings_file)),{});
+                load_game_config_text(settings,text);
+            }
+            mission_rules_67f548_=std::uint32_t(settings.attributes); //407A90 copies4CEE8C.
+            config.scale_health=(mission_rules_67f548_&0x100)!=0;
+            config.squad_pass=(mission_rules_67f548_&0x400)!=0;
+            config.powerup_pass=(mission_rules_67f548_&0x800)==0;
             config.mode = mission_theme(mission);
             config.night = mission_night(mission);
             config.player_object_id = player_->marker_object_id;
@@ -275,6 +288,7 @@ private:
     std::unique_ptr<MissionRuntimeState> mission_runtime_;
     std::optional<InitialPlayer> player_;
     std::unique_ptr<MissionTickState> mission_tick_;
+    std::uint32_t mission_rules_67f548_=0;
     std::unique_ptr<MissionAnimations> mission_animations_;
     std::unique_ptr<MissionGeometry> mission_geometry_;
     std::unique_ptr<MissionMuzzle> mission_muzzle_;

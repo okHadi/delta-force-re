@@ -89,6 +89,10 @@ set(DFRE_RUNTIME_MODULES
     mission_object_live
     mission_sound_definitions
     mission_object_queries
+    mission_object_cactus
+    mission_object_sight
+    mission_sound_registration
+    mission_event_actor_orders
 )
 target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp)
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
@@ -237,7 +241,11 @@ if(BUILD_TESTING)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)
         add_test(NAME native_${dfre_module} COMMAND native_${dfre_module})
     endforeach()
-    foreach(dfre_peer_test native_mission_peer_frame native_mission_peer_budget native_mission_peer_timers native_mission_control_gate native_mission_audio_listener native_mission_event_queries native_object_behavior native_mission_object_live native_mission_object_queries)
+    foreach(dfre_peer_test
+        native_mission_peer_frame native_mission_peer_budget native_mission_peer_timers
+        native_mission_control_gate native_mission_audio_listener native_mission_event_queries
+        native_object_behavior native_mission_object_live native_mission_object_queries
+        native_mission_object_cactus native_mission_object_sight native_mission_event_actor_orders)
         if(MSVC)
             target_compile_options(${dfre_peer_test} PRIVATE /UNDEBUG)
         else()
