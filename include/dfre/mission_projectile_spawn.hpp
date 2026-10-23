@@ -1,6 +1,7 @@
 #pragma once
 #include "dfre/mission_live.hpp"
 #include "dfre/weapons.hpp"
+#include <functional>
 
 namespace dfre {
 using MissionSpawnPacket=std::array<std::uint8_t,15>;
@@ -29,6 +30,8 @@ public:
     // Keep the mutable 15-byte receive buffer alive through its callbacks.
     void receive(std::uint8_t* bytes,std::size_t length);
     std::uint32_t spawn(std::uint32_t owner,std::uint32_t kind,MuzzleResult&); // 462F20
+    // Mutable source pose: x,y,z,yaw,pitch. Keep all twenty bytes live through effects.
+    std::uint32_t spawn_view(std::uint32_t owner,std::uint32_t kind,std::uint8_t*,std::size_t);
 private:
     MissionTickState& state_;
     MissionProjectileSpawnCells& cells_;
@@ -36,5 +39,6 @@ private:
     MissionProjectileSpawnBindings bindings_;
     std::array<std::uint32_t,3> item_indexes_{};
     AiActorRef owner_ref(std::uint32_t) const;
+    std::uint32_t spawn_current(std::uint32_t,std::uint32_t,const std::function<MuzzleResult()>&);
 };
 } // namespace dfre

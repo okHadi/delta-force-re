@@ -64,6 +64,13 @@ void MissionProjectileSpawn::receive(std::uint8_t* bytes,std::size_t length){
     spawn(actor_handle(3,slot),bytes[14],muzzle);
 }
 std::uint32_t MissionProjectileSpawn::spawn(std::uint32_t owner,std::uint32_t kind,MuzzleResult& muzzle){
+    return spawn_current(owner,kind,[&muzzle]{return muzzle;});
+}
+std::uint32_t MissionProjectileSpawn::spawn_view(std::uint32_t owner,std::uint32_t kind,std::uint8_t* bytes,std::size_t length){
+    if(!bytes||length!=20)throw MissionTickError("Projectile spawn needs twenty mutable pose bytes");
+    return spawn_current(owner,kind,[bytes]{return MuzzleResult{{signed_bits(read(bytes,0,4)),signed_bits(read(bytes,4,4)),signed_bits(read(bytes,8,4))},{read(bytes,12,4),read(bytes,16,4),0}};});
+}
+std::uint32_t MissionProjectileSpawn::spawn_current(std::uint32_t owner,std::uint32_t kind,const std::function<MuzzleResult()>& current){
     if(kind>=cells_.classes.size())throw MissionTickError("Projectile class exceeds the loaded table");
     if(state_.projectiles.size()!=512)throw MissionTickError("Projectile pool size changed");
     const auto ref=owner?std::optional<AiActorRef>(owner_ref(owner)):std::nullopt;
@@ -74,20 +81,21 @@ std::uint32_t MissionProjectileSpawn::spawn(std::uint32_t owner,std::uint32_t ki
     std::array<std::int32_t,2> items{};std::int32_t model=0;std::optional<unsigned> choice;
     if(f&1)choice=0;else if(f&0x10)choice=1;else if(f&0x40)choice=2;
     if(choice){const auto item=item_indexes_[*choice];items={std::int32_t(item),std::int32_t(item)};model=signed_bits(definitions_[item].model);}
-    state_.projectiles[index]=spawn_projectile(muzzle.origin,muzzle.aim,{cls.field_0c,cls.field_10,cls.field_14,cls.field_18,f},items,model,
+    const auto initial=current();
+    state_.projectiles[index]=spawn_projectile(initial.origin,initial.aim,{cls.field_0c,cls.field_10,cls.field_14,cls.field_18,f},items,model,
         ref?std::int32_t(ref->index):-1,color,(cells_.rules_8cf982&0x10)!=0);
     if(choice&&*choice==2){
         const auto& item=definitions_[item_indexes_[2]];
         if(item.ambient_handles[0])need(bindings_.attached_sound,"Projectile attached sound is not bound")(state_,index,item.ambient_handles[0],item.ambient_sound[0],0);
     }
-    if(cls.field_20&&!(cells_.rules_67dbc9&2))need(bindings_.positional_sound,"Projectile positional sound is not bound")(state_,cls.field_20,muzzle.origin);
+    if(cls.field_20&&!(cells_.rules_67dbc9&2))need(bindings_.positional_sound,"Projectile positional sound is not bound")(state_,cls.field_20,current().origin);
     const auto loudness=need(bindings_.loudness,"Projectile loudness is not bound")(state_,cls.field_20);
     if(loudness){
         if(!ref)throw MissionTickError("Projectile alert needs an owner");
         const auto image=snapshot_mission_actor(state_,*ref);
         const auto team_word=std::uint32_t(image[0x70])|std::uint32_t(image[0x71])<<8;
         const auto team_signed=team_word<0x8000u?std::int32_t(team_word):std::int32_t(team_word)-0x10000;
-        need(bindings_.alert,"Projectile alert is not bound")(state_,muzzle.origin,loudness>>1,team_signed,2);
+        need(bindings_.alert,"Projectile alert is not bound")(state_,current().origin,loudness>>1,team_signed,2);
     }
     if((cls.field_30&6)||!(cls.field_30&0x80)){
         if(!ref)throw MissionTickError("Projectile class flags need an owner");

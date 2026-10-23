@@ -1,0 +1,9 @@
+#include "dfre/mission_object_queries.hpp"
+#include <iostream>
+using namespace dfre;
+int main(){unsigned seed;while(std::cin>>seed){MissionTickState s;s.tables.groups[0].resize(1);s.tables.groups[3].resize(256);s.people.resize(2);auto& shooter=s.tables.groups[0][0];shooter.person_slot=0;shooter.field_70=1;shooter.angle_yaw=(seed%4)*0x40000000u;shooter.angle_pitch=(seed%3-1)*0x01000000u;s.people[0].field_74=(seed%5)*0x10000;s.people[0].field_9c=seed%2;s.people[1].field_74=0x18000;s.people[1].field_9c=1;s.config.local_actor=seed%8;s.globals.flags_67dbc9=seed&8;
+ for(unsigned i=0;i<8;++i){auto& a=s.tables.groups[3][i];a.active=(seed+i)%7!=0;a.definition_index=a.active?1:0;a.field_70=(seed+i)%5?2:1;a.field_6c=std::uint8_t((seed+i)%9==0?4:i&1);s.extra_for({3,i}).field_6d=(seed+i)%4==0?0x40:0;const unsigned distance=(seed*17+i*23)%1100;const auto axis=(seed+i)%4;a.position[axis&1]=axis<2?distance*65536u:0u-distance*65536u;a.position[2]=((seed+i)%9-4)*65536u;}
+ unsigned calls=0;MissionObjectTargetBindings b;b.sight_line=[&](const AiActorRef&,const AiActorRef& t){++calls;if(seed&16){s.extra_for(t).field_6d^=0x40;s.tables.groups[3][t.index].field_6c^=1;shooter.person_slot=1;}if(seed&32)shooter.angle_yaw+=0x10000000u;return std::int32_t((seed+t.index)%4);};b.frame_weight_10=[&](const AiActorRef& t){if(seed&64)s.extra_for(t).field_6d^=0x40;return (seed+t.index)%4*0x8000u;};const auto r=mission_object_target(s,{0,0},b);
+ EventStage e;const auto a=seed%62,bit=std::uint32_t(std::int32_t(seed%192)-64);const auto region=a+(bit&0x80000000u?1u:0u);mission_object_region_mark(e,region,bit);
+ std::cout<<"{\"target\":"<<r.source_actor<<",\"score\":"<<r.score<<",\"calls\":"<<calls<<",\"flags\":[";for(unsigned i=0;i<128;++i){if(i)std::cout<<',';std::cout<<e.flag_word_6e0050(i);}std::cout<<"]}\n";
+}}

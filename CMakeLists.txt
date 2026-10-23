@@ -82,7 +82,15 @@ set(DFRE_RUNTIME_MODULES
     mission_fragment_spawn
     mission_explosion_runtime
     mission_peer_requests
+    mission_positional_sound
+    mission_behavior_zones
+    mission_event_queries
+    mission_peer_projectile
+    mission_object_live
+    mission_sound_definitions
+    mission_object_queries
 )
+target_sources(dfre_core PRIVATE src/object_live_callbacks.cpp)
 foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
     target_sources(dfre_core PRIVATE src/${dfre_module}.cpp)
     add_executable(${dfre_module}_probe tools/${dfre_module}_probe.cpp)
@@ -92,6 +100,10 @@ add_executable(mission_profile_probe tools/mission_profile_probe.cpp)
 target_link_libraries(mission_profile_probe PRIVATE dfre_core)
 add_executable(mission_sound_stock_probe tools/mission_sound_stock_probe.cpp)
 target_link_libraries(mission_sound_stock_probe PRIVATE dfre_core)
+foreach(dfre_object_probe mission_object_move_live mission_object_slgt_live mission_object_slgt_ai_live)
+    add_executable(${dfre_object_probe}_probe tools/${dfre_object_probe}_probe.cpp)
+    target_link_libraries(${dfre_object_probe}_probe PRIVATE dfre_core)
+endforeach()
 target_include_directories(dfre_core PUBLIC include)
 target_compile_features(dfre_core PUBLIC cxx_std_17)
 set_target_properties(dfre_core PROPERTIES CXX_EXTENSIONS OFF)
@@ -217,12 +229,15 @@ if(BUILD_TESTING)
     add_executable(native_mission_peer_live tests/native_mission_peer_live.cpp)
     target_link_libraries(native_mission_peer_live PRIVATE dfre_core)
     add_test(NAME native_mission_peer_live COMMAND native_mission_peer_live)
+    add_executable(native_object_behavior tests/native_object_behavior.cpp)
+    target_link_libraries(native_object_behavior PRIVATE dfre_core)
+    add_test(NAME native_object_behavior COMMAND native_object_behavior)
     foreach(dfre_module IN LISTS DFRE_RUNTIME_MODULES)
         add_executable(native_${dfre_module} tests/native_${dfre_module}.cpp)
         target_link_libraries(native_${dfre_module} PRIVATE dfre_core)
         add_test(NAME native_${dfre_module} COMMAND native_${dfre_module})
     endforeach()
-    foreach(dfre_peer_test native_mission_peer_frame native_mission_peer_budget native_mission_peer_timers native_mission_control_gate native_mission_audio_listener)
+    foreach(dfre_peer_test native_mission_peer_frame native_mission_peer_budget native_mission_peer_timers native_mission_control_gate native_mission_audio_listener native_mission_event_queries native_object_behavior native_mission_object_live native_mission_object_queries)
         if(MSVC)
             target_compile_options(${dfre_peer_test} PRIVATE /UNDEBUG)
         else()
