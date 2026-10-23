@@ -48,6 +48,12 @@ int main(int argc,char** argv){try{
  const auto& memory=owner->asset_bindings();
  MissionDfSocketRuntimeMemory shared{memory.read,memory.write};
  MissionDfSocketRuntime sockets(shared);socket=&sockets;
+ const U allocation_size=0x1000000;
+ const auto large=memory.call(0x497f60,{allocation_size,4,0,0});
+ check(large>=0x28000000&& !sockets.claims(large,4));
+ memory.write(large,4,0x87654321);memory.write(large+allocation_size-4,4,0xabcdef01);
+ check(memory.read(large,4)==0x87654321&&memory.read(large+allocation_size-4,4)==0xabcdef01);
+ memory.call(0x4980d0,{large});
  std::recursive_mutex mutex;MissionLineFileRuntimeBindings locks;
  locks.lock=[&](U){mutex.lock();};locks.unlock=[&](U){mutex.unlock();};
  const auto scratch=memory.call(0x497f60,{0x2000,4,0,0});

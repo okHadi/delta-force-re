@@ -28,8 +28,12 @@
 #include "dfre/mission_df_socket_runtime.hpp"
 #include "dfre/mission_line_file_runtime.hpp"
 #include "dfre/mission_localization.hpp"
+#include "dfre/mission_session.hpp"
 
 #include <array>
+#include <chrono>
+#include <immintrin.h>
+#include <limits>
 #include <cstring>
 #include <fstream>
 #include <iostream>
@@ -167,17 +171,47 @@ public:
             for(std::size_t i=0;i<controls.size();++i)
                 controls[i]={profile_word(0x6a0+i*12),profile_word(0x6a4+i*12),profile_word(0x6a8+i*12)};
             mission_input_=std::make_unique<InputBridge>(controls);
+            mission_input_->set_query_row_source([this](auto row){
+                return mission_session_input_query_row(*mission_sound_,row);
+            });
+            mission_requested_8ee1d4_=source_memory.read(0x8ee1d4,4);
+            mission_camera_mode_6ba3ec_=source_memory.read(0x6ba3ec,4);
+            const std::array<std::int32_t*,3> camera_fields{{&mission_camera_position_6ba3d0_.x,
+                &mission_camera_position_6ba3d0_.y,&mission_camera_position_6ba3d0_.z}};
+            for(std::size_t i=0;i<camera_fields.size();++i){
+                const auto word=source_memory.read(0x6ba3d0+std::uint32_t(i)*4,4);
+                std::memcpy(camera_fields[i],&word,4);
+            }
+            const auto audio_origin=std::chrono::steady_clock::now();
+            MissionSessionHost session_host;
+            session_host.pump_490880=[this]{return poll_mission_input();};
+            session_host.rdtsc=[](){return std::uint64_t(__rdtsc());};
+            session_host.elapsed_audio_frames=[audio_origin,previous=std::uint64_t(0)]()mutable{
+                const auto elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-audio_origin).count();
+                const auto total=std::uint64_t(elapsed*22050);
+                const auto count=total-previous;
+                if(count>std::numeric_limits<std::uint32_t>::max())throw MissionTickError("Audio frame interval exceeds its current range");
+                previous=total;return std::uint32_t(count);
+            };
+            session_host.camera_actor_6ba3f0=[this]{return actor_handle(3,*mission_tick_->config.local_actor);};
+            session_host.camera_mode_6ba3ec=[this]{return mission_camera_mode_6ba3ec_;};
+            session_host.event_references=EventReferencePolicy::missing_not_fired;
+            session_host.event_diagnostic=[](auto index,auto count){
+                std::cerr<<"Mission event reference "<<index<<" exceeds loaded count "<<count<<'\n';
+            };
+            mission_session_=std::make_unique<MissionSession>(MissionSessionContext{
+                *mission_tick_,*mission_runtime_,mission_resources_->mission,*mission_assets_,world_->terrain,
+                *mission_animations_,*mission_geometry_,*mission_muzzle_,*mission_input_,*mission_sound_,
+                *mission_scripts_,*mission_audio_frame_,mission_script_queue_,mission_crt_thread_,*mission_clients_,
+                mission_extra_memory_,mission_rules_67f548_,mission_requested_8ee1d4_,mission_camera_position_6ba3d0_
+            },std::move(session_host));
+            mission_session_->install();
             mission_scene_ = std::make_unique<MissionScene32>(*mission_runtime_, *mission_assets_, *world_, gamma);
             draw_mission(true);
             screen_ = GameScreen::game;
         };
         world.update = [this] {
-            if (close_) return 1;
-            for (const auto& event : window_->poll()) {
-                mission_input_->feed(event);
-                if (event.kind == InputKind::quit) return 1;
-            }
-            return 0;
+            return poll_mission_input()?0:1;
         };
         world.render = [this] {
             draw_mission(false);
@@ -185,6 +219,7 @@ public:
             if (options_.frame_limit && ++frames_ >= options_.frame_limit) close_ = true;
         };
         world.leave = [this] {
+            mission_session_.reset();
             mission_scene_.reset();
             mission_input_.reset();
             if(mission_scripts_)mission_scripts_->service(0x455ea0,{});
@@ -219,6 +254,14 @@ public:
         end.render = [this] { if (!frame_.empty()) window_->present(frame_); };
     }
 
+    bool poll_mission_input() {
+        if(close_)return false;
+        for(const auto& event:window_->poll()){
+            mission_input_->feed(event);
+            if(event.kind==InputKind::quit)close_=true;
+        }
+        return !close_;
+    }
     bool definition_claim(std::uint32_t at,std::uint32_t width) const {
         const auto end=std::uint64_t(at)+width;
         if(at<0xc23814&&end>0xc23810){
@@ -272,6 +315,7 @@ public:
             return actor_word(actor,offset);
         };
         bindings.record_base=[this,record_base](std::uint32_t at,std::uint32_t width)->std::optional<std::uint32_t>{
+            if(mission_session_&&mission_session_->claims(at,width))return at;
             if(mission_clients_->claims(at,width))return at;
             if(mission_sockets_&&mission_sockets_->claims(at,width))return at;
             if(mission_scripts_&&mission_scripts_->owns(at,width))return at;
@@ -281,6 +325,7 @@ public:
         };
         bindings.record_read=[this,record_read](std::uint32_t base,std::uint32_t offset,std::uint32_t width){
             const auto at=base+offset;
+            if(mission_session_&&mission_session_->claims(at,width))return mission_session_->read(at,width);
             if(mission_clients_->claims(at,width))return mission_clients_->read(at,width);
             if(mission_sockets_&&mission_sockets_->claims(at,width))return mission_sockets_->read(at,width);
             if(mission_scripts_&&mission_scripts_->owns(at,width))return mission_scripts_->memory().read(at,width);
@@ -290,6 +335,7 @@ public:
         };
         bindings.record_store=[this,record_store](std::uint32_t base,std::uint32_t offset,std::uint32_t width,std::uint32_t value){
             const auto at=base+offset;
+            if(mission_session_&&mission_session_->claims(at,width)){mission_session_->write(at,width,value);return;}
             if(mission_clients_->claims(at,width)){mission_clients_->write(at,width,value);return;}
             if(mission_sockets_&&mission_sockets_->claims(at,width)){mission_sockets_->write(at,width,value);return;}
             if(mission_scripts_&&mission_scripts_->owns(at,width)){mission_scripts_->memory().write(at,width,value);return;}
@@ -323,6 +369,10 @@ public:
             MissionScriptRuntimeCells{mission_script_queue_,mission_tick_->globals.mission_67f528});
         const auto scratch=mission_sound_->asset_bindings().call(0x497f60,{0x4000,4,0,0});
         MissionScriptRegistryBindings script_host;
+        script_host.message=[this](auto id,const auto& packet){
+            if(!mission_session_)throw MissionTickError("Script packet requires a current mission session");
+            mission_session_->script_message(id,packet.data(),packet.size());
+        };
         script_host.crt_thread=[](){return 0x19000000u;};
         script_host.voice_volume=[this](){return mission_voice_volume_67f51c_;};
         mission_scripts_=std::make_unique<MissionScriptRegistry>(*mission_script_cells_,
@@ -339,6 +389,12 @@ public:
         mission_files_=std::make_unique<MissionLineFileRuntime>(options_.game_folder,memory,
             file_scratch,0x2000,std::move(file_locks));
         mission_client_startup({memory.read,memory.write,memory.call,{}});
+        for(const auto& table:std::array<std::pair<std::uint32_t,std::uint32_t>,3>{{
+            {0x50322c,0x4c80a8},{0x503234,0x4c80b4},{0x503230,0x4c80dc}}}){
+            const auto loaded=mission_rtxt_load(memory,table.second);
+            if(!loaded)throw MissionSoundAssetError("Game text table failed to load");
+            memory.write(table.first,4,loaded);
+        }
         for(std::size_t i=0;i<mission.header.size();++i)
             memory.write(0x8cf908+std::uint32_t(i),1,mission.header[i]);
         mission_sound_->initialize_definitions("LOOP.DEF");
@@ -490,6 +546,10 @@ private:
     MissionScriptQueueCells mission_script_queue_{};
     std::unique_ptr<MissionScriptRuntimeCells> mission_script_cells_;
     std::unique_ptr<MissionScriptRegistry> mission_scripts_;
+    std::uint32_t mission_requested_8ee1d4_=0;
+    std::uint32_t mission_camera_mode_6ba3ec_=0;
+    Fixed3 mission_camera_position_6ba3d0_{};
+    std::unique_ptr<MissionSession> mission_session_;
     StateLoop loop_;
     std::map<GameScreen, GameState> states_;
     GameScreen screen_ = GameScreen::main_menu;

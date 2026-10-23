@@ -54,7 +54,9 @@ public:
     }
     U read(U at,U width=4){check(width==1||width==2||width==4,"Invalid sound read width");U n=0;for(U i=0;i<width;++i)n|=U(*pointer(at+i,1))<<(8*i);return n;}
     void write(U at,U width,U n){check(width==1||width==2||width==4,"Invalid sound write width");for(U i=0;i<width;++i)*pointer(at+i,1)=std::uint8_t(n>>(8*i));}
-    U allocate(U size){check(size<0x8000000,"Sound allocation exceeds owner limit");const U base=next_;const std::uint64_t end=std::uint64_t(base)+size+32;
+    U allocate(U size){check(size<0x8000000,"Sound allocation exceeds owner limit");U base=next_;std::uint64_t end=std::uint64_t(base)+size+32;
+        // Keep the DF socket scratch, lookup and default work heap separate.
+        if(base<0x28000000u&&end>0x23000000u){base=0x28000000u;end=std::uint64_t(base)+size+32;}
         check(end<0xf0000000,"Sound allocation handles are full");next_=U((end+15)&~std::uint64_t(15));blocks_[base].resize(std::size_t(size)+16);++allocations;return base+16;}
     void release(U pointer){const auto found=blocks_.find(pointer-16);check(found!=blocks_.end()&&pointer>=0x22000010,"Sound release does not name a live allocation");blocks_.erase(found);}
     std::size_t remaining(U at){auto it=blocks_.upper_bound(at);check(it!=blocks_.begin(),"Sample allocation is missing");--it;check(at-it->first<=it->second.size(),"Sample address exceeds allocation");return it->second.size()-(at-it->first);}
@@ -65,7 +67,7 @@ private:
     struct View {U at;std::uint8_t* bytes;std::size_t size;};
     std::map<U,dfre::AssetBytes> blocks_;std::vector<View> views_;U next_=0x22000000;
 };
-constexpr U archive=0x21001000,height_base=0x10000000;
+constexpr U archive=0x21001000,height_base=0x15000000;
 std::int32_t si(U n){return n<=0x7fffffffu?std::int32_t(n):std::int32_t(std::int64_t(n)-0x100000000LL);}
 char upper(char c){return c>='a'&&c<='z'?char(c-'a'+'A'):c;}
 bool foreign_record(U at,U width){const auto end=std::uint64_t(at)+width;return(at<0x8cf680&&end>0x7cca80)||(at<0xa15898&&end>0x9f3098);}

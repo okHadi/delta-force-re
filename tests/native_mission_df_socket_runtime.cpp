@@ -14,7 +14,7 @@ struct Memory {
 };
 void startup(const MissionDfSocketBindings& b){assert(b.call(0x4c55f8,{0x101,0x8e1390})==0);}
 U make_socket(const MissionDfSocketBindings& b){const auto value=b.call(0x4c55c8,{2,2,0});assert(value!=0xffffffffu);return value;}
-U bind_port(MissionDfSocketRuntime& r,const MissionDfSocketBindings& b,U token,U port){r.write(0x1200000,2,2);r.write(0x1200002,2,b.call(0x4c55bc,{port}));r.write(0x1200004,4,0x0100007f);r.write(0x1200008,4,0);r.write(0x120000c,4,0);return b.call(0x4c55b6,{token,0x1200000,16});}
+U bind_port(MissionDfSocketRuntime& r,const MissionDfSocketBindings& b,U token,U port){r.write(0x1200000,2,2);r.write(0x1200002,2,b.call(0x4c55bc,{port}));r.write(0x1200004,4,0);r.write(0x1200008,4,0);r.write(0x120000c,4,0);return b.call(0x4c55b6,{token,0x1200000,16});}
 }
 int main(){
  {Memory m;MissionDfSocketRuntime r(m.bindings);auto b=r.bindings();
@@ -35,7 +35,7 @@ int main(){
   const auto first=make_socket(b),second=make_socket(b);assert(bind_port(r,b,first,0)==0);const auto port=r.local_port(first);assert(port!=0&&bind_port(r,b,second,port)==0xffffffffu);assert(b.call(0x4c55e0,{})==10048);assert(b.call(0x4c55bc,{1234})==0xd204&&b.call(0x4c55e0,{})==10048);
   r.write(0x1200020,4,1);assert(b.call(0x4c55c2,{second,0x8004667e,0x1200020})==0);assert(b.call(0x4c55c2,{0xdead,0x8004667e,0x1200020})==0xffffffffu&&b.call(0x4c55e0,{})==10038);
   r.write(0x8e353c,4,first);assert(mission_df_socket_set_buffer(b,false,65536)==0);const auto size=mission_df_socket_get_buffer(b,false);assert(size>0&&r.frame_depth()==0);rejects([&]{b.call(0x4c55ce,{first,0xffff,0x1234,0x1200020,4});});rejects([&]{b.call(0x4c55c8,{2,1,0});});rejects([&]{b.call(0xdead,{});});
-  // The source send body binds ANY. A loopback reservation must still force a retry.
+  // Reserve ANY so the source ANY bind must retry on each host platform.
   assert(mission_df_socket_open_send(b,U(port)-1)==0);assert(r.local_port(r.read(0x8e353c,4))!=port&&r.frame_depth()==0);assert(r.socket_count()==3);
  }
  {Memory m;MissionDfSocketRuntime r(m.bindings);auto b=r.bindings();startup(b);const auto occupied=make_socket(b);assert(bind_port(r,b,occupied,0)==0);const auto initial=r.local_port(occupied);r.write(0x1200040,2,initial);assert(mission_df_socket_start(b,2,0x1200040,0xf28)==0);const auto receive=r.read(0x8e3548,4),send=r.read(0x8e353c,4),chosen=r.read(0x1200040,2);assert(receive!=send&&chosen!=initial&&r.local_port(receive)==chosen);assert(r.read(0x8e354e,2)==chosen&&r.read(0x8e354c,2)==0xf28&&r.read(0x8e3530,4)==2);const auto work=r.read(0x8e3540,4),size=r.read(0x8e3544,4);assert(work&&size>12&&r.claims(work,size>3?4:1)&&r.frame_depth()==0);r.write(work+size-4,4,0xfedcba98);assert(r.read(work+size-4,4)==0xfedcba98&&r.read(0x8e352c,4)==0);

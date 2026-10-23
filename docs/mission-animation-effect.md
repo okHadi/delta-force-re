@@ -5,3 +5,5 @@
 Supply current reads of 1, 4 and 8 bytes. The PE double at 4CCB2C is -52428.8. The function reads water before actor positions. Wet effects call 45DC70 with the first water level, then read the current step flag and water for 43E7D0.
 
 Dry effects use the current COLOR grid and 256-byte terrain type table. Bind 43E7D0 to the real positional sound owner. Supply each reached visual or sound body.
+
+Use the supplied PE value at 4CCB2C. With signed 32-bit positions and water, the comparison gap is at least 0.19. Both 64-bit and 80-bit arithmetic give the same result. The Mac instruction test also checks other double values; that test does not prove those values on Windows.

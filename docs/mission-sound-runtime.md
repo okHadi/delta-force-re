@@ -13,3 +13,5 @@ Call `frame` at the mission scheduler site. Call `publish` and `advance_frames` 
 The required `service` provider handles reached mission script loading and registration (`455C90`, `456070`, `456080`, `456090`), diagnostics, loose-file loading, and archive name remapping. Unknown services raise an error when no provider is bound. The normal PFF file path, allocation, bank/cache calls, channel reservation, extension helper, and playback run inside this owner.
 
 Each active request has a separate stable scratch block. Keep the owner and all referenced data alive through callbacks. The original comparison covers ambient callbacks, reused token storage, actual `LOOP.DEF`, lazy WAV reuse/load/failure, channel writes, extension aliases, and the complete resolved definition table. The stock test uses actual `SNIPER.PWF` and sound `499` with zero device output.
+
+The virtual height view starts at `15000000`. Shared allocations start at `22000000` and skip `23000000..27FFFFFF`, reserved for DF socket frames, lookup data and the default work heap. Keep source DLL image storage at `10000000` separate from terrain storage. These addresses are host memory rules.
