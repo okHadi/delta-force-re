@@ -4,7 +4,7 @@ Create `MissionSession` after mission initialization and client placement. Keep 
 
 Use the current runtime, actor state, clients, sound, scripts, input and extra-actor memory. The runtime owns `live_types`. The session owns its frame, event, message, outbox, zone, projectile-request and trail state. Projectile records remain in `MissionTickState`.
 
-Construct the session before routing its source cells. Route `claims`, `read` and `write` before the sound fallback. Construction reads the current source values. Keep the extra-actor and definition memory routes in place.
+Construct the session before routing its source cells. Route `claims`, `read` and `write` before the sound fallback. Construction reads the current source values, including objective mask `67DBEC`. Publish the selected profile mask before construction. Keep the extra-actor and definition memory routes in place.
 
 Bind the input row provider to `mission_session_input_query_row(sound, row)`. Supply the host pump, clock, elapsed audio frames and current camera providers. Set the event policy and its diagnostic explicitly. Call `install`, then `step`. Read the state request after each step. Send script packets through `script_message`. Route source `42EBA0` to `end_events()` while Session is installed and all context owners are alive.
 
@@ -24,7 +24,9 @@ Seagull updates and movement use that same primary owner, including all 1,024 ph
 
 Game routes the closed Debrief `493A80` formats through current sound memory after HUD formatting. Parameter set/get `4C4F40/4C4F60` use the current table pointer and shared return cell. Keep parameter allocation and initialization with their source owner.
 
-Route `leave_service` before the sound fallback for `403A50` and `4401E0`. Keep Session installed through these calls. The reset uses current clients, squads, result builder and outbox with its own 206-byte packet.
+Route `leave_service` before the sound fallback for `403A50`, `4401E0` and `456E30`. The profiler call takes one index and uses the same frame profiler as mission stepping. Keep Session installed through these calls. The reset uses current clients, squads, result builder and outbox with its own 206-byte packet.
+
+Call `profile_leave(current_profile)` for `401E70` before Session teardown. Supply the current selected profile bytes. Restore saved rules `67DBE4` to live `67F548` at the preceding source leave site. The call uses current events, result bytes and x87 control.
 
 Route `hud_service` before the sound service fallback. HUD history uses the shared frame timers. Campaign text uses the current RTXT table at `503238`.
 

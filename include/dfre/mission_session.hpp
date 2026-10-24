@@ -66,6 +66,7 @@ public:
     void script_message(std::uint32_t id,const std::uint8_t* bytes,std::size_t length);
     void request_result(std::uint32_t mode,MissionLogicResultPacket& caller_packet);
     std::optional<std::uint32_t> leave_service(std::uint32_t site,const std::vector<std::uint32_t>& args);
+    void profile_leave(const std::function<AssetBytes&()>& current_profile); //401E70
     void end_events(); //42EBA0, while all current mission owners are alive
     std::uint32_t camera_yaw() const;
     // Route these owned cells before the sound memory fallback. Construction

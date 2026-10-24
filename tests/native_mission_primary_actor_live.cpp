@@ -2,6 +2,7 @@
 #include "dfre/mission_live.hpp"
 #include "dfre/mission_object_effects.hpp"
 #include "dfre/mission_client_outbox.hpp"
+#include "dfre/mission_animation.hpp"
 #include <cassert>
 #include <map>
 using namespace dfre;using U=std::uint32_t;
@@ -24,5 +25,29 @@ int main(){
  for(U i=0x400;i<0x1000;++i)bytes[S+i]=0;put_raw(D+0x13c+0x20,0xfce);MissionTickState allocated;init_mission_tick(allocated,{},AiActorTables{},AiItemDefinitionTable(definitions()),{},0);MissionPrimaryActorLive allocation(allocated,b,std::vector<AiActorImage>(1024));auto allocation_memory=allocation.insertion_bindings();GameMessageStage messages;MissionServerMessageBuffer server;std::vector<std::array<std::uint8_t,mission_client_record_size>> clients(17);clients[0][0x18c]=1;clients[0][0x1c4]=5;MissionClientOutboxBindings ob;ob.client=[&](std::size_t slot){return MissionClientRecordView{clients.at(slot).data(),clients.at(slot).size()};};ob.cell=[](U){return 0u;};MissionClientOutbox outbox(messages,server,ob);
  MissionObjectEffectBindings effect;effect.read=[&](U at,U width){if(at==0xc23810)return D;return allocation_memory.read(at,width);};effect.write=allocation_memory.write;effect.call=[&](U site,const std::vector<U>& args)->U{if(site==0x4828c0){assert(args.at(0)==0xfce);return 1;}if(site==0x49a620){for(U i=0;i<args.at(2);++i)effect.write(args.at(0)+i,1,args.at(1));return args.at(0);}if(site==0x45d970)return mission_actor_insert(allocation_memory,args.at(0),args.at(1));if(site==0x460d20){for(U i=0;i<4;++i)put_raw(S+0x120+i*4,args.at(i));return mission_object_effect_allocate(effect,S);}if(site==0x442630){std::vector<std::uint8_t> packet(args.at(2));for(U i=0;i<args.at(2);++i)packet[i]=std::uint8_t(effect.read(args.at(1)+i,1));outbox.broadcast(std::int32_t(args.at(0)),packet.data(),U(packet.size()));return 0;}throw MissionTickError("Unowned primary effect service");};
  const U packet=S+0x800;put_raw(packet+0x38,0);put_raw(packet+0x3c,111);put_raw(packet+0x40,222);put_raw(packet+0x44,333);mission_object_effect_publish(effect,packet);assert(allocated.tables.groups[0].size()==1&&allocated.tables.groups[0][0].position[0]==111&&allocated.tables.groups[0][0].position[1]==222&&allocated.tables.groups[0][0].position[2]==333);assert(allocation.read(A+4,4)==D+0x13c&&clients[0][0x204+8]==0x2b&&clients[0][0x204+12]==0xce&&clients[0][0x204+13]==0x0f);
-
+ // Exact foreign-memset clear retains the counted extent and all physical tails.
+ CharacterModel character;character.runtime_prepared=true;character.bone_map={0};
+ MissionAnimations animations({{kCharacterInstanceBase,&character,{{0,0,0,false,0,0,0,0}}}});
+ auto& actor=state.tables.groups[0][0];actor.field_18=kCharacterInstanceBase;
+ state.bind_animation({0,0},animations.controller(kCharacterInstanceBase),animations.actions(kCharacterInstanceBase));
+ auto& runtime=state.runtime_for({0,0});runtime.byte_6e=7;runtime.roll_38=19;runtime.vertical_44=-22;runtime.ground_100=0x778899;runtime.link_90=0xaabbcc;runtime.anim_flags_48=17;runtime.stance_64=3;
+ state.actor_extras[0][0].field_f8=0xabcdef;state.person_encoding[0][0]=ActorPersonEncoding::handle;
+ live.write(A,4,2); // Keep a mixed raw index/definition header during clear.
+ const auto person_owner=state.people[0].owner;const auto before_callbacks=person_called;
+ const auto actor_capacity=state.tables.groups[0].capacity(),image_capacity=state.stored_actor_images[0].capacity(),extra_capacity=state.actor_extras[0].capacity(),runtime_capacity=state.runtimes[0].capacity(),encoding_capacity=state.person_encoding[0].capacity();
+ const auto* actor_address=&state.tables.groups[0][0];
+ state.actor_extras[0].push_back({});invalid([&]{live.clear_physical_pool();});
+ assert(state.tables.groups[0][0].active&&state.tables.groups[0][0].position[0]==22&&state.runtimes[0][0]->driver&&state.people[0].owner==person_owner);
+ state.actor_extras[0].pop_back();assert(live.read(A,4)==2&&live.read(A+1023*0x114+0x110,4)==0xaabbccdd);
+ live.clear_physical_pool();
+ assert(live.read(0x8cfa1c,4)==2&&state.tables.groups[0].size()==2&&state.stored_actor_images[0].size()==2&&state.actor_extras[0].size()==2&&state.runtimes[0].size()==2&&state.person_encoding[0].size()==2);
+ assert(actor_address==&state.tables.groups[0][0]&&actor_capacity==state.tables.groups[0].capacity()&&image_capacity==state.stored_actor_images[0].capacity()&&extra_capacity==state.actor_extras[0].capacity()&&runtime_capacity==state.runtimes[0].capacity()&&encoding_capacity==state.person_encoding[0].capacity());
+ for(U offset=0;offset<0x45000;offset+=4)assert(live.read(A+offset,4)==0);
+ for(std::size_t slot=0;slot<2;++slot){assert(snapshot_mission_actor(state,{0,slot})==AiActorImage{});assert(state.stored_actor_images[0][slot]==AiActorImage{});assert(!state.tables.groups[0][slot].person_slot&&!state.runtimes[0][slot]);assert(state.actor_extras[0][slot].field_f8==0&&state.person_encoding[0][slot]==ActorPersonEncoding::slot);}
+ assert(state.people[0].owner==person_owner&&person_called==before_callbacks&&animations.size()==1&&animations.pose(kCharacterInstanceBase));
+ live.clear_physical_pool();assert(live.read(0x8cfa1c,4)==2);
+ // Count-zero and full-count owners retain their own extents on the same call.
+ allocation.clear_physical_pool();assert(allocated.tables.groups[0].size()==1&&allocation.read(A+4,4)==0);
+ full.clear_physical_pool();assert(full_state.tables.groups[0].size()==1024&&full.read(A+1023*0x114,4)==0);
+ MissionTickState empty;init_mission_tick(empty,{},AiActorTables{},AiItemDefinitionTable(definitions()),{},0);MissionPrimaryActorLive empty_owner(empty,b,std::vector<AiActorImage>(1024));empty_owner.write(A+0x110,4,0xffffffff);empty_owner.clear_physical_pool();assert(empty.tables.groups[0].empty()&&empty_owner.read(A+0x110,4)==0);
 }

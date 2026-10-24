@@ -277,6 +277,7 @@ struct MissionSession::Impl {
 
     explicit Impl(MissionSessionContext context,MissionSessionHost host,MissionResultImage* result=nullptr):c(context),h(std::move(host)),camera{c.camera_position_6ba3d0,{},0,0},owned_result_image(result?nullptr:std::make_unique<MissionResultImage>()),result_image(result?*result:*owned_result_image){
         const auto& memory=c.sound.asset_bindings();
+        event_stage.flags_67dbec()=memory.read(0x67dbec,4);
         for(std::size_t i=0;i<hud_history.size();++i)hud_history[i]=std::uint8_t(memory.read(0xbd34b0+U(i),1));
         hud_counter_bd4810=memory.read(0xbd4810,4);cells.emplace(0x67db54,memory.read(0x67db54,4));
         for(std::size_t i=0;i<result_image.size();++i)result_image[i]=std::uint8_t(memory.read(0x67f714+U(i),1));
@@ -855,10 +856,28 @@ bool MissionSession::installed() const noexcept{return impl_->active;}
 MissionTickReport MissionSession::step(){if(!installed())throw MissionTickError("Mission session is not installed");return mission_tick(impl_->c.state,impl_->input);}
 void MissionSession::request_result(U mode,MissionLogicResultPacket& packet){if(!installed())throw MissionTickError("Mission result requires an installed session");mission_logic_request_result(impl_->result_bindings,mode,packet);}
 std::optional<U> MissionSession::leave_service(U site,const std::vector<U>& args){
-    if(site!=0x403a50&&site!=0x4401e0)return {};
-    if(!installed()||!args.empty())throw MissionTickError("Peer leave requires an installed Session and no arguments");
+    if(site!=0x403a50&&site!=0x4401e0&&site!=0x456e30)return {};
+    if(!installed())throw MissionTickError("Leave service requires an installed Session");
+    if(site==0x456e30){
+        if(args.size()!=1)throw MissionTickError("Leave profiler needs one index");
+        MissionStageCall call;call.address=site;call.args[0]=args[0];call.argument_count=1;
+        return impl_->frame->stage(call);
+    }
+    if(!args.empty())throw MissionTickError("Peer leave takes no arguments");
     if(site==0x403a50)return mission_peer_leave_drain(impl_->periodic);
     mission_peer_reset(impl_->periodic,Impl::peer_leave_source);return 0;
+}
+void MissionSession::profile_leave(const std::function<AssetBytes&()>& current_profile){
+    if(!installed())throw MissionTickError("Profile leave requires an installed Session");
+    const auto& memory=impl_->c.sound.asset_bindings();
+    MissionProfileBindings profile;
+    profile.cell=[&](U at){return memory.read(at,4);};
+    profile.store=[&](U at,U value){memory.write(at,4,value);};
+    profile.profile=current_profile;
+    profile.result=[this]{return impl_->result_image;};
+    profile.fp_control=[this]{return impl_->fp_control_word;};
+    profile.end_events=[this]{end_events();};
+    mission_profile_leave(profile);
 }
 void MissionSession::end_events(){if(!installed())throw MissionTickError("Mission end events require an installed Session");impl_->event_stage.run_bit2_events();}
 std::optional<U> MissionSession::hud_service(U site,const std::vector<U>& args){return impl_->hud_service(site,args);}

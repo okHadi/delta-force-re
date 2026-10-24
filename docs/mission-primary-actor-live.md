@@ -16,4 +16,6 @@ Bind actual44A0C0 through the delegated person provider. That service must estab
 
 Definition resolvers read the current resource table. They must keep the actor pool and adapter call stable while they run. Route pool changes through this adapter. Current typed field changes and full canonical actor clears remain visible in raw reads.
 
+Use `clear_physical_pool()` for the exact foreign memset `49A620(7DDE80,0,45000h)`. It checks every counted side-vector extent and the complete registered tail before mutation. The complete commit allocates nothing and calls no external provider. It clears all raw headers and tail bytes, counted actors, stored images, extras, person encoding, and runtime entries. Actor count, vector extents, capacities, and actor addresses stay current. Shared people and typed character controllers keep their separate release boundaries.
+
 The original test runs real45D970 instructions and compares ordered access, all1024 physical records, count publication, person callback changes, and failure prefixes. Native checks cover mixed headers, current typed aliases, tail publication, pointer validation, count limits, stable actor references, current person binding, and the last physical slot. They also join447610 through460D20 and45D970 to the canonical group0 actor and shared2B outbox publication.

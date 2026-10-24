@@ -22,6 +22,21 @@ struct MissionPrimaryActorLive::Impl {
   state.tables.groups[0].reserve(1024);state.stored_actor_images[0].reserve(1024);state.actor_extras[0].reserve(1024);state.runtimes[0].reserve(1024);state.person_encoding[0].reserve(1024);
  }
  void ready()const{if(state.tables.groups[0].size()!=count||state.stored_actor_images[0].size()!=count||state.actor_extras[0].size()!=count||state.runtimes[0].size()!=count||state.person_encoding[0].size()!=count)throw MissionTickError("Primary actor canonical extent changed outside its owner");}
+ void clear(){
+  ready();
+  if(count>1024||tail.size()!=1024-count)throw MissionTickError("Primary clear has an incomplete physical tail");
+  for(std::size_t slot=count;slot<1024;++slot)if(tail.find(slot)==tail.end())throw MissionTickError("Primary clear has an unowned physical row");
+  // The complete foreign-memset commit performs no allocation or callbacks.
+  for(std::size_t slot=0;slot<count;++slot){
+   state.tables.groups[0][slot]=AiActorState{};
+   state.stored_actor_images[0][slot].fill(0);
+   state.actor_extras[0][slot]=BehaviorActorExtra{};
+   state.person_encoding[0][slot]=ActorPersonEncoding::slot;
+   state.runtimes[0][slot].reset();
+  }
+  headers.fill(Header{});
+  for(auto& row:tail)row.second.fill(0);
+ }
  U normalized(U raw){const U result=raw?b.definition_index(raw):0;ready();if(result>=state.definitions.entries().size())throw MissionTickError("Primary definition exceeds the canonical table");return result;}
  AiActorImage image(std::size_t slot){ready();if(slot>=count)return tail.at(slot);auto current=snapshot_mission_actor(state,{0,slot});auto& h=headers[slot];const U n=word(current,4);
   if(h.pending&&current==AiActorImage{}&&state.stored_actor_images[0][slot]==AiActorImage{}&&h.normalized){h={};}
@@ -53,5 +68,6 @@ std::optional<U> MissionPrimaryActorLive::record_base(U at,U size)const{width(at
 bool MissionPrimaryActorLive::claims(U at,U size)const{if(record_base(at,size))return true;const auto end=std::uint64_t(at)+size;if(at>=count_at&&end<=count_at+4)return true;if(at<count_at+4&&end>count_at)throw MissionTickError("Primary count range crosses its owner");return false;}
 U MissionPrimaryActorLive::read(U at,U size){if(auto record=record_base(at,size)){const auto image=impl_->image((*record-base)/stride);U n=0;for(U i=0;i<size;++i)n|=U(image.at(at-*record+i))<<(i*8);return n;}if(!claims(at,size))throw MissionTickError("Primary read has no owner");impl_->ready();const U shift=(at-count_at)*8;return (U(impl_->count)>>shift)&(size==4?0xffffffffu:(1u<<(size*8))-1);}
 void MissionPrimaryActorLive::write(U at,U size,U value){if(auto record=record_base(at,size)){impl_->store((*record-base)/stride,at-*record,size,value);return;}if(!claims(at,size))throw MissionTickError("Primary store has no owner");if(at!=count_at||size!=4)throw MissionTickError("Primary insertion count needs an aligned DWORD store");impl_->publish(value);}
+void MissionPrimaryActorLive::clear_physical_pool(){impl_->clear();}
 MissionActorInsertBindings MissionPrimaryActorLive::insertion_bindings(){MissionActorInsertBindings b;b.read=[this](U at,U size){if(claims(at,size))return read(at,size);return need(impl_->b.delegated.read,"Primary delegated read is not bound")(at,size);};b.write=[this](U at,U size,U n){if(claims(at,size)){write(at,size,n);return;}need(impl_->b.delegated.write,"Primary delegated store is not bound")(at,size,n);};b.person=[this](U actor){return need(impl_->b.delegated.person,"Primary person allocator is not bound")(actor);};return b;}
 }

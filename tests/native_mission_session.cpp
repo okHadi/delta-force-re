@@ -175,8 +175,11 @@ int main(int argc,char** argv){try{
     MissionSessionHost host;host.pump_490880=[](){return true;};host.rdtsc=[](){return std::uint64_t(std::chrono::steady_clock::now().time_since_epoch().count());};host.elapsed_audio_frames=[](){return 1u;};host.camera_actor_6ba3f0=[&](){return actor_handle(3,*state.config.local_actor);};host.camera_mode_6ba3ec=[](){return 0u;};
     std::size_t repaired=0;host.event_references=event_reference_repair?EventReferencePolicy::missing_not_fired:EventReferencePolicy::strict;host.event_diagnostic=[&](auto requested_index,auto loaded){if(requested_index!=74||loaded!=74)throw MissionTickError("Unexpected event repair");++repaired;};
     MissionResultImage retained_result{};
+    sound_memory.write(0x67dbec,4,0x80000000);
     auto session_owner=std::make_unique<MissionSession>(MissionSessionContext{state,initial,resources.mission,cache,terrain,animations,geometry,muzzle,bridge,sound,*registry,audio,scripts,crt_cells,clients,*extra_memory,rules_word,requested,camera_position},host,retained_result);
     auto& session=*session_owner;
+    if(session.read(0x67dbec,4)!=0x80000000)throw MissionTickError("Session lost the loaded objective mask");
+    session.write(0x67dbec,4,0);
     if(sockets->claims(0x18000000,4)||sockets->claims(0x19000000,4)||sockets->claims(0x1b000000,4)||sockets->claims(0x1c000000,4)||clients.claims(0x19000000,4)||session.claims(0x18000000,4)||session.claims(0x19000000,4)||session.claims(0x1b000000,4)||!session.claims(0x1c000000,1))throw MissionTickError("Virtual source owners overlap");
     std::uint32_t first_definition_word;std::memcpy(&first_definition_word,initial.definitions.data(),4);
     if(sound_memory.read(0x1900000c,4)!=crt_cells.seed||sound_memory.read(0x18000000,4)!=first_definition_word)throw MissionTickError("Canonical CRT or definition route differs");
@@ -200,6 +203,9 @@ int main(int argc,char** argv){try{
     state.update_callbacks.emplace(0x0badf00d,[](auto&,const auto&,const auto&){});
     const auto prior_updates=state.update_callbacks.size(),prior_secondary=state.secondary_callbacks.size();
     session.install();if(!session.installed())throw MissionTickError("Session did not install");
+    const auto prior_profile=session.read(0x4f8718,4);sound_memory.call(0x456e30,{5});
+    if(session.read(0x4f8718,4)!=5)throw MissionTickError("Leave profiler lost the current frame owner");
+    sound_memory.call(0x456e30,{prior_profile});
     try{for(unsigned i=0;i<frame_count;++i){if(i==0)bridge.feed(InputEvent{InputKind::key_down,int(keys[2].key)});if(i==4)bridge.feed(InputEvent{InputKind::key_up,int(keys[2].key)});if(i==16)bridge.feed(InputEvent{InputKind::key_down,int(keys[8].key)});if(i==20)bridge.feed(InputEvent{InputKind::key_up,int(keys[8].key)});const auto report=session.step();std::cout<<"session_frame "<<report.tick<<" ammo "<<state.weapons.magazine(state.weapons.current_definition().weapon_class)<<std::endl;}}
     catch(const std::exception& error){std::cout<<"session_stop "<<state.tick_67dbf4<<" "<<error.what()<<std::endl;session.uninstall();current_session=nullptr;if(!event_reference_repair&&state.tick_67dbf4==48)return 0;throw;}
     std::cout<<"session_final ammo "<<state.weapons.magazine(state.weapons.current_definition().weapon_class)<<" repairs "<<repaired<<std::endl;
@@ -217,6 +223,18 @@ int main(int argc,char** argv){try{
     std::cout<<"session_result mode1 rows "<<session.read(0x67f71c,4)<<" source_projectile_ring "<<shots_before_result<<std::endl;
     sound_memory.call(0x42eba0,{});
     std::cout<<"session_end_events current_live_owners selected "<<std::count_if(resources.mission.events.begin(),resources.mission.events.end(),[](const auto& event){return (event.words[0]&4u)!=0;})<<"\n";
+    AssetBytes outcome_profile=profile.raw();
+    const auto profile_put=[&](std::uint32_t at,std::uint32_t value){for(unsigned i=0;i<4;++i)outcome_profile.at(at+i)=std::uint8_t(value>>(i*8));};
+    const auto profile_get=[&](std::uint32_t at){std::uint32_t value=0;for(unsigned i=0;i<4;++i)value|=std::uint32_t(outcome_profile.at(at+i))<<(i*8);return value;};
+    profile_put(0x28,3);profile_put(0x13c,0x80000000);
+    sound_memory.write(0x67f70c,4,0x80000000);session.write(0x67dbec,4,0x80000008);
+    const auto start_rules=rules_word;
+    sound_memory.write(0x67dbe4,4,start_rules);session.write(0x67f548,4,0);
+    session.write(0x67f548,4,sound_memory.read(0x67dbe4,4)); //404150 restores start rules.
+    session.profile_leave([&]() ->AssetBytes&{return outcome_profile;});
+    if(profile_get(0x13c)!=0x80000008||sound_memory.read(0x4cee8c,4)!=start_rules)throw MissionTickError("Live profile leave lost objective mask or restored rules");
+    session.write(0x67dbec,4,0);
+    std::cout<<"session_profile_leave current_result_mask_rules copied_profile\n";
     if(sound_memory.call(0x403a50,{})!=0)throw MissionTickError("Single-player leave drain differs");
     std::uint32_t reset_client=0;for(std::size_t slot=0;slot<17;++slot){const auto base=MissionClientLive::source_address(slot,0);if(clients.read(base+0x18c,1)){reset_client=base;break;}}
     if(!reset_client)throw MissionTickError("Peer reset has no active source client");
@@ -230,6 +248,7 @@ int main(int argc,char** argv){try{
     state.update_callbacks.emplace(0x0badf00e,[](auto&,const auto&,const auto&){});
     session.uninstall();current_session=nullptr;if(state.update_callbacks.size()!=prior_updates+1||state.secondary_callbacks.size()!=prior_secondary||!state.update_callbacks.count(0x0badf00d)||!state.update_callbacks.count(0x0badf00e))throw MissionTickError("Session removed another callback owner");if(session.installed())throw MissionTickError("Session did not uninstall");
     bool stopped_end_events=false;try{session.end_events();}catch(const MissionTickError&){stopped_end_events=true;}if(!stopped_end_events)throw MissionTickError("End events used an uninstalled Session");
+    fail([&]{session.profile_leave([&]() ->AssetBytes&{return outcome_profile;});});
     MissionResultImage expected_result{};for(std::size_t i=0;i<expected_result.size();++i)expected_result[i]=std::uint8_t(session.read(result_state_block+std::uint32_t(i),1));
     if(retained_result!=expected_result)throw MissionTickError("Session result has a second byte owner");
     session_owner.reset();if(retained_result!=expected_result||retained_result[4]!=1)throw MissionTickError("Mission result did not survive Session teardown");

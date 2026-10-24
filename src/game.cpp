@@ -1,3 +1,4 @@
+#include "dfre/mission_profile_start.hpp"
 #include "dfre/mission_owner_cleanup.hpp"
 #include "dfre/mission_debrief_format.hpp"
 #include "dfre/mission_parameter.hpp"
@@ -134,6 +135,12 @@ public:
                 names.emplace(assets_.read(config.campaign_text_file).bytes);
             prepare_mission_sound();
             const auto& source_memory=mission_sound_->asset_bindings();
+            source_memory.write(0x4cee8c,4,mission_rules_67f548_);
+            source_memory.write(0x67f548,4,mission_rules_67f548_);
+            source_memory.write(0x4cee90,4,std::uint32_t(settings.replay));
+            const MissionDebriefBindings profile_start{source_memory.read,source_memory.write,source_memory.call};
+            mission_profile_start_mask(profile_start);
+            mission_profile_start_result(profile_start);
             source_memory.write(0x68ba34,4,mission_selection_->mission);
             const auto name=profile.name();
             const auto name_at=source_memory.call(0x497f60,{std::uint32_t(name.size()+1),4,0,0});
@@ -424,6 +431,11 @@ public:
             record_store(base,offset,width,value);
         };
         bindings.service=[this](std::uint32_t site,const std::vector<std::uint32_t>& args){
+            if(site==0x401e70){
+                if(!args.empty()||!mission_session_)throw MissionTickError("Profile leave requires the current Session");
+                mission_session_->profile_leave([this]() ->AssetBytes&{return soldier_.profiles().at(soldier_.selected()).source_bytes();});
+                return 0u;
+            }
             if(site==0x42eba0){if(!args.empty()||!mission_session_)throw MissionTickError("Mission end events require the current Session");mission_session_->end_events();return 0u;}
             if(mission_session_){if(const auto result=mission_session_->leave_service(site,args))return *result;if(const auto result=mission_session_->hud_service(site,args))return *result;}
             if(mission_scripts_){const auto result=mission_scripts_->service(site,args);if(result)return *result;}

@@ -22,6 +22,9 @@ public:
     std::optional<std::uint32_t> record_base(std::uint32_t address,std::uint32_t width) const;
     std::uint32_t read(std::uint32_t address,std::uint32_t width);
     void write(std::uint32_t address,std::uint32_t width,std::uint32_t value);
+    // Complete-preflight/commit service for49A620(7DDE80,0,45000h).
+    // Keep current count/extents; character/person release has a separate boundary.
+    void clear_physical_pool();
     MissionActorInsertBindings insertion_bindings();
 private:
     struct Impl;
