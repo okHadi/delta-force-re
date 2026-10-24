@@ -1,0 +1,26 @@
+#include "dfre/mission_character_resource.hpp"
+#include "dfre/mission_actor_resources.hpp"
+#include "dfre/mission_sound_runtime.hpp"
+#include "dfre/models.hpp"
+#include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <map>
+#include <set>
+#include <stdexcept>
+using namespace dfre;using U=std::uint32_t;
+namespace {
+void check(bool n,const char* text){if(!n)throw std::runtime_error(text);}template<class F>void fails(F f){bool stopped=false;try{f();}catch(const std::exception&){stopped=true;}check(stopped,"Required failure did not stop");}
+U word(const AssetBytes& bytes,U at){U n=0;for(U i=0;i<4;++i)n|=U(bytes.at(at+i))<<(i*8);return n;}
+void basic(){std::map<U,U> words{{0x1100000-8,9},{0x1300000,0},{0x6ba4a0,0x1100000},{0x1100038,0xffffffff},{0x110003c,0x80000000},{0x1100040,0},{0x1100004,0},{0x1100008,0}};MissionDebriefBindings b;b.read=[&](U at,U width){check(width==4,"Basic width");return words.at(at);};b.write=[&](U at,U width,U n){check(width==4,"Basic write width");words.at(at)=n;};check(mission_character_resource_label(b,0x1100000,0x12345678)==0x10ffff0&&words.at(0x10ffff8)==0x12345678,"Actual heap label word");mission_character_resource_prepare(b,0,0x1300000);check(words.at(0x1100038)==0xfffffffe&&words.at(0x110003c)==0x16a80000,"Signed source scaling");fails([&]{mission_character_resource_relocate(b,1,0x1300000);});check(words.at(0x1300000)==0x1100000,"Missing file provider changed output");}
+void stock(const std::filesystem::path& folder){AssetStore assets(folder);std::ifstream exe_file(folder/"Df.exe",std::ios::binary);AssetBytes exe((std::istreambuf_iterator<char>(exe_file)),{});Fixed3 listener{};U yaw=0;MissionAudioFrameCells audio{0,listener,yaw};const TerrainGeometry* terrain=nullptr;MissionSoundRuntime sound(assets,exe,audio,terrain,{});const auto& m=sound.asset_bindings();MissionDebriefBindings b{m.read,m.write,{}};unsigned files=0;
+ b.call=[&](U site,const auto& args)->U{if(site==0x499e5e){for(U i=0;;++i){U x=m.read(args[0]+i,1),y=m.read(args[1]+i,1);if(x>='a'&&x<='z')x-=32;if(y>='a'&&y<='z')y-=32;if(x!=y)return 1;if(!x)return 0;}}if(site==0x499410)++files;return m.call(site,args);};
+ const U scratch=m.call(0x497f60,{0x100,4,0,0}),frame=scratch+0x7c,name=m.call(0x497f60,{64,4,0,0});check(scratch&&name,"Native arena allocation");auto put_name=[&](const std::string& text){for(U i=0;i<=text.size();++i)m.write(name+i,1,i<text.size()?std::uint8_t(text[i]):0);m.write(frame+0x14,4,name);};auto live=[&](U payload){const auto ctx=m.read(0x5013a0,4);U at=m.read(ctx+8,4);std::set<U>seen;while(at){check(seen.insert(at).second,"Arena cycle");if(at+16==payload)return true;at=m.read(at+12,4);}return false;};
+ check(m.read(0x6bbd40,4)==0,"Native source CHR registry is not cold");std::set<std::string> names;for(const auto& archive:assets.archives())for(const auto& entry:archive.entries()){std::string n=entry.name;for(auto& c:n)if(c>='A'&&c<='Z')c+=32;if(!entry.deleted&&n.size()>=4&&n.substr(n.size()-4)==".chr")names.insert(n);}
+ std::vector<U>payloads;unsigned loaded=0;for(const auto& filename:names){auto raw=assets.read(filename).bytes;if(word(raw,0)!=0x31524843)continue;const auto prepared=prepare_character_runtime(decode_character(raw));put_name(filename);const U row=mission_character_resource_load(b,frame);check(row==0x6ba440+loaded*100,"Current physical resource row");const U payload=m.read(row+0x60,4);payloads.push_back(payload);check(payload&&live(payload)&&m.read(payload,4)==0x31524843&&m.read(payload-8,4)==row+0x20,"Load-time real allocation and header label");check(m.read(payload+4,4)==payload+word(raw,4)&&m.read(payload+12,4)==payload+word(raw,12),"Raw CHR relocation");for(U offset:{56u,60u,64u})check(m.read(payload+offset,4)==word(prepared.raw,offset),"Prepared header differs from typed cache math");for(const auto& bone:prepared.bones){const auto& a=bone.tracks[0];for(U i=0;i<a.count;++i)for(U k=0;k<3;++k){const auto offset=a.offset+i*68+k*4;check(m.read(payload+offset,4)==word(prepared.raw,offset),"Prepared track differs from typed cache math");}}
+ const U ctx=m.read(0x5013a0,4),generation=m.read(ctx+0xc,4);const auto file_count=files;std::string upper=filename;for(auto& c:upper)if(c>='a'&&c<='z')c-=32;put_name(upper);check(mission_character_resource_load(b,frame)==row&&files==file_count&&m.read(ctx+0xc,4)==generation,"Case-insensitive current dedup allocated again");++loaded;if(loaded==2)break;}
+ check(loaded>0&&files==loaded&&m.read(0x6bbd40,4)==loaded,"Actual unmodified CHR file required");
+ MissionActorResourceBindings cleanup{m.read,m.write,m.call};mission_character_resources_clear(cleanup);check(m.read(0x6bbd40,4)==0,"Real42C950 count clear");for(U p:payloads)check(!live(p)&&m.read(p,4)==0x31524843,"Real source resource free retains bytes");for(U at=0x6ba440;at<0x6bbd40;++at)check(m.read(at,1)==0,"Current resource registry clear");m.call(0x4980d0,{name});m.call(0x4980d0,{scratch});std::cout<<loaded<<" actual CHR file(s): load, relocate, prepare, dedup, arena label,42C950 release passed\n";
+}
+}
+int main(int argc,char** argv){try{basic();if(argc==2)stock(argv[1]);else check(argc==1,"Use native_mission_character_resource [GAME_FOLDER]");return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

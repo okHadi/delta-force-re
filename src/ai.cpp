@@ -91,6 +91,8 @@ AiItemDefinitionTable::AiItemDefinitionTable(std::vector<AiItemDefinition> entri
     if (entries_.empty()) throw AiError("AI definition table needs at least the null record");
 }
 
+void AiItemDefinitionTable::clear_model(std::size_t index) { entries_.at(index).field_6c=0; }
+
 std::size_t AiItemDefinitionTable::find_index(std::uint32_t id) const noexcept {
     for (std::size_t i = 0; i < entries_.size(); ++i)
         if (entries_[i].id == id) return i;

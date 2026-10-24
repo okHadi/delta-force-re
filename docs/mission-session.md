@@ -22,7 +22,7 @@ Tree updates read all 256 physical player slots from the current actors and reta
 
 Seagull updates and movement use that same primary owner, including all 1,024 physical slots. Keep the 28-byte AI frame separate from the tree frame. Bind current terrain, math, sound and shared random state. Preserve the health and flags written by the source producer.
 
-Game routes the closed Debrief `493A80` formats through current sound memory after HUD formatting. Parameter set/get `4C4F40/4C4F60` use the current table pointer and shared return cell. Keep parameter allocation and initialization with their source owner.
+Game routes the closed Debrief `493A80` formats through current sound memory after HUD formatting. Parameter set/get `4C4F40/4C4F60` use the current table pointer and shared return cell. Keep parameter allocation and initialization with their source owner. Game publishes current definition count `C23814`. Source `482910` clears the current definitions’ model, husk and character links; the AI model view receives the same model clear. Allow aligned zero DWORD stores to these three resource fields.
 
 Route `leave_service` before the sound fallback for `403A50`, `4401E0` and `456E30`. The profiler call takes one index and uses the same frame profiler as mission stepping. Keep Session installed through these calls. The reset uses current clients, squads, result builder and outbox with its own 206-byte packet.
 

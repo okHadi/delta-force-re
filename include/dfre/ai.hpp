@@ -59,6 +59,7 @@ public:
     explicit AiItemDefinitionTable(std::vector<AiItemDefinition> entries);
     const std::vector<AiItemDefinition>& entries() const noexcept { return entries_; }
     bool empty() const noexcept { return entries_.empty(); }
+    void clear_model(std::size_t index);
     std::size_t find_index(std::uint32_t id) const noexcept;
 private:
     std::vector<AiItemDefinition> entries_;

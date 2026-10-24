@@ -1,3 +1,4 @@
+#include "dfre/mission_actor_resources.hpp"
 #include "dfre/mission_profile_start.hpp"
 #include "dfre/mission_owner_cleanup.hpp"
 #include "dfre/mission_debrief_format.hpp"
@@ -317,8 +318,9 @@ public:
     }
     bool definition_claim(std::uint32_t at,std::uint32_t width) const {
         const auto end=std::uint64_t(at)+width;
-        if(at<0xc23814&&end>0xc23810){
-            if(at<0xc23810||end>0xc23814)throw MissionTickError("Definition pointer access crosses its field");
+        if(at<0xc23818&&end>0xc23810){
+            const auto cell=at<0xc23814?0xc23810u:0xc23814u;
+            if(at<cell||end>std::uint64_t(cell)+4)throw MissionTickError("Definition table cell access crosses its field");
             return true;
         }
         if(!mission_runtime_)return false;
@@ -331,10 +333,28 @@ public:
     }
     std::uint32_t definition_read(std::uint32_t at,std::uint32_t width) const {
         if(!mission_runtime_)throw MissionTickError("Mission definition table is not ready");
-        if(at>=0xc23810&&at<0xc23814)return (definition_base>>((at-0xc23810)*8))&(width==4?0xffffffffu:((1u<<(width*8))-1));
+        if(at>=0xc23810&&at<0xc23818){
+            const auto cell=at<0xc23814?0xc23810u:0xc23814u;
+            const auto value=cell==0xc23810?definition_base:std::uint32_t(mission_runtime_->definitions.size());
+            return (value>>((at-cell)*8))&(width==4?0xffffffffu:((1u<<(width*8))-1));
+        }
         const auto* bytes=reinterpret_cast<const std::uint8_t*>(mission_runtime_->definitions.data());
         std::uint32_t value=0;for(std::uint32_t i=0;i<width;++i)value|=std::uint32_t(bytes[at-definition_base+i])<<(8*i);
         return value;
+    }
+    void definition_clear(std::uint32_t at,std::uint32_t width,std::uint32_t value) {
+        if(!mission_runtime_||!mission_tick_||width!=4||value!=0||at<definition_base)
+            throw MissionTickError("Definition resource clear requires a current aligned zero DWORD");
+        const auto offset=at-definition_base;
+        const auto slot=offset/runtime_item_size,field=offset%runtime_item_size;
+        if(slot>=mission_runtime_->definitions.size()||(field!=0x6c&&field!=0x70&&field!=0x74))
+            throw MissionTickError("Definition resource clear is outside its current fields");
+        if(mission_tick_->definitions.entries().size()!=mission_runtime_->definitions.size())
+            throw MissionTickError("Definition model view has a different current extent");
+        auto& item=mission_runtime_->definitions.at(slot);
+        if(field==0x6c){mission_tick_->definitions.clear_model(slot);item.model=0;}
+        else if(field==0x70)item.husk_model=0;
+        else item.character=0;
     }
     bool extra_count_claim(std::uint32_t at,std::uint32_t width) const {
         const auto end=std::uint64_t(at)+width;
@@ -427,7 +447,7 @@ public:
             if(mission_sockets_&&mission_sockets_->claims(at,width)){mission_sockets_->write(at,width,value);return;}
             if(mission_scripts_&&mission_scripts_->owns(at,width)){mission_scripts_->memory().write(at,width,value);return;}
             if(mission_extra_memory_.write&&(mission_extra_actor_record_base(at,width)||extra_count_claim(at,width))){mission_extra_memory_.write(at,width,value);return;}
-            if(definition_claim(at,width))throw MissionTickError("Mission definitions are read-only after initialization");
+            if(definition_claim(at,width)){definition_clear(at,width,value);return;}
             record_store(base,offset,width,value);
         };
         bindings.service=[this](std::uint32_t site,const std::vector<std::uint32_t>& args){
@@ -440,6 +460,7 @@ public:
             if(mission_session_){if(const auto result=mission_session_->leave_service(site,args))return *result;if(const auto result=mission_session_->hud_service(site,args))return *result;}
             if(mission_scripts_){const auto result=mission_scripts_->service(site,args);if(result)return *result;}
             const auto& memory=mission_sound_->asset_bindings();
+            if(site==0x482910){if(!args.empty())throw MissionTickError("Item resource clear takes no arguments");mission_item_resource_links_clear({memory.read,memory.write,memory.call});return 0u;}
             if(site==0x43e6d0){if(!args.empty())throw MissionTickError("Sound cleanup takes no arguments");mission_sound_->cleanup();return 0u;}
             if(site==0x49db20){if(args.size()!=1)throw MissionTickError("Bank cleanup needs its current context");mission_sound_->release_banks(args[0]);return 0u;}
             if(site==0x402d40){if(!args.empty())throw MissionTickError("Resource cleanup takes no arguments");mission_resource_cleanup_global({memory.read,memory.write,memory.call});return 0u;}
@@ -464,6 +485,11 @@ public:
         };
         mission_sound_=std::make_unique<MissionSoundRuntime>(assets_,executable,
             *mission_audio_frame_,mission_sound_terrain_,std::move(bindings));
+        mission_sound_->bind_fill_handler([this](auto target,auto byte,auto count){
+            if(target!=0x7dde80||byte!=0||count!=0x45000)return false;
+            if(!mission_primary_)throw MissionTickError("Primary clear requires its current owner");
+            mission_primary_->clear_physical_pool();return true;
+        });
         mission_script_queue_={};
         mission_script_cells_=std::make_unique<MissionScriptRuntimeCells>(
             MissionScriptRuntimeCells{mission_script_queue_,mission_tick_->globals.mission_67f528});

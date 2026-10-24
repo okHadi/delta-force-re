@@ -90,5 +90,24 @@ int main(int argc,char** argv){try{
  check(c.read(0x4a2ae0,4)==generation&&c.read(0x4a2716,4)==77&&c.read(0x4a2712,4)==0x1234,"Playback reset changed retained control cells");
  fails([&]{c.call(0x4a2aed,{1});});
 
- std::cout<<"Sound arena bounds, live file aliases, lookup lifetime and stock playback checks passed\n";return 0;
+ fails([&]{current.bind_fill_handler({});});
+ U fill_calls=0,claimed_fills=0;bool fail_fill=false;
+ current.bind_fill_handler([&](U target,U byte,U count){
+  ++fill_calls;
+  if(target!=0x6e06a8||byte!=0||count!=16)return false;
+  listener.x=0;if(fail_fill)throw std::runtime_error("Required fill failed after its first owner write");
+  listener.y=0;listener.z=0;yaw=0;++claimed_fills;return true;
+ });
+ fails([&]{current.bind_fill_handler([](U,U,U){return false;});});
+ listener={7,8,9};yaw=10;
+ check(c.call(0x49a620,{0x6e06a8,0x100,16})==0x6e06a8&&claimed_fills==1&&listener.x==0&&listener.y==0&&listener.z==0&&yaw==0,"Claimed fill lost current fields or byte conversion");
+ const auto fill_block=c.call(0x497f60,{8,4,0,0});
+ check(c.call(0x49a620,{fill_block,0x1ab,8})==fill_block&&fill_calls==2&&claimed_fills==1,"Declined fill did not use current scalar storage");
+ for(U i=0;i<8;++i)check(c.read(fill_block+i,1)==0xab,"Fallback fill changed its byte");
+ check(c.call(0x49a620,{0xfffff000,0,0})==0xfffff000,"Zero fill required mapped bytes");
+ listener={17,18,19};yaw=20;fail_fill=true;
+ fails([&]{c.call(0x49a620,{0x6e06a8,0,16});});
+ check(listener.x==0&&listener.y==18&&listener.z==19&&yaw==20&&claimed_fills==1,"Fill error ran fallback or lost the owner prefix");
+ c.call(0x4980d0,{fill_block});
+ std::cout<<"Sound arena bounds, live fill owners, file aliases, lookup lifetime and stock playback checks passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

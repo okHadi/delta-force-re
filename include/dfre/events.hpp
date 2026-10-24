@@ -1,6 +1,7 @@
 #pragma once
 
 #include "dfre/mission.hpp"
+#include "dfre/mission_event_memory.hpp"
 
 #include <array>
 #include <cstddef>
@@ -62,6 +63,11 @@ public:
     virtual void action_460280(std::size_t action_index);
     // Exact byte for a legacy kind2 read beyond the loaded event table.
     virtual std::uint32_t external_event_fired(std::size_t event_index);
+    // Source mode keeps captured physical record addresses.
+    virtual std::uint32_t probe_460330_record(std::uint32_t source_record);
+    virtual void action_4601a0_record(std::uint32_t source_record);
+    virtual void action_460280_record(std::uint32_t source_record);
+    virtual std::uint32_t fired_byte_record(std::uint32_t captured_events_base,std::uint32_t index);
 };
 
 // Bounded event stage: load, post-load binding, scheduling and dispatch.
@@ -93,6 +99,17 @@ public:
     static constexpr std::size_t flag_3d_words = 8192;
 
     explicit EventStage(EventHost* host = nullptr);
+    // Attach before loading. Keep the borrowed memory owner alive longer than this stage.
+    void attach_source(MissionEventMemory&);
+    bool uses_source() const noexcept{return source_!=nullptr;}
+    EventRecordView event_view(std::size_t) const;
+    EventRecordView trigger_view(std::size_t) const;
+    EventRecordView action_view(std::size_t) const;
+    // Source-mode entry points with an already captured original argument.
+    void process_event_record(std::uint32_t source_record);
+    std::uint32_t evaluate_event_triggers_record(std::uint32_t source_record);
+    std::uint32_t evaluate_trigger_record(std::uint32_t source_record);
+    void dispatch_action_record(std::uint32_t source_record);
 
     EventHost* host() const noexcept { return host_; }
     void set_host(EventHost* host) noexcept { host_ = host; }
@@ -137,27 +154,26 @@ public:
     std::uint32_t evaluate_trigger(std::size_t trigger_index);   // 0x42e620
     void dispatch_action(std::size_t action_index);              // 0x42e810
 
-    std::size_t event_count() const noexcept { return events_.size(); }
-    std::size_t trigger_count() const noexcept { return triggers_.size(); }
-    std::size_t action_count() const noexcept { return actions_.size(); }
-
-    MissionEvent& event(std::size_t index) { return events_.at(index); }
-    const MissionEvent& event(std::size_t index) const { return events_.at(index); }
-    EventTableRecord& trigger(std::size_t index) { return triggers_.at(index); }
-    const EventTableRecord& trigger(std::size_t index) const { return triggers_.at(index); }
-    EventTableRecord& action(std::size_t index) { return actions_.at(index); }
-    const EventTableRecord& action(std::size_t index) const { return actions_.at(index); }
+    std::size_t event_count() const;
+    std::size_t trigger_count() const;
+    std::size_t action_count() const;
+    MissionEvent& event(std::size_t);
+    const MissionEvent& event(std::size_t) const;
+    EventTableRecord& trigger(std::size_t);
+    const EventTableRecord& trigger(std::size_t) const;
+    EventTableRecord& action(std::size_t);
+    const EventTableRecord& action(std::size_t) const;
 
     // words[5] byte 0 of an event, the fired flag the runtime writes.
     std::uint32_t event_fired(std::size_t event_index) const;
 
     // 0x4f2be4 event cursor and 0x4f2be0 loader flag.
-    std::uint32_t cursor() const noexcept { return cursor_; }
-    std::uint32_t frame_counter() const noexcept { return frame_counter_; }
-    void set_frame_counter(std::uint32_t value) noexcept { frame_counter_=value; }
-    void set_cursor(std::uint32_t cursor) noexcept { cursor_ = cursor & 7u; }
-    std::uint32_t loader_flag() const noexcept { return loader_flag_; }
-    void set_loader_flag(std::uint32_t value) noexcept { loader_flag_ = value; }
+    std::uint32_t cursor() const;
+    std::uint32_t frame_counter() const;
+    void set_frame_counter(std::uint32_t);
+    void set_cursor(std::uint32_t);
+    std::uint32_t loader_flag() const;
+    void set_loader_flag(std::uint32_t);
 
     // 0x42edd0 / 0x42ee00 / 0x42ee30 / 0x42ee50 and their test twins
     // 0x42e520 / 0x42e550 / 0x42e580 / 0x42e5b0. Bit selection follows the
@@ -179,21 +195,40 @@ public:
     // Raw flag words the original reads back: 0x42f1b0 reads 0x6e0254 and
     // 0x6e0250; 0x67dbec is read by trigger kind 3. The three word accessors
     // expose the reload arrays for tools and tests.
-    std::uint32_t flag_word_6e0050(std::size_t index) const { return flags_6e0050_.at(index); }
-    std::uint32_t flag_word_6d7e50(std::size_t index) const { return flags_6d7e50_.at(index); }
-    std::uint32_t flag_word_6d8050(std::size_t index) const { return flags_6d8050_.at(index); }
-    std::uint32_t flags_6e0254() const noexcept { return flags_6e0254_; }
-    std::uint32_t flags_6e0250() const noexcept { return flags_6e0250_; }
-    std::uint32_t& flags_67dbec() noexcept { return flags_67dbec_; }
-    std::uint32_t flags_67dbec() const noexcept { return flags_67dbec_; }
+    std::uint32_t flag_word_6e0050(std::size_t) const;
+    std::uint32_t flag_word_6d7e50(std::size_t) const;
+    std::uint32_t flag_word_6d8050(std::size_t) const;
+    std::uint32_t flags_6e0254() const;
+    std::uint32_t flags_6e0250() const;
+    std::uint32_t& flags_67dbec(); // owned reference mode only
+    std::uint32_t flags_67dbec() const;
+    std::uint32_t flag_value_67dbec() const;
+    void set_flag_value_67dbec(std::uint32_t);
 
 private:
     EventHost& require_host() const;
     std::uint32_t host_object_dword(std::uint32_t address, std::uint32_t index) const;
-    void dispatch_event_actions(const MissionEvent& record);
+    struct Record;
+    struct EngineScope;
+    void owned_only() const;
+    void source_only() const;
+    std::uint32_t count_bits(EventTable) const;
+    Record owned_record(EventTable,std::size_t);
+    Record source_record(EventTable,std::uint32_t);
+    Record run_record(const Record&,EventTable,std::uint32_t offset);
+    void process_record(Record);
+    std::uint32_t evaluate_record_triggers(Record);
+    std::uint32_t evaluate_record(Record);
+    void dispatch_record(Record);
+    void dispatch_event_actions(Record);
+    void run_bits(std::uint8_t);
+    std::uint32_t global_read(std::uint32_t) const;
+    void global_write(std::uint32_t,std::uint32_t);
     void bind_records(const std::vector<MissionObject>& markers, bool triggers);
 
     EventHost* host_;
+    MissionEventMemory* source_=nullptr;
+    std::size_t engine_depth_=0;
     std::vector<MissionEvent> events_;
     std::vector<EventTableRecord> triggers_;
     std::vector<EventTableRecord> actions_;
@@ -208,7 +243,7 @@ private:
     std::uint32_t flags_67dbec_ = 0; // 0x42ebe0 does not clear this one
 };
 
-// Caller-selected reconstruction repair. The raw EventStage path stays strict.
+// Caller-selected repair for owned fixtures. Source mode uses the required raw fired provider.
 enum class EventReferencePolicy { strict, missing_not_fired };
 using EventReferenceDiagnostic = std::function<void(std::size_t requested,std::size_t loaded)>;
 std::uint32_t event_fired_reference(const EventStage&,std::size_t requested,

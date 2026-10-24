@@ -23,60 +23,47 @@ void EventHost::action_460280(std::size_t) { throw EventError("Event host 460280
 
 std::uint32_t EventHost::external_event_fired(std::size_t){throw EventError("Event external fired byte is not bound");}
 
+std::uint32_t EventHost::probe_460330_record(std::uint32_t){throw EventError("Raw event rectangle provider is not bound");}
+void EventHost::action_4601a0_record(std::uint32_t){throw EventError("Raw event person edit is not bound");}
+void EventHost::action_460280_record(std::uint32_t){throw EventError("Raw event actor order is not bound");}
+std::uint32_t EventHost::fired_byte_record(std::uint32_t,std::uint32_t){throw EventError("Raw event fired byte is not bound");}
 namespace {
-std::uint32_t low16(std::uint32_t value) noexcept { return value & 0xffffu; }
-std::uint32_t high16(std::uint32_t value) noexcept { return value >> 16; }
-
-std::uint32_t with_low16(std::uint32_t value, std::uint32_t part) noexcept {
-    return (value & 0xffff0000u) | (part & 0xffffu);
+using U=std::uint32_t;
+std::int64_t signed_word(U n){return n<=0x7fffffffu?std::int64_t(n):std::int64_t(n)-0x100000000ll;}
+std::int32_t signed_half(U n){n&=0xffffu;return n<=0x7fffu?std::int32_t(n):std::int32_t(n)-0x10000;}
+U bounded_size(std::size_t n){if(n>0x7fffffffu)throw EventError("Owned event table count is too large");return U(n);}
 }
-} // namespace
-
-EventStage::EventStage(EventHost* host) : host_(host) {}
-
-void EventStage::reset() {
-    // 0x42ebe0 frees the tables, then clears 0x6e0050 (0x200), 0x6d7e50
-    // (0x200), 0x6d8050 (0x8000), 0x6e0254 and 0x6e0250. It leaves the cursor
-    // 0x4f2be4 and 0x67dbec alone, so this does too.
-    events_.clear();
-    triggers_.clear();
-    actions_.clear();
-    flags_6e0050_.fill(0);
-    flags_6d7e50_.fill(0);
-    flags_6d8050_.fill(0);
-    flags_6e0250_ = 0;
-    flags_6e0254_ = 0;
-}
-
-void EventStage::load(const MissionData& mission) {
-    // 0x42ec90 order: reset, tables, index to pointer conversion (the stage
-    // keeps the raw indexes), both binders, then the loader flag toggle.
-    reset();
-    events_ = mission.events;
-    triggers_ = mission.triggers;
-    actions_ = mission.actions;
-    bind_object_triggers(mission.object_groups[2]);
-    bind_object_actions(mission.object_groups[2]);
-    loader_flag_ ^= 1; // 0x42edb6
-}
-
-void EventStage::load_tables(std::vector<MissionEvent> events, std::vector<EventTableRecord> triggers,
-                             std::vector<EventTableRecord> actions) {
-    reset();
-    events_ = std::move(events);
-    triggers_ = std::move(triggers);
-    actions_ = std::move(actions);
-}
-
-void EventStage::bind_object_triggers(const std::vector<MissionObject>& markers) {
-    bind_records(markers, true);
-}
-
-void EventStage::bind_object_actions(const std::vector<MissionObject>& markers) {
-    bind_records(markers, false);
-}
-
+struct EventStage::EngineScope {EventStage& stage;explicit EngineScope(EventStage& s):stage(s){++stage.engine_depth_;}~EngineScope(){--stage.engine_depth_;}};
+struct EventStage::Record {
+ EventStage* stage;EventTable kind;U address;std::size_t index;
+ U* words()const{switch(kind){case EventTable::events:return stage->events_.at(index).words.data();case EventTable::triggers:return stage->triggers_.at(index).data();case EventTable::actions:return stage->actions_.at(index).data();}throw EventError("Invalid event record kind");}
+ U read(U offset,unsigned width)const{const U bytes=kind==EventTable::events?24:32;if((width!=1&&width!=2&&width!=4)||offset>bytes||width>bytes-offset)throw EventError("Event field exceeds its record");if(stage->source_){const auto at=std::uint64_t(address)+offset;if(at+width>0x100000000ull)throw EventError("Event field address wraps");return stage->source_->read(U(at),width);}U n=0;const auto* w=words();for(U i=0;i<width;++i)n|=((w[(offset+i)/4]>>(((offset+i)%4)*8))&255u)<<(i*8);return n;}
+ void write(U offset,unsigned width,U value)const{const U bytes=kind==EventTable::events?24:32;if((width!=1&&width!=2&&width!=4)||offset>bytes||width>bytes-offset)throw EventError("Event field exceeds its record");if(stage->source_){const auto at=std::uint64_t(address)+offset;if(at+width>0x100000000ull)throw EventError("Event field address wraps");stage->source_->write(U(at),width,value);return;}auto* w=words();for(U i=0;i<width;++i){const U shift=((offset+i)%4)*8;auto& word=w[(offset+i)/4];word=(word&~(255u<<shift))|(((value>>(i*8))&255u)<<shift);}}
+};
+EventStage::EventStage(EventHost* host):host_(host){}
+void EventStage::owned_only()const{if(source_)throw EventError("Owned event reference API is unavailable in source mode");}
+void EventStage::source_only()const{if(!source_)throw EventError("Event source memory is not attached");}
+void EventStage::attach_source(MissionEventMemory& source){if(source_||engine_depth_||!events_.empty()||!triggers_.empty()||!actions_.empty())throw EventError("Attach event source before loading or dispatch");source_=&source;}
+EventRecordView EventStage::event_view(std::size_t i)const{source_only();return source_->event_at(i);}
+EventRecordView EventStage::trigger_view(std::size_t i)const{source_only();return source_->trigger_at(i);}
+EventRecordView EventStage::action_view(std::size_t i)const{source_only();return source_->action_at(i);}
+U EventStage::count_bits(EventTable t)const{if(source_)return source_->count_bits(t);switch(t){case EventTable::events:return bounded_size(events_.size());case EventTable::triggers:return bounded_size(triggers_.size());case EventTable::actions:return bounded_size(actions_.size());}throw EventError("Invalid event table");}
+std::size_t EventStage::event_count()const{const U n=count_bits(EventTable::events);return signed_word(n)>0?n:0;}
+std::size_t EventStage::trigger_count()const{const U n=count_bits(EventTable::triggers);return signed_word(n)>0?n:0;}
+std::size_t EventStage::action_count()const{const U n=count_bits(EventTable::actions);return signed_word(n)>0?n:0;}
+MissionEvent& EventStage::event(std::size_t i){owned_only();return events_.at(i);}const MissionEvent& EventStage::event(std::size_t i)const{owned_only();return events_.at(i);}
+EventTableRecord& EventStage::trigger(std::size_t i){owned_only();return triggers_.at(i);}const EventTableRecord& EventStage::trigger(std::size_t i)const{owned_only();return triggers_.at(i);}
+EventTableRecord& EventStage::action(std::size_t i){owned_only();return actions_.at(i);}const EventTableRecord& EventStage::action(std::size_t i)const{owned_only();return actions_.at(i);}
+EventStage::Record EventStage::owned_record(EventTable kind,std::size_t index){std::size_t count=0;switch(kind){case EventTable::events:count=events_.size();break;case EventTable::triggers:count=triggers_.size();break;case EventTable::actions:count=actions_.size();break;}if(index>=count)throw EventError("Event record index exceeds its table");return{this,kind,0,index};}
+EventStage::Record EventStage::source_record(EventTable kind,U address){source_only();return{this,kind,address,0};}
+EventStage::Record EventStage::run_record(const Record& event,EventTable kind,U offset){const U base=event.read(kind==EventTable::triggers?4:8,4);if(source_)return source_record(kind,base+offset);return owned_record(kind,std::size_t(base)+offset/32);}
+void EventStage::reset(){if(source_){source_->reset();return;}if(engine_depth_)throw EventError("Owned event storage must stay stable during dispatch");events_.clear();triggers_.clear();actions_.clear();flags_6e0050_.fill(0);flags_6d7e50_.fill(0);flags_6d8050_.fill(0);flags_6e0254_=0;flags_6e0250_=0;}
+void EventStage::load(const MissionData& mission){owned_only();reset();events_=mission.events;triggers_=mission.triggers;actions_=mission.actions;bind_object_triggers(mission.object_groups[2]);bind_object_actions(mission.object_groups[2]);loader_flag_^=1;}
+void EventStage::load_tables(std::vector<MissionEvent> events,std::vector<EventTableRecord> triggers,std::vector<EventTableRecord> actions){owned_only();reset();events_=std::move(events);triggers_=std::move(triggers);actions_=std::move(actions);}
+void EventStage::bind_object_triggers(const std::vector<MissionObject>& markers){bind_records(markers,true);}
+void EventStage::bind_object_actions(const std::vector<MissionObject>& markers){bind_records(markers,false);}
 void EventStage::bind_records(const std::vector<MissionObject>& markers, bool trigger_table) {
+    owned_only();
     // 0x42eea0 for triggers, 0x42f020 for actions. Both walk every event and
     // every slot of its run, and both match markers by type 0x177d plus the
     // converter's value for raw byte 0x4a (0x449710: param_1[0x1f] for 0x177d).
@@ -124,350 +111,80 @@ void EventStage::bind_records(const std::vector<MissionObject>& markers, bool tr
     }
 }
 
-void EventStage::tick() {
-    // 0x42eaf0: events[cursor], events[cursor + 8], ... then cursor wraps mod 8.
-    for (std::size_t index = cursor_; index < events_.size(); index += 8) {
-        if ((events_[index].words[0] & 0x6u) == 0) process_event(index);
-    }
-    cursor_ = (cursor_ + 1) & 7u;
+U EventStage::global_read(U at)const{
+ if(source_)return source_->read(at,4);
+ if(at==0x4f2be4)return cursor_;if(at==0x4f2be0)return loader_flag_;if(at==0x6e4734)return frame_counter_;if(at==0x67dbec)return flags_67dbec_;if(at==0x6e0250)return flags_6e0250_;if(at==0x6e0254)return flags_6e0254_;
+ if(at>=0x6e0050&&at<0x6e0250)return flags_6e0050_.at((at-0x6e0050)/4);if(at>=0x6d7e50&&at<0x6d8050)return flags_6d7e50_.at((at-0x6d7e50)/4);if(at>=0x6d8050&&at<0x6e0050)return flags_6d8050_.at((at-0x6d8050)/4);throw EventError("Unknown owned event global");
 }
-
-void EventStage::run_bit1_events() {
-    // 0x42eb60.
-    for (std::size_t index = 0; index < events_.size(); ++index) {
-        if ((events_[index].words[0] & 0x2u) != 0) process_event(index);
-    }
+void EventStage::global_write(U at,U value){
+ if(source_){source_->write(at,4,value);return;}
+ if(at==0x4f2be4){cursor_=value;return;}if(at==0x4f2be0){loader_flag_=value;return;}if(at==0x6e4734){frame_counter_=value;return;}if(at==0x67dbec){flags_67dbec_=value;return;}if(at==0x6e0250){flags_6e0250_=value;return;}if(at==0x6e0254){flags_6e0254_=value;return;}
+ if(at>=0x6e0050&&at<0x6e0250){flags_6e0050_.at((at-0x6e0050)/4)=value;return;}if(at>=0x6d7e50&&at<0x6d8050){flags_6d7e50_.at((at-0x6d7e50)/4)=value;return;}if(at>=0x6d8050&&at<0x6e0050){flags_6d8050_.at((at-0x6d8050)/4)=value;return;}throw EventError("Unknown owned event global");
 }
-
-void EventStage::run_bit2_events() {
-    // 0x42eba0.
-    for (std::size_t index = 0; index < events_.size(); ++index) {
-        if ((events_[index].words[0] & 0x4u) != 0) process_event(index);
-    }
+U EventStage::cursor()const{return global_read(0x4f2be4);}U EventStage::frame_counter()const{return global_read(0x6e4734);}U EventStage::loader_flag()const{return global_read(0x4f2be0);}
+void EventStage::set_cursor(U n){global_write(0x4f2be4,n&7u);}void EventStage::set_frame_counter(U n){global_write(0x6e4734,n);}void EventStage::set_loader_flag(U n){global_write(0x4f2be0,n);}
+void EventStage::tick(){EngineScope scope(*this);const U offset_cursor=cursor();const U base=source_?source_->table_base(EventTable::events):0;const U count=count_bits(EventTable::events);U index=cursor(),address=base+offset_cursor*24;std::size_t owned_index=offset_cursor;
+ if(signed_word(index)<signed_word(count))do{auto record=source_?source_record(EventTable::events,address):owned_record(EventTable::events,owned_index);if(!(record.read(0,1)&6u))process_record(record);const U current=count_bits(EventTable::events);index+=8;address+=192;owned_index+=8;if(signed_word(index)>=signed_word(current))break;}while(true);
+ const U current=cursor();global_write(0x4f2be4,(current+1)&7u);
 }
-
-void EventStage::frame_driver_step() {
-    // 0x443c8c-0x443ca5: counter 0x6e4734 increments per step, tick() runs on
-    // signed values above 15 and the counter resets to zero.
-    ++frame_counter_;
-    if (static_cast<std::int32_t>(frame_counter_) > 15) {
-        frame_counter_ = 0;
-        tick();
-    }
+void EventStage::run_bits(std::uint8_t bits){EngineScope scope(*this);U address=source_?source_->table_base(EventTable::events):0;const U count=count_bits(EventTable::events);U index=0;if(signed_word(count)<=0)return;do{auto record=source_?source_record(EventTable::events,address):owned_record(EventTable::events,index);if(record.read(0,1)&bits)process_record(record);const U current=count_bits(EventTable::events);++index;address+=24;if(signed_word(index)>=signed_word(current))return;}while(true);}
+void EventStage::run_bit1_events(){run_bits(2);}void EventStage::run_bit2_events(){run_bits(4);}
+void EventStage::frame_driver_step(){const U next=frame_counter()+1;set_frame_counter(next);if(signed_word(next)>15){tick();set_frame_counter(0);}}
+U EventStage::event_fired(std::size_t index)const{if(source_)return source_->event_at(index).read(20,1);return events_.at(index).words[5]&255u;}
+U event_fired_reference(const EventStage& stage,std::size_t requested,EventReferencePolicy policy,const EventReferenceDiagnostic& diagnostic){if(stage.uses_source())throw EventError("Owned event reference policy is unavailable in source mode");const auto loaded=stage.event_count();if(requested<loaded)return stage.event_fired(requested);if(policy!=EventReferencePolicy::missing_not_fired)throw EventError("Event fired reference exceeds its loaded table");if(!diagnostic)throw EventError("Missing event repair needs its diagnostic");diagnostic(requested,loaded);return 0;}
+EventHost& EventStage::require_host()const{if(!host_)throw EventError("Event host is not bound");return *host_;}
+U EventStage::host_object_dword(U address,U index)const{if(source_)return source_->read(address+index*64,4);return require_host().object_index_dword(address,index);}
+void EventStage::process_event(std::size_t index){EngineScope scope(*this);if(source_)process_record(source_record(EventTable::events,event_view(index).source_address()));else process_record(owned_record(EventTable::events,index));}
+U EventStage::evaluate_event_triggers(std::size_t index){EngineScope scope(*this);return evaluate_record_triggers(source_?source_record(EventTable::events,event_view(index).source_address()):owned_record(EventTable::events,index));}
+U EventStage::evaluate_trigger(std::size_t index){EngineScope scope(*this);return evaluate_record(source_?source_record(EventTable::triggers,trigger_view(index).source_address()):owned_record(EventTable::triggers,index));}
+void EventStage::dispatch_action(std::size_t index){EngineScope scope(*this);dispatch_record(source_?source_record(EventTable::actions,action_view(index).source_address()):owned_record(EventTable::actions,index));}
+void EventStage::process_event_record(U at){EngineScope scope(*this);process_record(source_record(EventTable::events,at));}U EventStage::evaluate_event_triggers_record(U at){EngineScope scope(*this);return evaluate_record_triggers(source_record(EventTable::events,at));}U EventStage::evaluate_trigger_record(U at){EngineScope scope(*this);return evaluate_record(source_record(EventTable::triggers,at));}void EventStage::dispatch_action_record(U at){EngineScope scope(*this);dispatch_record(source_record(EventTable::actions,at));}
+void EventStage::dispatch_event_actions(Record record){U index=0,offset=0;for(;;){const U count=record.read(22,1);if(index>=count)return;auto action=run_record(record,EventTable::actions,offset);++index;dispatch_record(action);offset+=32;}}
+void EventStage::process_record(Record record){if(source_&&!record.address)return;
+ const U delay_compare=record.read(16,2);if(!delay_compare){const U repeat_compare=record.read(12,2);if(!repeat_compare){if(record.read(20,1))return;if(!evaluate_record_triggers(record))return;const U reload=record.read(18,2);record.write(20,1,1);if(reload)record.write(16,2,reload);else dispatch_event_actions(record);if(record.read(0,1)&1u){const U repeat_reload=record.read(14,2);if(repeat_reload)record.write(12,2,repeat_reload);else record.write(20,1,0);}return;}}
+ const U delay=record.read(16,2);if(delay){const U next=(delay-128u)&0xffffu;record.write(16,2,next);if(signed_half(next)<=0){record.write(16,2,0);if(!evaluate_record_triggers(record)){record.write(20,1,0);record.write(12,2,0);return;}dispatch_event_actions(record);}}
+ const U repeat=record.read(12,2);if(repeat){const U next=(repeat-128u)&0xffffu;record.write(12,2,next);if(signed_half(next)<=0){record.write(12,2,0);record.write(20,1,0);}}
 }
-
-std::uint32_t EventStage::event_fired(std::size_t event_index) const {
-    return events_.at(event_index).words[5] & 0xffu;
-}
-
-std::uint32_t event_fired_reference(const EventStage& stage,std::size_t requested,
-    EventReferencePolicy policy,const EventReferenceDiagnostic& diagnostic){
-    const auto loaded=stage.event_count();
-    if(requested<loaded)return stage.event_fired(requested);
-    if(policy!=EventReferencePolicy::missing_not_fired)
-        throw EventError("Event fired reference exceeds its loaded table");
-    if(!diagnostic)throw EventError("Missing event repair needs its diagnostic");
-    diagnostic(requested,loaded);return 0;
-}
-
-EventHost& EventStage::require_host() const {
-    if(!host_)throw EventError("Event host is not bound");
-    return *host_;
-}
-
-std::uint32_t EventStage::host_object_dword(std::uint32_t address, std::uint32_t index) const {
-    return require_host().object_index_dword(address, index);
-}
-
-void EventStage::dispatch_event_actions(const MissionEvent& record) {
-    for (std::uint32_t slot = 0; slot < record.action_count(); ++slot) {
-        const auto index=std::uint64_t(record.words[2])+slot;
-        if(index>=actions_.size())throw EventError("Event action run exceeds its table");
-        dispatch_action(std::size_t(index));
-    }
-}
-
-void EventStage::process_event(std::size_t event_index) {
-    // 0x42e9e0, line by line. Timers step by 0x80 and compare as signed 16 bit.
-    MissionEvent& record = events_.at(event_index);
-    std::uint32_t* w = record.words.data();
-
-    std::uint32_t delay = low16(w[4]);
-    std::uint32_t repeat = low16(w[3]);
-
-    // Counter path 0x42ea10: step the repeat timer down and clear the fired
-    // flag when it expires.
-    const auto step_repeat = [&] {
-        repeat=low16(w[3]);
-        if (repeat == 0) return;
-        const auto next = static_cast<std::int16_t>(repeat - 0x80u);
-        repeat = static_cast<std::uint16_t>(next);
-        w[3] = with_low16(w[3], repeat);
-        if (next <= 0) {
-            repeat = 0;
-            w[3] = with_low16(w[3], 0);
-            w[5] &= 0xffffff00u; // fired = 0
-        }
-    };
-
-    // Arm path 0x42ead6: repeat flag on stores the reload; reload zero clears.
-    const auto arm_repeat = [&] {
-        if (!(w[0]&1)) return;
-        const std::uint32_t reload = high16(w[3]);
-        if (reload == 0) {
-            w[5] &= 0xffffff00u;
-        } else {
-            w[3] = with_low16(w[3], reload);
-        }
-    };
-
-    // Fire path 0x42ea7e: clear the delay, evaluate, then dispatch and step.
-    const auto fire = [&] {
-        w[4] = with_low16(w[4], 0);
-        if (evaluate_event_triggers(event_index) == 0) {
-            w[5] &= 0xffffff00u;
-            w[3] = with_low16(w[3], 0);
-            return;
-        }
-        dispatch_event_actions(record);
-        step_repeat();
-    };
-
-    if (delay != 0) {
-        const auto next = static_cast<std::int16_t>(delay - 0x80u);
-        delay = static_cast<std::uint16_t>(next);
-        w[4] = with_low16(w[4], delay);
-        if (next > 0) {
-            step_repeat();
-            return;
-        }
-        fire();
-        return;
-    }
-    if (repeat != 0) {
-        step_repeat();
-        return;
-    }
-    if ((w[5] & 0xffu) != 0) return; // fired, waiting
-    if (evaluate_event_triggers(event_index) == 0) return;
-    const std::uint32_t reload = high16(w[4]);
-    w[5] = (w[5] & 0xffffff00u) | 1u; // fired = 1
-    if (reload != 0) {
-        w[4] = with_low16(w[4], reload);
-        arm_repeat();
-        return;
-    }
-    dispatch_event_actions(record);
-    arm_repeat();
-}
-
-std::uint32_t EventStage::evaluate_event_triggers(std::size_t event_index) {
-    // 0x42e930: one trigger is a value; the list combines with the previous
-    // trigger's words[0] bits 1 (or) and 2 (xor); neither means and.
-    const MissionEvent& record = events_.at(event_index);
-    if(!record.trigger_count())return 1;
-    const auto trigger_index=[&](std::uint32_t slot){
-        const auto index=std::uint64_t(record.words[1])+slot;
-        if(index>=triggers_.size())throw EventError("Event trigger run exceeds its table");
-        return std::size_t(index);
-    };
-    std::uint32_t result=evaluate_trigger(trigger_index(0));
-    if(triggers_[trigger_index(0)][0]&1)result^=1;
-    for(std::uint32_t slot=1;slot<record.trigger_count();++slot){
-        auto value=evaluate_trigger(trigger_index(slot));
-        if(triggers_[trigger_index(slot)][0]&1)value^=1;
-        const auto operation=triggers_[trigger_index(slot-1)][0];
-        if(operation&2)result|=value;
-        else if(operation&4)result^=value;
-        else result&=value;
-    }
-    return result;
-}
-
-std::uint32_t EventStage::evaluate_trigger(std::size_t trigger_index) {
-    // 0x42e620. Jump tables: 0x42e5cc on words[1], 0x42e5e4 on words[2].
-    const EventTableRecord& entry = triggers_.at(trigger_index);
-    switch (entry[1]) {
-    case 0:
-        return 0;
-    case 1:
-        switch (entry[2]) {
-        case 1:
-            return flag_42e520(entry[3], entry[4]) ? 1u : 0u;
-        case 2:
-            return flag_42e550(entry[3], entry[4]) ? 1u : 0u;
-        case 3:
-            return host_object_dword(event_object_field_7936a4, entry[3]) == 2u ? 1u : 0u;
-        case 4:
-            return static_cast<std::int32_t>(host_object_dword(event_object_field_7936ac, entry[3])) <= 0 ? 1u : 0u;
-        case 5:
-            return static_cast<std::int32_t>(host_object_dword(event_object_field_7936ac, entry[3])) > 0 ? 1u : 0u;
-        case 6: {
-            const auto index=entry[3];
-            const auto live = static_cast<std::int32_t>(host_object_dword(event_object_field_7936a8, index));
-            const auto start = static_cast<std::int32_t>(host_object_dword(event_object_field_7936ac, index));
-            return static_cast<std::int32_t>(std::uint32_t(live) - std::uint32_t(start)) >= static_cast<std::int32_t>(entry[4]) ? 1u : 0u;
-        }
-        case 7:
-            return flag_42e580(entry[3], entry[4], entry[5]) ? 1u : 0u;
-        case 9: {
-            const auto index=entry[3];
-            const auto live=host_object_dword(event_object_field_7936a8,index);
-            const auto start=host_object_dword(event_object_field_7936ac,index);
-            return live==start?1u:0u;
-        }
-        case 10:
-            // 0x42e72b forwards the whole trigger record pointer.
-            return require_host().probe_460330(trigger_index);
-        case 11:
-            // 0x42e739 forwards words[3] and words[4].
-            return require_host().probe_460560(entry[3], entry[4]);
-        case 12: {
-            const auto index=entry[3],threshold=entry[4];
-            return static_cast<std::int32_t>(threshold)<=static_cast<std::int32_t>(
-                host_object_dword(event_object_field_7936ac,index))?1u:0u;
-        }
-        default:
-            return 0; // 0x42e637, also for subjects above 12
-        }
-    case 2: {
-        // 0x42e76d: fired flag of the event named by words[3]. The original
-        // requires a valid event table index.
-        const std::size_t other = entry[3];
-        if(other>=events_.size())return require_host().external_event_fired(other)&0xffu;
-        return events_[other].words[5]&0xffu;
-    }
-    case 3:
-        return flag_42e5b0(entry[3]) ? 1u : 0u;
-    case 4:
-        return loader_flag_; // 0x4f2be0, toggled once per load
-    case 5:
-        return require_host().world_67f520_is_zero() && !require_host().world_67f549_bit1() ? 1u : 0u;
-    default:
-        return 0; // words[1] above 5
-    }
-}
-
-void EventStage::dispatch_action(std::size_t action_index) {
-    // 0x42e810. Jump table 0x42e7cc; kinds above 15 return at once.
-    EventTableRecord& entry = actions_.at(action_index);
-    switch (entry[1]) {
-    case 0:
-        return;
-    case 1:
-        require_host().action_45f670(entry[3], entry[4]);
-        return;
-    case 2:
-        require_host().action_45f4c0(entry[3]);
-        return;
-    case 3:
-        require_host().action_4601a0(action_index);
-        return;
-    case 4:
-        require_host().action_45f5b0(entry[3]);
-        return;
-    case 5:
-        set_flag_42ee50(entry[3]); // 0x42ee50(word3)
-        return;
-    case 6:
-        require_host().action_404dd0(entry[3]);
-        return;
-    case 7:
-        require_host().action_43f500(entry[3]);
-        return;
-    case 8:
-        require_host().action_444ca0(1);
-        return;
-    case 9:
-        require_host().action_444ca0(2);
-        return;
-    case 10:
-        require_host().action_444ca0(0);
-        return;
-    case 11:
-        require_host().action_460640(entry[3], entry[4]);
-        return;
-    case 12:
-    case 13:
-        require_host().action_460280(action_index);
-        return;
-    case 14:
-        set_flags_6e0254_bit(entry[3]);
-        return;
-    case 15:
-        set_flags_6e0250_bit(entry[3]);
-        return;
-    default:
-        return;
-    }
-}
-
-// --- Flag memory ------------------------------------------------------------
-// 0x42e520/0x42edd0 index 0x6e0050 as (a * 2 + (b >> 5)) with bit b & 31.
-// 0x42e550/0x42ee00 index 0x6d7e50 the same way. 0x42e580/0x42ee30 index
-// 0x6d8050 as ((a << 7) + b) with bit c & 31. 0x42e5b0/0x42ee50 bit a & 31
-// in 0x67dbec. Every word index must be inside its table.
-
-namespace {
-std::int32_t flag_2d_index(std::uint32_t a, std::uint32_t b) noexcept {
-    const std::uint32_t word = static_cast<std::uint32_t>(static_cast<std::int32_t>(b) >> 5) + a * 2u;
-    return static_cast<std::int32_t>(word);
-}
-std::int32_t flag_3d_index(std::uint32_t a, std::uint32_t b) noexcept {
-    return static_cast<std::int32_t>((a << 7) + b);
-}
-} // namespace
-
-bool EventStage::flag_42e520(std::uint32_t a, std::uint32_t b) const {
-    const std::int32_t index = flag_2d_index(a, b);
-    if (index < 0 || static_cast<std::size_t>(index) >= flags_6e0050_.size()) throw EventError("Event 6E0050 flag index exceeds its table");
-    return (flags_6e0050_[static_cast<std::size_t>(index)] & (1u << (b & 31u))) != 0;
-}
-
-void EventStage::set_flag_42edd0(std::uint32_t a, std::uint32_t b) {
-    const std::int32_t index = flag_2d_index(a, b);
-    if (index < 0 || static_cast<std::size_t>(index) >= flags_6e0050_.size()) throw EventError("Event 6E0050 flag index exceeds its table");
-    flags_6e0050_[static_cast<std::size_t>(index)] |= 1u << (b & 31u);
-}
-
-bool EventStage::flag_42e550(std::uint32_t a, std::uint32_t b) const {
-    const std::int32_t index = flag_2d_index(a, b);
-    if (index < 0 || static_cast<std::size_t>(index) >= flags_6d7e50_.size()) throw EventError("Event 6D7E50 flag index exceeds its table");
-    return (flags_6d7e50_[static_cast<std::size_t>(index)] & (1u << (b & 31u))) != 0;
-}
-
-void EventStage::set_flag_42ee00(std::uint32_t a, std::uint32_t b) {
-    const std::int32_t index = flag_2d_index(a, b);
-    if (index < 0 || static_cast<std::size_t>(index) >= flags_6d7e50_.size()) throw EventError("Event 6D7E50 flag index exceeds its table");
-    flags_6d7e50_[static_cast<std::size_t>(index)] |= 1u << (b & 31u);
-}
-
-bool EventStage::flag_42e580(std::uint32_t a, std::uint32_t b, std::uint32_t c) const {
-    const std::int32_t index = flag_3d_index(a, b);
-    if (index < 0 || static_cast<std::size_t>(index) >= flags_6d8050_.size()) throw EventError("Event 6D8050 flag index exceeds its table");
-    return (flags_6d8050_[static_cast<std::size_t>(index)] & (1u << (c & 31u))) != 0;
-}
-
-void EventStage::set_flag_42ee30(std::uint32_t a, std::uint32_t b, std::uint32_t c) {
-    const std::int32_t index = flag_3d_index(a, b);
-    if (index < 0 || static_cast<std::size_t>(index) >= flags_6d8050_.size()) throw EventError("Event 6D8050 flag index exceeds its table");
-    flags_6d8050_[static_cast<std::size_t>(index)] |= 1u << (c & 31u);
-}
-
-bool EventStage::flag_42e5b0(std::uint32_t bit) const {
-    return (flags_67dbec_ & (1u << (bit & 31u))) != 0;
-}
-
-void EventStage::set_flag_42ee50(std::uint32_t bit) {
-    flags_67dbec_ |= 1u << (bit & 31u);
-}
-
-void EventStage::set_flags_6e0254_bit(std::uint32_t bit) {
-    flags_6e0254_ |= 1u << (bit & 31u);
-}
-
-void EventStage::set_flags_6e0250_bit(std::uint32_t bit) {
-    flags_6e0250_ |= 1u << (bit & 31u);
-}
-
+U EventStage::evaluate_record_triggers(Record record){if(!record.read(21,1))return 1;U result=evaluate_record(run_record(record,EventTable::triggers,0));if(run_record(record,EventTable::triggers,0).read(0,1)&1u)result^=1;U index=1,offset=32;for(;;){if(index>=record.read(21,1))return result;U value=evaluate_record(run_record(record,EventTable::triggers,offset));if(run_record(record,EventTable::triggers,offset).read(0,1)&1u)value^=1;const U operation=run_record(record,EventTable::triggers,offset-32).read(0,1);if(operation&2)result|=value;else if(operation&4)result^=value;else result&=value;++index;offset+=32;}}
+U EventStage::evaluate_record(Record entry){const U kind=entry.read(4,4);switch(kind){case 0:return 0;case 1:{const U subtype=entry.read(8,4);switch(subtype){
+ case 1:{const U b=entry.read(16,4),a=entry.read(12,4);return flag_42e520(a,b)?1u:0u;}
+ case 2:{const U b=entry.read(16,4),a=entry.read(12,4);return flag_42e550(a,b)?1u:0u;}
+ case 3:{const U index=entry.read(12,4);return host_object_dword(event_object_field_7936a4,index)==2?1u:0u;}
+ case 4:{const U index=entry.read(12,4);return signed_word(host_object_dword(event_object_field_7936ac,index))<=0?1u:0u;}
+ case 5:{const U index=entry.read(12,4);return signed_word(host_object_dword(event_object_field_7936ac,index))>0?1u:0u;}
+ case 6:{const U index=entry.read(12,4);const U initial=host_object_dword(event_object_field_7936a8,index);const U current=host_object_dword(event_object_field_7936ac,index);const U threshold=entry.read(16,4);return signed_word(initial-current)>=signed_word(threshold)?1u:0u;}
+ case 7:{const U c=entry.read(20,4),b=entry.read(16,4),a=entry.read(12,4);return flag_42e580(a,b,c)?1u:0u;}
+ case 9:{const U index=entry.read(12,4);const U initial=host_object_dword(event_object_field_7936a8,index);const U current=host_object_dword(event_object_field_7936ac,index);return initial==current?1u:0u;}
+ case 10:return source_?require_host().probe_460330_record(entry.address):require_host().probe_460330(entry.index);
+ case 11:{const U b=entry.read(16,4),a=entry.read(12,4);return require_host().probe_460560(a,b);}
+ case 12:{const U index=entry.read(12,4),threshold=entry.read(16,4);return signed_word(threshold)<=signed_word(host_object_dword(event_object_field_7936ac,index))?1u:0u;}
+ default:return 0;}}
+ case 2:{const U index=entry.read(12,4);if(source_){const U base=source_->table_base(EventTable::events);return require_host().fired_byte_record(base,index)&255u;}if(index>=events_.size())return require_host().external_event_fired(index)&255u;return events_[index].words[5]&255u;}
+ case 3:{const U bit=entry.read(12,4);return flag_42e5b0(bit)?1u:0u;}
+ case 4:return loader_flag();
+ case 5:if(source_){if(source_->read(0x67f520,4))return 0;return(source_->read(0x67f549,1)&2u)?0u:1u;}return require_host().world_67f520_is_zero()&&!require_host().world_67f549_bit1()?1u:0u;
+ default:return 0;}}
+void EventStage::dispatch_record(Record entry){const U kind=entry.read(4,4);switch(kind){case 0:return;
+ case 1:{const U b=entry.read(16,4),a=entry.read(12,4);require_host().action_45f670(a,b);return;}
+ case 2:{const U a=entry.read(12,4);require_host().action_45f4c0(a);return;}
+ case 3:if(source_)require_host().action_4601a0_record(entry.address);else require_host().action_4601a0(entry.index);return;
+ case 4:{const U a=entry.read(12,4);require_host().action_45f5b0(a);return;}
+ case 5:{const U a=entry.read(12,4);set_flag_42ee50(a);return;}
+ case 6:{const U a=entry.read(12,4);require_host().action_404dd0(a);return;}
+ case 7:{const U a=entry.read(12,4);require_host().action_43f500(a);return;}
+ case 8:require_host().action_444ca0(1);return;case 9:require_host().action_444ca0(2);return;case 10:require_host().action_444ca0(0);return;
+ case 11:{const U b=entry.read(16,4),a=entry.read(12,4);require_host().action_460640(a,b);return;}
+ case 12:case 13:if(source_)require_host().action_460280_record(entry.address);else require_host().action_460280(entry.index);return;
+ case 14:{const U bit=entry.read(12,1);set_flags_6e0254_bit(bit);return;}case 15:{const U bit=entry.read(12,1);set_flags_6e0250_bit(bit);return;}default:return;}}
+namespace {std::int64_t index_2d(U a,U b){const U shifted=(b>>5)|((b&0x80000000u)?0xf8000000u:0u);return signed_word(shifted+a*2u);}std::int64_t index_3d(U a,U b){return signed_word((a<<7)+b);}}
+U EventStage::flag_word_6e0050(std::size_t i)const{if(i>=flag_2d_words)throw EventError("Event flag index exceeds 6E0050");return global_read(0x6e0050+U(i)*4);}U EventStage::flag_word_6d7e50(std::size_t i)const{if(i>=flag_2d_words)throw EventError("Event flag index exceeds 6D7E50");return global_read(0x6d7e50+U(i)*4);}U EventStage::flag_word_6d8050(std::size_t i)const{if(i>=flag_3d_words)throw EventError("Event flag index exceeds 6D8050");return global_read(0x6d8050+U(i)*4);}
+bool EventStage::flag_42e520(U a,U b)const{const auto i=index_2d(a,b);if(i<0||i>=std::int64_t(flag_2d_words))throw EventError("Event flag index exceeds 6E0050");return(flag_word_6e0050(std::size_t(i))&(1u<<(b&31)))!=0;}
+bool EventStage::flag_42e550(U a,U b)const{const auto i=index_2d(a,b);if(i<0||i>=std::int64_t(flag_2d_words))throw EventError("Event flag index exceeds 6D7E50");return(flag_word_6d7e50(std::size_t(i))&(1u<<(b&31)))!=0;}
+bool EventStage::flag_42e580(U a,U b,U c)const{const auto i=index_3d(a,b);if(i<0||i>=std::int64_t(flag_3d_words))throw EventError("Event flag index exceeds 6D8050");return(flag_word_6d8050(std::size_t(i))&(1u<<(c&31)))!=0;}
+void EventStage::set_flag_42edd0(U a,U b){const auto i=index_2d(a,b);if(i<0||i>=std::int64_t(flag_2d_words))throw EventError("Event flag index exceeds 6E0050");const U at=0x6e0050+U(i)*4;const U value=global_read(at);global_write(at,value|(1u<<(b&31)));}
+void EventStage::set_flag_42ee00(U a,U b){const auto i=index_2d(a,b);if(i<0||i>=std::int64_t(flag_2d_words))throw EventError("Event flag index exceeds 6D7E50");const U at=0x6d7e50+U(i)*4;const U value=global_read(at);global_write(at,value|(1u<<(b&31)));}
+void EventStage::set_flag_42ee30(U a,U b,U c){const auto i=index_3d(a,b);if(i<0||i>=std::int64_t(flag_3d_words))throw EventError("Event flag index exceeds 6D8050");const U at=0x6d8050+U(i)*4;const U value=global_read(at);global_write(at,value|(1u<<(c&31)));}
+bool EventStage::flag_42e5b0(U bit)const{return(flag_value_67dbec()&(1u<<(bit&31)))!=0;}void EventStage::set_flag_42ee50(U bit){const U value=flag_value_67dbec();set_flag_value_67dbec(value|(1u<<(bit&31)));}
+U EventStage::flags_6e0254()const{return global_read(0x6e0254);}U EventStage::flags_6e0250()const{return global_read(0x6e0250);}U& EventStage::flags_67dbec(){owned_only();return flags_67dbec_;}U EventStage::flags_67dbec()const{return flag_value_67dbec();}U EventStage::flag_value_67dbec()const{return global_read(0x67dbec);}void EventStage::set_flag_value_67dbec(U n){global_write(0x67dbec,n);}
+void EventStage::set_flags_6e0254_bit(U bit){const U value=flags_6e0254();global_write(0x6e0254,value|(1u<<(bit&31)));}void EventStage::set_flags_6e0250_bit(U bit){const U value=flags_6e0250();global_write(0x6e0250,value|(1u<<(bit&31)));}
 } // namespace dfre

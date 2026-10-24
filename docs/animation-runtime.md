@@ -3,7 +3,10 @@
 `AnimationController` runs CHR1 action selection, frame interpolation, root motion,
 heading changes, events, frame conditions, and action loops. `frame_mask()` reads
 the current frame flags at `+04`. `set_condition_state()` writes instance `+38`
-before the next tick. `pose()` supplies the current bone pose to the renderer.
+before the next tick. `pose()` supplies the current bone pose to the renderer. Head overrides use the
+frame duration for timed frames and the last Y-angle delta for immediate frames.
+A zero head divisor stops after the preceding pose-delta writes. Pitch uses the
+source signed byte shift.
 
 Use `decode_animation_definition()` to read decoded ANM text. Lines contain
 `name number [velocity] [override]`. Velocity becomes

@@ -456,13 +456,18 @@ void AnimationController::compute_pose_delta(const CharacterFrame& next,
     if (frame_flags(next) & 0x80) {
         require(bone_count_ >= 3, "pitch adjustment requires three bones");
         const auto pitch = std::uint32_t(inputs_.pitch);
+        //43A4DC keeps the last Y-angle delta in EBX for both head divisions.
+        const auto head_divisor = timed ? ticks : pose_delta_.back().angles[1];
+        require(head_divisor != 0, "character head divisor is zero");
         auto bone_two = std::int32_t(std::uint32_t(pitch) << 17) - pose_[2].angles[1];
         bone_two = arithmetic_shift(std::int32_t(std::uint32_t(bone_two) << 7), 7);
-        if (timed) bone_two /= ticks;
+        bone_two /= head_divisor;
         pose_delta_[2].angles[1] = bone_two;
-        auto bone_one = std::int32_t(std::uint32_t(pitch >> 2) << 17);
+        //SAR AL,2 sign-fills within the byte while the upper EAX bytes stay zero.
+        const auto body_pitch = std::uint32_t(arithmetic_shift(signed_byte(inputs_.pitch), 2)) & 0xff;
+        auto bone_one = std::int32_t(body_pitch << 17);
         bone_one = arithmetic_shift(std::int32_t(std::uint32_t(bone_one) << 7), 7);
-        if (timed) bone_one /= ticks;
+        bone_one /= head_divisor;
         pose_delta_[1].angles[1] = std::int32_t(std::uint32_t(pose_delta_[1].angles[1]) +
             std::uint32_t(bone_one));
     }

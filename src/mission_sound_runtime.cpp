@@ -119,6 +119,7 @@ struct MissionSoundRuntime::Impl {
     Memory memory;U enabled=1;MissionAudioPlaybackCells voices{enabled};MissionAudioPlaybackBindings voice_bindings;
     MissionAudioPlayback playback;MissionSoundAssetBindings assets;MissionAudioCacheBindings cache;MissionSoundBankBindings banks;
     AssetBytes file;std::size_t position=0;U depth=0;
+    std::function<bool(U,U,U)> fill_handler;
     struct Stack {
         Impl& owner;U at;
         explicit Stack(Impl& value):owner(value),at(0x21002000+value.depth*512){check(value.depth<96,"Sound request nesting exceeds scratch storage");++owner.depth;}
@@ -167,7 +168,12 @@ struct MissionSoundRuntime::Impl {
     U foreign(U site,const std::vector<U>& args){check(bool(host.service),"Sound foreign service is not bound");return host.service(site,args);}
     U call(U site,const std::vector<U>& a){
         switch(site){
-        case 0x49a620:for(U i=0;i<a.at(2);++i)write(a.at(0)+i,1,a.at(1)&255u);return a.at(0);
+        case 0x49a620:{
+            const auto target=a.at(0),byte=a.at(1)&255u,count=a.at(2);
+            if(fill_handler&&fill_handler(target,byte,count))return target;
+            for(U i=0;i<count;++i)write(target+i,1,byte);
+            return target;
+        }
         case 0x497f60:return memory.allocate(a.at(0),a.at(1),a.at(2),a.at(3));
         case 0x4980d0:return memory.release(a.at(0));
         case 0x499040:return exists(a.at(0));
@@ -301,6 +307,11 @@ void MissionSoundRuntime::attach(U actor,U id,U scale,U ceiling){mission_sound_a
 void MissionSoundRuntime::stop(U actor,U scale){mission_sound_stop(impl_->banks,actor,scale);}
 U MissionSoundRuntime::loudness(U id){return mission_sound_loudness(impl_->banks,id);}
 U MissionSoundRuntime::definition_id(std::string_view name){if(name.empty()||!name.front())return 0;return impl_->definition_id(name);}
+void MissionSoundRuntime::bind_fill_handler(std::function<bool(U,U,U)> handler){
+    check(bool(handler),"Source fill provider is empty");
+    check(!impl_->fill_handler,"Source fill provider is already bound");
+    impl_->fill_handler=std::move(handler);
+}
 void MissionSoundRuntime::cleanup(){const auto& b=impl_->assets;mission_sound_cleanup({b.read,b.write,b.call});}
 void MissionSoundRuntime::release_banks(U context){auto& p=*impl_;Impl::Stack stack(p);p.write(stack.at,4,context);const auto& b=p.assets;mission_sound_bank_cleanup({b.read,b.write,b.call},stack.at,stack.at+16);}
 void MissionSoundRuntime::frame(){impl_->frame();}

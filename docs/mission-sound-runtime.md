@@ -14,6 +14,8 @@ The required `service` provider handles reached mission script loading and regis
 
 Call `cleanup()` for source `43E6D0` while the script, playback and frame owners remain alive. Route reached `49DB20` to `release_banks(context)`. Bank teardown uses its own current argument and 16-byte frame inside the same memory owner.
 
+Use `bind_fill_handler` once for complete current spans at `49A620(address,byte,count)`. Return false for an unclaimed span so scalar writes use their current owners. A claimed span uses its owner’s full clear operation. Provider errors retain committed changes and stop the call. Game routes the exact primary actor pool clear through `MissionPrimaryActorLive`.
+
 Each active request has a separate stable scratch block. Keep the owner and all referenced data alive through callbacks. The original comparison covers ambient callbacks, reused token storage, actual `LOOP.DEF`, lazy WAV reuse/load/failure, channel writes, extension aliases, and the complete resolved definition table. The stock test uses actual `SNIPER.PWF` and sound `499` with zero device output.
 
 Validate every byte address before a width-two or width-four memory store commits any byte. Valid stores can cross current bound fields, including listener and yaw. File copies write each byte through the current source owner. Run `native_mission_sound_runtime GAME_FOLDER` for rejected-store prefixes, controlled file bytes across live fields, and repeated public lookup checks against the current heap list and generation.
