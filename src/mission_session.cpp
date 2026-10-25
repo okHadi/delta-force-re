@@ -1,4 +1,8 @@
 #include "dfre/mission_peer_leave.hpp"
+#include "dfre/mission_client_ready.hpp"
+#include "dfre/mission_event_live.hpp"
+#include "dfre/mission_event_markers.hpp"
+#include "dfre/mission_event_region_person.hpp"
 #include "dfre/mission_session.hpp"
 #include "dfre/mission_round_checks.hpp"
 #include "dfre/mission_event_actor_flags.hpp"
@@ -85,6 +89,13 @@ struct SessionEventHost : dfre::EventHost {
     std::function<bool()> multiplayer_zero;
     std::function<std::uint32_t(std::size_t)> fired_reference;
     std::uint32_t external_event_fired(std::size_t index) override{return fired_reference(index);}
+    std::function<std::uint32_t(std::uint32_t)> raw_rect;
+    std::function<void(std::uint32_t)> raw_person,raw_region;
+    std::function<std::uint32_t(std::uint32_t,std::uint32_t)> raw_fired;
+    std::uint32_t probe_460330_record(std::uint32_t at) override{return need(raw_rect,"Source event rectangle is not bound")(at);}
+    void action_4601a0_record(std::uint32_t at) override{need(raw_person,"Source event person edit is not bound")(at);}
+    void action_460280_record(std::uint32_t at) override{need(raw_region,"Source event region edit is not bound")(at);}
+    std::uint32_t fired_byte_record(std::uint32_t base,std::uint32_t index) override{return need(raw_fired,"Source event fired byte is not bound")(base,index);}
     std::function<bool()> rule_bit1;
     bool world_67f549_bit1() override{return rule_bit1();}
     std::function<void(std::uint32_t,std::uint32_t)> orders;
@@ -128,6 +139,12 @@ struct MissionSession::Impl {
     std::map<U,U> listener_extra,cells;
     MissionControlGateBindings gate;std::function<void()> logic_run,reset_zones;
     MissionAnimationEffectBindings animation_effect;
+    MissionEventResourceBindings event_memory_bindings;
+    std::unique_ptr<MissionEventMemory> event_memory;
+    MissionEventPersonBindings event_live;
+    //Sound owns this mapped span after its bounded request frames at21002000..2100DFFF.
+    static constexpr U event_name_source=0x2100e000;
+    std::array<std::uint8_t,260> event_name{};
     SessionEventHost event_host;EventStage event_stage{&event_host};
     MissionEventActorOrderBindings order_binding;
     ProjectileDamageState shared_damage;
@@ -141,6 +158,27 @@ struct MissionSession::Impl {
     MissionServerMessageBuffer server;std::unique_ptr<MissionClientOutbox> outbox;
     std::unique_ptr<MissionActorLifecycle> lifecycle;MissionEventActorFlagBindings flag_bindings;
     MissionPeerParserBindings parser;
+    MissionClientAddedBindings ready;
+    static constexpr U ready_source=0x1b002100,reject_source=0x1b002240;
+    std::array<std::uint8_t,0x128> ready_frame{};
+    std::array<std::uint8_t,0x4c> reject_frame{};
+    bool ready_active=false,reject_active=false;
+    void receive_ready(const MissionPeerParserCall& call){
+        if(!active||!ready.read||call.count!=2||call.payload_argument!=1||call.args[0]>=mission_client_count||call.length!=0xe2||!call.payload)
+            throw MissionTickError("Ready parser call has an invalid current payload");
+        if(parser.resolve(call.args[1],call.length)!=call.payload)
+            throw MissionTickError("Ready parser payload differs from its current source span");
+        if(ready_active)throw MissionTickError("Ready caller frame is already active");
+        ready_active=true;struct Scope{bool& active;~Scope(){active=false;}} scope{ready_active};
+        ready.write(ready_source+0x120,4,call.args[0]);ready.write(ready_source+0x124,4,call.args[1]);
+        mission_client_ready(ready,ready_source,ready_frame.size());
+    }
+    void reject_client(U slot){
+        if(reject_active)throw MissionTickError("Reject caller frame is already active");
+        reject_active=true;struct Scope{bool& active;~Scope(){active=false;}} scope{reject_active};
+        ready.write(reject_source+0x48,4,slot);
+        mission_client_reject(ready,reject_source,reject_frame.size());
+    }
     MissionPeerFrameBindings peer;MissionPeerTimerBindings peer_timers;
     MissionPeerBudgetBindings budget;MissionRoundServiceBindings round;
     MissionRoundCheckBindings round_checks;MissionActorMessageBindings actor_message;
@@ -277,7 +315,12 @@ struct MissionSession::Impl {
 
     explicit Impl(MissionSessionContext context,MissionSessionHost host,MissionResultImage* result=nullptr):c(context),h(std::move(host)),camera{c.camera_position_6ba3d0,{},0,0},owned_result_image(result?nullptr:std::make_unique<MissionResultImage>()),result_image(result?*result:*owned_result_image){
         const auto& memory=c.sound.asset_bindings();
-        event_stage.flags_67dbec()=memory.read(0x67dbec,4);
+        if(h.source_event_file.empty())event_stage.flags_67dbec()=memory.read(0x67dbec,4);
+        else {
+            if(h.source_event_file.size()>=event_name.size()||h.source_event_file.find('\0')!=std::string::npos)
+                throw MissionTickError("Source event filename is invalid");
+            std::copy(h.source_event_file.begin(),h.source_event_file.end(),event_name.begin());
+        }
         for(std::size_t i=0;i<hud_history.size();++i)hud_history[i]=std::uint8_t(memory.read(0xbd34b0+U(i),1));
         hud_counter_bd4810=memory.read(0xbd4810,4);cells.emplace(0x67db54,memory.read(0x67db54,4));
         for(std::size_t i=0;i<result_image.size();++i)result_image[i]=std::uint8_t(memory.read(0x67f714+U(i),1));
@@ -305,6 +348,8 @@ struct MissionSession::Impl {
     }
     std::uint8_t* source_byte(U at){
         const auto field=[at](U base,auto& value)->std::uint8_t*{if(at<base||std::uint64_t(at-base)>=sizeof(value))return nullptr;return reinterpret_cast<std::uint8_t*>(&value)+(at-base);};
+        if(ready_active)if(auto* p=field(ready_source,ready_frame))return p;
+        if(reject_active)if(auto* p=field(reject_source,reject_frame))return p;
         if(auto* p=field(0x8ec1cc,messages.peer_frame_buffer().bytes_8ec1cc))return p;
         if(auto* p=field(0x8ee1cc,messages.peer_frame_buffer().count_8ee1cc))return p;
         if(auto* p=field(0x67f538,c.state.send_interval_67f538))return p;
@@ -312,7 +357,8 @@ struct MissionSession::Impl {
         if(auto* p=field(peer_leave_source,peer_leave_packet))return p;
         if(auto* p=field(0x67dbc0,c.state.globals.menu_flag_67dbc0))return p;
         if(auto* p=field(0x503428,c.state.globals.toggle_503428))return p;
-        if(auto* p=field(0x67dbec,event_stage.flags_67dbec()))return p;
+        if(h.source_event_file.empty())if(auto* p=field(0x67dbec,event_stage.flags_67dbec()))return p;
+        if(auto* p=field(0x793680,c.runtime.live_types.bytes))return p;
         if(auto* p=field(0xbd34b0,hud_history))return p;
         if(auto* p=field(0xbd4810,hud_counter_bd4810))return p;
         if(hud_frame_active)if(auto* p=field(hud_frame_address,hud_frame))return p;
@@ -352,6 +398,66 @@ struct MissionSession::Impl {
         return nullptr;
     }
     bool claims(U at,U width){if(width!=1&&width!=2&&width!=4)throw MissionTickError("Mission session memory width is invalid");if(std::uint64_t(at)+width>0x100000000ull)throw MissionTickError("Mission session memory wraps");U owned=0;for(U i=0;i<width;++i)owned+=source_byte(at+i)!=nullptr;if(owned&&owned!=width)throw MissionTickError("Mission session memory partially overlaps an owned cell");return owned==width;}
+    void load_source_events(){
+        const auto& memory=c.sound.asset_bindings();
+        event_live=mission_event_live_bindings(c.state,
+            [this](U at,U width){
+                try{return c.sound.asset_bindings().read(at,width);}
+                catch(const std::exception& error){throw MissionTickError("Event source read "+std::to_string(at)+"/"+std::to_string(width)+": "+error.what());}
+            },
+            [this](U at,U width,U value){c.sound.asset_bindings().write(at,width,value);},
+            [this](std::size_t index){
+                if(index>=c.runtime.definitions.size())throw MissionTickError("Event definition index exceeds its current table");
+                const auto at=std::uint64_t(c.sound.asset_bindings().read(0xc23810,4))+index*sizeof(RuntimeItemDefinition);
+                if(at>0xffffffffu)throw MissionTickError("Event definition address wraps");
+                return U(at);
+            },[this]{return fp_control_word;});
+        const auto current_read=event_live.read;
+        event_live.read=[this,current_read](U at,U width){
+            const auto end=std::uint64_t(at)+width;
+            if(h.primary_source_records&&((at>=0x7dde80&&end<=0x822e80)||(at>=0x8cfa1c&&end<=0x8cfa20)))
+                return c.sound.asset_bindings().read(at,width);
+            return current_read(at,width);
+        };
+        event_memory_bindings.read=event_live.read;
+        event_memory_bindings.write=event_live.write;
+        event_memory_bindings.call=[this](U site,const std::vector<U>& args)->U{
+            if(site==0x42eea0||site==0x42f020){
+                if(!args.empty())throw MissionTickError("Event marker binders take no arguments");
+                if(site==0x42eea0)mission_event_markers_triggers(event_memory_bindings);
+                else mission_event_markers_actions(event_memory_bindings);
+                return 0;
+            }
+            return c.sound.asset_bindings().call(site,args);
+        };
+        if(!event_memory){
+            event_memory=std::make_unique<MissionEventMemory>(event_memory_bindings);
+            event_stage.attach_source(*event_memory);
+        }
+        event_host.raw_fired=[this](U base,U index){return event_memory_bindings.read(base+index*24u+20u,1);};
+        event_host.raw_rect=[this](U at){
+            std::array<std::int32_t,5> fields{};
+            for(U i=0;i<fields.size();++i){const U value=event_memory_bindings.read(at+12+i*4,4);std::memcpy(&fields[i],&value,4);}
+            return mission_event_rect(c.state,{fields[0],fields[1],fields[2],fields[3],fields[4]});
+        };
+        event_host.raw_person=[this](U at){mission_event_person_edits(event_live,at);};
+        event_host.raw_region=[this](U at){mission_event_region_person(event_live,at);};
+        std::uint64_t objects=0;for(const auto& group:c.mission.object_groups)objects+=group.size();
+        const auto offset=268+objects*96+17408+2048+640;
+        const auto expected=offset+12+c.mission.events.size()*24+(c.mission.triggers.size()+c.mission.actions.size())*32;
+        if(expected>0x7fffffffu)throw MissionTickError("Source event file exceeds its current seek range");
+        for(U i=0;i<=h.source_event_file.size();++i)memory.write(event_name_source+i,1,event_name[i]);
+        if(memory.call(0x499120,{event_name_source})==0xffffffffu)throw MissionTickError("Source event file failed to open");
+        bool opened=true;
+        const auto close=[&]{opened=false;memory.call(0x499020,{});};
+        try{
+            if(memory.call(0x4992d0,{0,2})!=expected||memory.call(0x4992d0,{U(offset),0})!=offset)
+                throw MissionTickError("Source event file extent differs from the decoded mission");
+            event_memory->load_current_file();
+            if(memory.call(0x4992d0,{0,1})!=expected)throw MissionTickError("Source event loader left a different file cursor");
+            close();
+        }catch(...){if(opened)close();throw;}
+    }
     void setup(){
 auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto& terrain=c.terrain;auto& animations=c.animations;auto& geometry=c.geometry;auto& muzzle=c.muzzle;auto& bridge=c.input;auto& sound=c.sound;auto& audio=c.audio;auto& listener=c.audio.listener_6e06a8;auto& listener_yaw=c.audio.yaw_6e06b4;auto& crt_cells=c.crt_thread;auto& clients=c.clients;auto& rules_word=c.rules_67f548;auto& types=c.runtime.live_types;
         matrices=initialized_mission_matrices(initial,cache,animations);
@@ -433,7 +539,8 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         if(auto result=mission_area_live_stage(state,geometry,call,area))return result;
         return std::nullopt;
     };
-    event_stage.load(c.mission);event_host.fired_reference=[&](auto index){return event_fired_reference(event_stage,index,h.event_references,h.event_diagnostic);};
+    if(h.source_event_file.empty())event_stage.load(c.mission);else load_source_events();
+    event_host.fired_reference=[&](auto index){return event_fired_reference(event_stage,index,h.event_references,h.event_diagnostic);};
     event_host.person_edit=[&](auto index){auto& action=event_stage.action(index);auto binding=mission_event_person_bindings(state,action,0x27000000,[&](auto address){return sound.asset_bindings().read(address,4);},[this]{return fp_control_word;});mission_event_person_edits(binding,0x27000000);};
     order_binding=mission_event_actor_order_bindings(state);event_host.orders=[&](auto side,auto list){mission_event_actor_orders(order_binding,std::int32_t(side),list);};
 
@@ -543,7 +650,17 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
     parser.write=[&](auto at,auto width,auto value){periodic.write(at,width,value);};
     parser.resolve=[this](U at,std::size_t length){auto& bytes=messages.peer_frame_buffer().bytes_8ec1cc;if(at<0x8ec1cc||std::uint64_t(at-0x8ec1cc)+length>bytes.size())throw MissionTickError("Peer parser source span has no current owner");return bytes.data()+at-0x8ec1cc;};
     parser.client=[&](auto slot){return clients.client(slot);};
-    parser.call=[](const auto& call)->U{throw MissionTickError("Peer parser required body is not bound "+std::to_string(call.address));};
+    parser.call=[this](const auto& call)->U{
+        if(call.address==0x446a30){receive_ready(call);return 0;}
+        if(call.address==0x47df40){
+            if(call.count!=2||!c.state.world.terrain)throw MissionTickError("Peer terrain call needs two coordinates and current terrain");
+            std::int32_t x,y;std::memcpy(&x,&call.args[0],4);std::memcpy(&y,&call.args[1],4);
+            return U(ground_height_query(*c.state.world.terrain,x,y));
+        }
+        //448C00 is RET in the supplied executable; its caller ignores EAX.
+        if(call.address==0x448c00){if(call.count!=1)throw MissionTickError("Peer movement return takes one slot argument");return 0;}
+        throw MissionTickError("Peer parser required body is not bound "+std::to_string(call.address));
+    };
     logic.cell=cell;logic.store=cell_store;logic.client=client_read;logic.client_store=client_store;
     logic.actor=[&](auto group,auto slot,auto at,auto width){const auto image=snapshot_mission_actor(state,{std::uint8_t(group),slot});std::uint32_t n=0;for(unsigned i=0;i<width;++i)n|=std::uint32_t(image.at(at+i))<<(8*i);return n;};
     logic.actor_byte_store=[&](auto group,auto slot,auto at,auto n){auto image=snapshot_mission_actor(state,{std::uint8_t(group),slot});image.at(at)=n;apply_mission_actor_image(state,{std::uint8_t(group),slot},image);};
@@ -672,6 +789,30 @@ auto& state=c.state;auto& initial=c.runtime;const auto& cache=c.cache;const auto
         if(site==0x47df40){std::int32_t x,y;std::memcpy(&x,&args.at(0),4);std::memcpy(&y,&args.at(1),4);return U(ground_height_query(terrain.geometry,x,y));}
         if(site==0x49a620){for(U i=0;i<args.at(2);++i)helo.write(args.at(0)+i,1,args.at(1)&255);return args.at(0);}
         throw MissionTickError("Helicopter required body is not bound "+std::to_string(site));
+    };
+    ready.read=[this](U at,U width){return helo.read(at,width);};
+    ready.write=[this](U at,U width,U value){helo.write(at,width,value);};
+    ready.call=[this](U site,const std::vector<U>& args)->U{
+        if(site==0x441750){
+            if(args.size()!=4)throw MissionTickError("Ready outbox call needs four arguments");
+            const U client=args[0];
+            if(client<mission_client_source_base||(client-mission_client_source_base)%mission_client_record_size)
+                throw MissionTickError("Ready outbox client pointer is invalid");
+            const auto slot=(client-mission_client_source_base)/mission_client_record_size;
+            if(slot>=mission_client_count)throw MissionTickError("Ready outbox client exceeds its current pool");
+            const U pointer=args[2],length=args[3];const std::uint8_t* payload=nullptr;
+            if(length){
+                if(!ready_active||pointer<ready_source||std::uint64_t(pointer-ready_source)+length>ready_frame.size())
+                    throw MissionTickError("Ready response payload has no active frame owner");
+                payload=ready_frame.data()+pointer-ready_source;
+            }else if(pointer)throw MissionTickError("Empty Ready response has a nonnull source pointer");
+            return outbox->enqueue(slot,std::int32_t(args[1]),payload,length)?1u:0u;
+        }
+        if(site==0x447e80){if(args.size()!=1)throw MissionTickError("Ready resupply needs one current client");mission_client_resupply(ready,args[0]);return 0;}
+        if(site==0x447fb0){if(args.size()!=1)throw MissionTickError("Ready reject needs one current slot");reject_client(args[0]);return 0;}
+        if(site==0x49a620)return helo.call(site,args);
+        if(site==0x404d80||site==0x479f00)return hud.call(site,args);
+        return c.sound.asset_bindings().call(site,args);
     };
     bind_mission_object_helo_move(state,helo);
     bind_mission_object_helo_update(state,helo,helo_source,helo_frame.size());
@@ -856,8 +997,9 @@ bool MissionSession::installed() const noexcept{return impl_->active;}
 MissionTickReport MissionSession::step(){if(!installed())throw MissionTickError("Mission session is not installed");return mission_tick(impl_->c.state,impl_->input);}
 void MissionSession::request_result(U mode,MissionLogicResultPacket& packet){if(!installed())throw MissionTickError("Mission result requires an installed session");mission_logic_request_result(impl_->result_bindings,mode,packet);}
 std::optional<U> MissionSession::leave_service(U site,const std::vector<U>& args){
-    if(site!=0x403a50&&site!=0x4401e0&&site!=0x456e30)return {};
+    if(site!=0x403a50&&site!=0x4401e0&&site!=0x456e30&&site!=0x42ebe0)return {};
     if(!installed())throw MissionTickError("Leave service requires an installed Session");
+    if(site==0x42ebe0){if(!args.empty())throw MissionTickError("Event reset takes no arguments");reset_events();return 0;}
     if(site==0x456e30){
         if(args.size()!=1)throw MissionTickError("Leave profiler needs one index");
         MissionStageCall call;call.address=site;call.args[0]=args[0];call.argument_count=1;
@@ -880,6 +1022,7 @@ void MissionSession::profile_leave(const std::function<AssetBytes&()>& current_p
     mission_profile_leave(profile);
 }
 void MissionSession::end_events(){if(!installed())throw MissionTickError("Mission end events require an installed Session");impl_->event_stage.run_bit2_events();}
+void MissionSession::reset_events(){impl_->event_stage.reset();}
 std::optional<U> MissionSession::hud_service(U site,const std::vector<U>& args){return impl_->hud_service(site,args);}
 void MissionSession::script_message(U id,const std::uint8_t* bytes,std::size_t length){if(!installed()||!impl_->outbox)throw MissionTickError("Mission script outbox is not installed");if(length>std::numeric_limits<U>::max())throw MissionTickError("Mission script message is too large");impl_->outbox->broadcast(std::int32_t(id),bytes,U(length));}
 U MissionSession::camera_yaw() const{return impl_->camera.yaw_6ba3e8;}

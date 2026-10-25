@@ -7,6 +7,10 @@
 #include <memory>
 #include <optional>
 namespace dfre {
+struct MissionAllocationIdentity {
+    std::uint32_t generation,size;
+    std::uint64_t incarnation;
+};
 struct MissionSoundRuntimeBindings {
     std::function<std::uint32_t(std::uint32_t actor,std::uint32_t offset)> actor_word;
     std::function<std::optional<std::uint32_t>(std::uint32_t address,std::uint32_t width)> record_base;
@@ -44,6 +48,8 @@ public:
     void frame(); //43F0B0
     void publish();
     void advance_frames(std::uint32_t actual_sample_frames);
+    //Exact current live arena payloads only. Source bytes remain after release.
+    std::optional<MissionAllocationIdentity> allocation_identity(std::uint32_t payload) const;
     const MissionSoundAssetBindings& asset_bindings() const;
     const MissionSoundBankBindings& bank_bindings() const;
 private:

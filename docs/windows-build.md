@@ -30,6 +30,8 @@ Run a copy of the supplied game from `.local/reference-game/`. Keep the source f
 
 `reference_capture OUTPUT.ppm` reads the original process's 32-bit display buffer. It checks the window version and dispatcher bytes. Use a new output path. The tool reads process memory and writes an image; it keeps game memory unchanged.
 
+Build this tool with `cmake --build .local/build/windows --target reference_capture`.
+
 Target executable SHA-256: `abbdf55a1d189b8eb6c1c464da7bdd08ec01f6b0ccd72182ab43bb01b7f651ff`.
 
 ## Window backend
@@ -38,8 +40,12 @@ Windows uses Win32 input and a 32-bit DIB display. Mac development builds use SD
 
 ```sh
 cmake -S . -B build -DDFRE_BUILD_WINDOW=ON
-cmake --build build -j 4
+cmake --build build --target window_probe -j 4
 build/window_probe "/path/to/Delta Force" DFSPLASH.PCX
 ```
 
 `window_probe` checks image display. Game states use the same window interface.
+
+## CI
+
+Normal pushes run all Linux tests and build the Windows game. Select `full_checks` in the manual Tests workflow to run Windows tests. Build individual probes with `--target NAME_probe`, or set `-DDFRE_BUILD_PROBES=ON` for all probes.

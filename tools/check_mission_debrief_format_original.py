@@ -6,8 +6,8 @@ import unicorn
 from unicorn.x86_const import UC_X86_REG_EAX,UC_X86_REG_GDTR,UC_X86_REG_CS,UC_X86_REG_DS,UC_X86_REG_ES,UC_X86_REG_SS
 from check_projectiles_original import Rig,SOURCE_SHA256
 A=0x1200000;D=0x1300000
-FORMATS=[0x4cae34,0x4cad48,0x4cadd0,0x4cad50,0x4cad5c,0x4cadd8,0x4cae08,0x4cadbc,0x4cae14]
-TEXT=['dfcamp%02i.bin','Win%d','Lose%d','Briefing%d','Unable to find mission %d debriefing won text','Unable to find mission %d debriefing lose text','%s ~ ~ %s','%s ~ %s : %d ~ ~ %s',"Unable to find '%s'"]
+FORMATS=[0x4cae34,0x4cad48,0x4cadd0,0x4cad50,0x4cad5c,0x4cadd8,0x4cae08,0x4cadbc,0x4cae14,0x4cc67c,0x4cc570,0x4cc278,0x4ccc60,0x4ccc80]
+TEXT=['dfcamp%02i.bin','Win%d','Lose%d','Briefing%d','Unable to find mission %d debriefing won text','Unable to find mission %d debriefing lose text','%s ~ ~ %s','%s ~ %s : %d ~ ~ %s',"Unable to find '%s'","WPN%03i","%i","%s %s","STR_PWNAME%02i","STR_SPWNAME%02i"]
 def run(a):
  r=Rig(a.game);r.stubs.pop(0x493a80);u=r.u;u.mem_map(0x3000000,0x1000);u.mem_write(0x3000000,bytes(8)+bytes.fromhex('ffff0000009bcf00ffff00000093cf00'));u.reg_write(UC_X86_REG_GDTR,(0,0x3000000,23,0))
  for reg,selector in [(UC_X86_REG_CS,8),(UC_X86_REG_DS,16),(UC_X86_REG_ES,16),(UC_X86_REG_SS,16)]:u.reg_write(reg,selector)
@@ -37,18 +37,18 @@ def run(a):
    if writes==1 and v[3]&4:pending.append(lambda:put(sources[1],ord('X')))
  u.hook_add(unicorn.UC_HOOK_CODE,flush);u.hook_add(unicorn.UC_HOOK_MEM_READ|unicorn.UC_HOOK_MEM_WRITE,memory)
  rows=[]
- for index in range(9):
+ for index in range(14):
   for value in [0,1,9,10,99,100,0x7fffffff,0x80000000,0xffffffff]:
    for layout in [0,1,2]:
     for mutation in [0,1,2,4,8,16]:rows.append([index,value,layout,mutation,0,0,'5354415453','4b494c4c53','5041594c4f4144'])
- for _ in range(a.cases):rows.append([rng.randrange(9),rng.getrandbits(32),rng.randrange(3),rng.randrange(32),rng.choice([0,1,2,6,12,20]),rng.choice([0,1,2,8,16,30]),*(rng.randbytes(rng.randrange(20)).hex() or '-' for _ in range(3))])
+ for _ in range(a.cases):rows.append([rng.randrange(14),rng.getrandbits(32),rng.randrange(3),rng.randrange(32),rng.choice([0,1,2,6,12,20]),rng.choice([0,1,2,8,16,30]),*(rng.randbytes(rng.randrange(20)).hex() or '-' for _ in range(3))])
  expected=[]
  for v in rows:
   index,value,layout,mutation,_,_=v[:6];source=A+16 if layout==2 else A;dest=D if layout==0 else A+1 if layout==1 else A;sources=[source,A+128,A+256]
   u.mem_write(A,b'\xa5'*4096);u.mem_write(D,b'\xa5'*4096);lengths=[]
   for at,hexdata in zip(sources,v[6:]):
    data=bytes.fromhex(hexdata) if hexdata!='-' else b'';lengths.append(len(data));u.mem_write(at,data+b'\0')
-  args=[value] if index<6 else [0 if mutation&16 else sources[0],sources[1]] if index==6 else [0 if mutation&16 else sources[0],sources[1],value,sources[2]] if index==7 else [0 if mutation&16 else sources[0]]
+  args=[value] if index<6 or index in (9,10,12,13) else [0 if mutation&16 else sources[0],sources[1]] if index in (6,11) else [0 if mutation&16 else sources[0],sources[1],value,sources[2]] if index==7 else [0 if mutation&16 else sources[0]]
   trace=[];pending=[];reads=writes=start_reads=0;failed=False;rejected=None;active=True
   try:r.call(0x493a80,dest,FORMATS[index],*args);flush()
   except (RuntimeError,unicorn.UcError):

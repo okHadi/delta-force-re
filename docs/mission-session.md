@@ -4,9 +4,11 @@ Create `MissionSession` after mission initialization and client placement. Keep 
 
 Use the current runtime, actor state, clients, sound, scripts, input and extra-actor memory. The runtime owns `live_types`. The session owns its frame, event, message, outbox, zone, projectile-request and trail state. Projectile records remain in `MissionTickState`.
 
-Construct the session before routing its source cells. Route `claims`, `read` and `write` before the sound fallback. Construction reads the current source values, including objective mask `67DBEC`. Publish the selected profile mask before construction. Keep the extra-actor and definition memory routes in place.
+Construct the session before routing its source cells. Route `claims`, `read` and `write` before the sound fallback. Publish the selected profile mask before construction. Keep the extra-actor and definition memory routes in place.
 
-Bind the input row provider to `mission_session_input_query_row(sound, row)`. Supply the host pump, clock, elapsed audio frames and current camera providers. Set the event policy and its diagnostic explicitly. Call `install`, then `step`. Read the state request after each step. Send script packets through `script_message`. Route source `42EBA0` to `end_events()` while Session is installed and all context owners are alive.
+Bind the input row provider to `mission_session_input_query_row(sound, row)`. Supply the host pump, clock, elapsed audio frames and current camera providers. Set `source_event_file` to the current BMS filename for source event tables. `install` loads the actual file into the current arena and binds current markers. Source events read the same objective mask `67DBEC`, flags and frame counter as the other services. Each fired-byte reference reads its actual wrapping arena address. Set the event policy and diagnostic for owned fixtures. Call `install`, then `step`. Read the state request after each step. Send script packets through `script_message`. Route source `42EBA0` to `end_events()` while Session is installed and all context owners are alive.
+
+Use the current parser message `0B` for client readiness. The `446A30` route checks its current E2-byte packet, uses separate Ready and Reject caller frames, and sends through the same outbox. Keep physical actors, people, marker lists, clients, RTXT and HUD providers live. Game runs weapon startup `46BFB0` against current item definitions and publishes the nine terrain content values before Session starts. The formatter supports the exact startup and Ready literals. Bind each reached transport call. Run `native_mission_session GAME_FOLDER MISSION client-ready` for C05M07.BMS and C06M01.BMS. Keep remote admission as an explicit test input and require transport after local Ready handling.
 
 Keep scoreboard, squad, result and peer-buffer cells under the session memory route. Periodic services use the same clients and outbox as message receive. Call `request_result(mode, caller_packet)` with current packet storage. The result returns through the shared message queue. Its row count follows the current client filter.
 
@@ -24,7 +26,7 @@ Seagull updates and movement use that same primary owner, including all 1,024 ph
 
 Game routes the closed Debrief `493A80` formats through current sound memory after HUD formatting. Parameter set/get `4C4F40/4C4F60` use the current table pointer and shared return cell. Keep parameter allocation and initialization with their source owner. Game publishes current definition count `C23814`. Source `482910` clears the current definitions’ model, husk and character links; the AI model view receives the same model clear. Allow aligned zero DWORD stores to these three resource fields.
 
-Route `leave_service` before the sound fallback for `403A50`, `4401E0` and `456E30`. The profiler call takes one index and uses the same frame profiler as mission stepping. Keep Session installed through these calls. The reset uses current clients, squads, result builder and outbox with its own 206-byte packet.
+Route `leave_service` before the sound fallback for `403A50`, `4401E0`, `456E30` and `42EBE0`. The profiler call takes one index and uses the same frame profiler as mission stepping. Keep Session installed through these calls. The peer reset uses current clients, squads, result builder and outbox with its own 206-byte packet. Call `reset_events` before releasing the sound arena. Game calls it at host teardown; the source cleanup chain uses `42EBE0`.
 
 Call `profile_leave(current_profile)` for `401E70` before Session teardown. Supply the current selected profile bytes. Restore saved rules `67DBE4` to live `67F548` at the preceding source leave site. The call uses current events, result bytes and x87 control.
 
@@ -32,6 +34,6 @@ Route `hud_service` before the sound service fallback. HUD history uses the shar
 
 Keep installed callback slots under session control. `uninstall` restores the previous world bindings and removes the callback IDs it installed. Other callback IDs remain present. Each reached foreign body needs a real provider.
 
-The stock test uses the supplied C05M07 assets and real client startup. Strict mode stops at frame 48 on event reference 74. With `missing_not_fired`, 256 frames complete and two repair diagnostics occur. The 2,048-frame run checks enemy projectiles, periodic services, result delivery and callback cleanup. Use the explicit end-event fixture to check the current result publisher while actors, clients and messages are live. Placement and cold CRT start remain explicit test inputs. Audio devices stay closed.
+Use the supplied-asset tests for Session, HUD, source-event bindings and client readiness. Keep owned event fixtures and source-arena checks separate. Use actual loader-cell inputs and record each selected mission filename. Require complete actor, message and exit checks before enabling Game frame updates. Audio devices stay closed.
 
 The game installs the session during mission start and destroys it before its context owners. Game updates currently poll input and draw the scene. Run the asset test for mission simulation checks.

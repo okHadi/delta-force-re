@@ -1,0 +1,6 @@
+#include "dfre/animation.hpp"
+#include <fstream>
+#include <iostream>
+#include <iterator>
+#include <stdexcept>
+int main(int argc,char** argv){try{if(argc!=2)throw std::runtime_error("Use animation_source_state_probe CHR_FILE");std::ifstream file(argv[1],std::ios::binary);if(!file)throw std::runtime_error("CHR file is not open");std::vector<std::uint8_t> bytes((std::istreambuf_iterator<char>(file)),{});const auto model=dfre::prepare_character_runtime(dfre::decode_character(bytes));dfre::AnimationController controller(model);const auto state=controller.source_state();if(state.pose.data!=controller.pose().data()||state.pose_delta.data!=controller.pose_delta().data()||state.root_base.data!=controller.root_positions().data()||state.root_delta.data!=controller.root_delta().data())throw std::runtime_error("Current arrays need one owner");std::cout<<"{\"bone_count\":"<<state.bone_count<<",\"root_count\":"<<state.root_count<<",\"remaining_ticks\":"<<state.remaining_ticks<<",\"animation_offset\":"<<(state.animation?state.animation->offset:0)<<",\"frame_offset\":"<<(state.frame?state.frame->offset:0)<<",\"pose_rows\":"<<state.pose.size<<",\"root_rows\":"<<state.root_base.size<<"}\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

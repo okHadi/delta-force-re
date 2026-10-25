@@ -3,6 +3,8 @@
 #include "dfre/mission_owner_cleanup.hpp"
 #include "dfre/mission_debrief_format.hpp"
 #include "dfre/mission_parameter.hpp"
+#include "dfre/mission_weapon_startup.hpp"
+#include "dfre/mission_terrain_content.hpp"
 #include "dfre/game.hpp"
 
 #include "dfre/assets.hpp"
@@ -157,6 +159,19 @@ public:
                 names ? &*names : nullptr, config,
                 [this](std::string_view name){return mission_sound_->definition_id(name);},
                 [this](std::string_view name)->const Model&{return mission_assets_->model(name);}));
+            const auto& startup_memory=mission_sound_->asset_bindings();
+            MissionClientAddedBindings weapon_startup{startup_memory.read,startup_memory.write,{}};
+            weapon_startup.call=[this,&startup_memory](auto site,const auto& args)->std::uint32_t{
+                if(site==0x4828c0){
+                    if(args.size()!=1)throw MissionTickError("Weapon graphic lookup needs one item ID");
+                    return std::uint32_t(runtime_item_index(mission_runtime_->definitions,args[0]));
+                }
+                return startup_memory.call(site,args);
+            };
+            //Separate mapped caller frame; Sound request frames end at2100DFFF.
+            mission_weapon_startup(weapon_startup,0x2100e200,0x20);
+            const auto content=mission_terrain_content(assets_,world_->terrain);
+            for(std::uint32_t i=0;i<content.size();++i)startup_memory.write(0xbd67d4+i*4,4,content[i]);
             if (!mission_runtime_->local_player || !mission_runtime_->actors)
                 throw std::runtime_error("Mission has no local player actor");
             for(const auto& spawn:mission_runtime_->spawns)
@@ -236,6 +251,7 @@ public:
             const auto audio_origin=std::chrono::steady_clock::now();
             MissionSessionHost session_host;
             session_host.primary_source_records=true;
+            session_host.source_event_file=mission_selection_->filename;
             session_host.pump_490880=[this]{return poll_mission_input();};
             session_host.rdtsc=[](){return std::uint64_t(__rdtsc());};
             session_host.elapsed_audio_frames=[audio_origin,previous=std::uint64_t(0)]()mutable{
@@ -247,10 +263,6 @@ public:
             };
             session_host.camera_actor_6ba3f0=[this]{return actor_handle(3,*mission_tick_->config.local_actor);};
             session_host.camera_mode_6ba3ec=[this]{return mission_camera_mode_6ba3ec_;};
-            session_host.event_references=EventReferencePolicy::missing_not_fired;
-            session_host.event_diagnostic=[](auto index,auto count){
-                std::cerr<<"Mission event reference "<<index<<" exceeds loaded count "<<count<<'\n';
-            };
             mission_session_=std::make_unique<MissionSession>(MissionSessionContext{
                 *mission_tick_,*mission_runtime_,mission_resources_->mission,*mission_assets_,world_->terrain,
                 *mission_animations_,*mission_geometry_,*mission_muzzle_,*mission_input_,*mission_sound_,
@@ -272,6 +284,7 @@ public:
         };
         world.leave = [this] {
             mission_result_retained_=bool(mission_session_);
+            if(mission_session_)mission_session_->reset_events();
             mission_session_.reset();
             mission_scene_.reset();
             mission_input_.reset();

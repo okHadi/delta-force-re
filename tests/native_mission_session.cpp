@@ -1,4 +1,7 @@
 #include "dfre/mission_session.hpp"
+#include "dfre/mission_weapon_startup.hpp"
+#include "dfre/mission_terrain_content.hpp"
+#include "dfre/mission_debrief_format.hpp"
 #include "dfre/mission_round_checks.hpp"
 #include "dfre/mission_event_actor_flags.hpp"
 #include "dfre/mission_object_update.hpp"
@@ -41,6 +44,7 @@
 #include "dfre/mission_crt_thread.hpp"
 #include "dfre/mission_script_registry.hpp"
 #include "dfre/mission_rtxt.hpp"
+#include "dfre/campaign.hpp"
 #include "dfre/mission_projectile_trails.hpp"
 #include "dfre/mission_terrain_types.hpp"
 #include "dfre/mission_terrain_mark.hpp"
@@ -69,9 +73,12 @@
 int main(int argc,char** argv){try{
     if(argc==1){std::cout<<"Mission session requires supplied game assets\n";return 77;}
     using namespace dfre;
-    if(argc!=3&&argc!=4&&argc!=5)throw std::invalid_argument("Use: native_mission_session GAME_FOLDER MISSION [missing-event-not-fired [frames]]");
+    if(argc!=3&&argc!=4&&argc!=5)throw std::invalid_argument("Use: native_mission_session GAME_FOLDER MISSION [missing-event-not-fired|source-events [frames]|client-ready]");
+    const bool ready_mode=argc>=4&&std::string(argv[3])=="client-ready";
+    if(ready_mode&&argc!=4)throw MissionTickError("Ready mode takes no frame count");
     const bool event_reference_repair=argc>=4&&std::string(argv[3])=="missing-event-not-fired";
-    if(argc>=4&&!event_reference_repair)throw MissionTickError("Unknown scenario input");
+    const bool source_events=ready_mode||(argc>=4&&std::string(argv[3])=="source-events");
+    if(argc>=4&&!event_reference_repair&&!source_events)throw MissionTickError("Unknown scenario input");
     const auto frame_count=argc==5?std::stoul(argv[4]):256ul;
     if(frame_count<256||frame_count>1000000)throw MissionTickError("Session frame count must be256..1000000");
     std::cout<<"event_reference_repair "<<event_reference_repair<<std::endl;
@@ -90,6 +97,7 @@ int main(int argc,char** argv){try{
     Fixed3 listener{};std::uint32_t listener_yaw=0;MissionAudioFrameCells audio{0,listener,listener_yaw};
     std::ifstream exe_file(std::filesystem::path(argv[1])/"Df.exe",std::ios::binary);if(!exe_file)throw MissionTickError("Original executable is missing");const AssetBytes executable((std::istreambuf_iterator<char>(exe_file)),{});
     const MissionRuntimeState* current_initial=nullptr;MissionSession* current_session=nullptr;
+    bool fail_ready_format=false,mutate_reject_peer=false;unsigned reject_formats=0,waypoint_formats=0;std::array<std::uint32_t,9> ready_content{};
     std::optional<MissionActorInsertBindings> extra_memory;std::uint32_t extra_count=0;
     std::uint32_t script_key=0x04960552;MissionCrtThreadCells crt_cells;const std::uint32_t source_thread=0x19000000;
     MissionScriptQueueCells scripts{};MissionScriptRuntimeCells script_cells{scripts,state.globals.mission_67f528};
@@ -107,6 +115,9 @@ int main(int argc,char** argv){try{
         if(current_session){if(const auto value=current_session->leave_service(site,args))return *value;if(const auto value=current_session->hud_service(site,args))return *value;}
         if(line_owner)if(const auto value=line_owner->service(site,args))return *value;
         if(registry){if(const auto value=registry->service(site,args))return *value;}
+        if(ready_mode&&site==0x404cf0){const auto& m=sound_owner->asset_bindings();return mission_localized_text({m.read,[&](auto table,auto group,auto key){return mission_rtxt_lookup(m,table,group,key);}},args.at(0),args.at(1));}
+        if(ready_mode&&site==0x493a80){if(args.at(1)==0x4cc67c)++waypoint_formats;const auto& m=sound_owner->asset_bindings();if(args.at(1)==0x4cc278){++reject_formats;if(fail_ready_format)throw MissionTickError("Declared Ready reject format failure");}const auto value=mission_debrief_format({m.read,m.write,m.call},args);if(args.at(1)==0x4cc278&&mutate_reject_peer)m.write(0x67db40,4,0x13579bdf);return value;}
+        if(ready_mode&&site==0x4828c0){if(!current_initial)throw MissionTickError("Weapon startup requires current definitions");return std::uint32_t(runtime_item_index(current_initial->definitions,args.at(0)));}
         if(site==0x499f1f)return mission_rtxt_load(sound_owner->asset_bindings(),args.at(0));
         if(site==0x49a076)return mission_rtxt_entry(sound_owner->asset_bindings(),args.at(0),args.at(1));
         if(site==0x49a092)return mission_rtxt_lookup(sound_owner->asset_bindings(),args.at(0),args.at(1),args.at(2));
@@ -115,6 +126,10 @@ int main(int argc,char** argv){try{
     socket_memory=std::make_unique<MissionDfSocketRuntimeMemory>(MissionDfSocketRuntimeMemory{sound_memory.read,sound_memory.write});sockets=std::make_unique<MissionDfSocketRuntime>(*socket_memory);
     MissionLineFileRuntimeBindings locks;locks.lock=[&](auto){file_mutex.lock();};locks.unlock=[&](auto){file_mutex.unlock();};const auto startup_scratch=sound_memory.call(0x497f60,{0x2000,4,0,0});line_owner=std::make_unique<MissionLineFileRuntime>(argv[1],sound_memory,startup_scratch,0x2000,locks);
     MissionClientStartupBindings startup;startup.read=sound_memory.read;startup.write=sound_memory.write;startup.call=[&](auto site,const auto& args)->std::uint32_t{if(site==0x49a620){const auto count=args.at(2),byte=args.at(1)&255,word=byte*0x01010101u;std::uint32_t i=0;for(;count-i>=4;i+=4)sound_memory.write(args.at(0)+i,4,word);for(;i<count;++i)sound_memory.write(args.at(0)+i,1,byte);return args.at(0);}if(site==0x404cf0){MissionLocalizationBindings localized;localized.read=sound_memory.read;localized.lookup_49a092=[](auto,auto,auto)->std::uint32_t{throw MissionTickError("Cold startup text table must be unloaded");};return mission_localized_text(localized,args.at(0),args.at(1));}if(site==0x454df0)return mission_df_socket_resolve(sockets->bindings(),args.at(0));if(site==0x454bb0)return mission_df_socket_start(sockets->bindings(),args.at(0),args.at(1),args.at(2));if(const auto result=line_owner->service(site,args))return *result;throw MissionTickError("Client startup required call has no owner "+std::to_string(site));};mission_client_startup(startup);std::cout<<"client_startup actual43FF30 canonical17 socket_count "<<sockets->socket_count()<<std::endl;
+    if(source_events){
+    for(const auto& source:std::array<std::pair<std::uint32_t,std::uint32_t>,3>{{{0x50322c,0x4c80a8},{0x503234,0x4c80b4},{0x503230,0x4c80dc}}}){const auto table=mission_rtxt_load(sound_memory,source.second);if(!table)throw MissionTickError("Required game text table failed to load");sound_memory.write(source.first,4,table);}
+    const CampaignCatalog campaigns(store);std::string campaign_name;for(const auto& campaign:campaigns.campaigns())for(const auto& mission:campaign.missions)if(mission.filename==argv[2])campaign_name=campaign.text_file;if(campaign_name.empty())throw MissionTickError("Supplied mission has no current campaign text selection");const auto campaign_path=sound_memory.call(0x497f60,{std::uint32_t(campaign_name.size()+1),4,0,0});for(std::size_t i=0;i<=campaign_name.size();++i)sound_memory.write(campaign_path+std::uint32_t(i),1,i<campaign_name.size()?std::uint8_t(campaign_name[i]):0);if(!sound_memory.call(0x499040,{campaign_path}))throw MissionTickError("Selected campaign RTXT is absent");const auto campaign_table=mission_rtxt_load(sound_memory,campaign_path);sound_memory.call(0x4980d0,{campaign_path});if(!campaign_table)throw MissionTickError("Selected campaign RTXT failed to load");sound_memory.write(0x503238,4,campaign_table);
+    }
     const auto script_scratch=sound_memory.call(0x497f60,{0x4000,4,0,0});
     MissionScriptRegistryBindings script_host;script_host.crt_thread=[&]{return source_thread;};script_host.voice_volume=[&]{return std::uint32_t(loaded_config.dialog_volume);};
     script_host.message=[&](auto id,const auto& packet){if(!script_message)throw MissionTickError("Script message outbox is not installed");script_message(id,packet);};
@@ -128,9 +143,11 @@ int main(int argc,char** argv){try{
     const auto profile_word=[&](std::size_t at){std::uint32_t value;std::memcpy(&value,profile.raw().data()+at,4);return value;};
     WeaponState starting_weapons;starting_weapons.loadout({profile_word(0x680),profile_word(0x684),profile_word(0x688)});starting_weapons.select_slot(3);config.weapon_slot_value=starting_weapons.current_weapon();
     std::cout<<"profile new_stock_default loadout "<<profile_word(0x680)<<','<<profile_word(0x684)<<','<<profile_word(0x688)<<" weapon "<<unsigned(starting_weapons.current_weapon())<<std::endl;
+    if(ready_mode){config.player_name=profile.name();config.player_face_id=profile.portrait();const auto profile_name=profile.name();const auto name_source=sound_memory.call(0x497f60,{std::uint32_t(profile_name.size()+1),4,0,0});for(std::size_t i=0;i<=profile_name.size();++i)sound_memory.write(name_source+std::uint32_t(i),1,i<profile_name.size()?std::uint8_t(profile_name[i]):0);mission_client_setup_local({sound_memory.read,sound_memory.write,sound_memory.call,{}},name_source,profile.portrait(),config.player_side);sound_memory.call(0x4980d0,{name_source});config.player_team=clients.read(mission_client_source_base+0x1c4,2);config.local_player_active=clients.read(mission_client_source_base+0x18c,1)!=0;}
     config.player_object_id=sound.asset_bindings().read(0x50133c,4);std::cout<<"local_peer_identity "<<config.player_object_id<<std::endl;
     auto initial=assemble_mission_runtime(resources,cache.items(),terrain.geometry,nullptr,config,sound_resolver,[&](std::string_view name)->const Model&{return cache.model(name);});
     current_initial=&initial;
+    if(ready_mode){mission_weapon_startup({sound_memory.read,sound_memory.write,sound_memory.call},0x2100e200,0x20);ready_content=mission_terrain_content(store,terrain);for(std::uint32_t i=0;i<ready_content.size();++i)sound_memory.write(0xbd67d4+i*4,4,ready_content[i]);}
     std::size_t ambient_bound=0;for(const auto& item:initial.definitions)for(auto handle:item.ambient_handles)ambient_bound+=handle!=0;std::cout<<"ambient_bound "<<ambient_bound<<std::endl;if(!ambient_bound)throw MissionTickError("Stock ambient item names have no bindings");
 
     MissionAnimations animations(initial,cache);MissionGeometry geometry(initial,cache,store);
@@ -169,17 +186,22 @@ int main(int argc,char** argv){try{
     InputSourceFlags flags;flags.window_active=true;bridge.set_source_flags(flags);
     state.world.trigger_held_47a290=[&](auto row){return bridge.query_active(row);};
 
-    for(std::size_t slot=0;slot<initial.placements.size();++slot){const auto& row=initial.placements[slot];const auto base=MissionClientLive::source_address(slot);clients.write(base,4,slot?std::uint32_t(slot):sound_memory.read(0x50133c,4));clients.write(base+0x18c,1,row.active);clients.write(base+0x1c4,2,row.team_code);if(row.actor)clients.write(base+8,4,mission_actor_source_address(3,*row.actor));}
+    if(ready_mode){for(const auto& spawn:initial.spawns)clients.write(MissionClientLive::source_address(spawn.placement,8),4,mission_actor_source_address(3,spawn.actor));}
+    else for(std::size_t slot=0;slot<initial.placements.size();++slot){const auto& row=initial.placements[slot];const auto base=MissionClientLive::source_address(slot);clients.write(base,4,slot?std::uint32_t(slot):sound_memory.read(0x50133c,4));clients.write(base+0x18c,1,row.active);clients.write(base+0x1c4,2,row.team_code);if(row.actor)clients.write(base+8,4,mission_actor_source_address(3,*row.actor));}
     state.projectiles.resize(512);
     std::uint32_t requested=0;Fixed3 camera_position{};
     MissionSessionHost host;host.pump_490880=[](){return true;};host.rdtsc=[](){return std::uint64_t(std::chrono::steady_clock::now().time_since_epoch().count());};host.elapsed_audio_frames=[](){return 1u;};host.camera_actor_6ba3f0=[&](){return actor_handle(3,*state.config.local_actor);};host.camera_mode_6ba3ec=[](){return 0u;};
     std::size_t repaired=0;host.event_references=event_reference_repair?EventReferencePolicy::missing_not_fired:EventReferencePolicy::strict;host.event_diagnostic=[&](auto requested_index,auto loaded){if(requested_index!=74||loaded!=74)throw MissionTickError("Unexpected event repair");++repaired;};
+    if(source_events)host.source_event_file=argv[2];
     MissionResultImage retained_result{};
     sound_memory.write(0x67dbec,4,0x80000000);
     auto session_owner=std::make_unique<MissionSession>(MissionSessionContext{state,initial,resources.mission,cache,terrain,animations,geometry,muzzle,bridge,sound,*registry,audio,scripts,crt_cells,clients,*extra_memory,rules_word,requested,camera_position},host,retained_result);
     auto& session=*session_owner;
-    if(session.read(0x67dbec,4)!=0x80000000)throw MissionTickError("Session lost the loaded objective mask");
-    session.write(0x67dbec,4,0);
+    const auto objective_read=[&]{return source_events?sound_memory.read(0x67dbec,4):session.read(0x67dbec,4);};
+    const auto objective_store=[&](std::uint32_t value){if(source_events)sound_memory.write(0x67dbec,4,value);else session.write(0x67dbec,4,value);};
+    if(source_events&&session.claims(0x67dbec,4))throw MissionTickError("Source objectives have a copied Session owner");
+    if(objective_read()!=0x80000000)throw MissionTickError("Session lost the loaded objective mask");
+    objective_store(0);
     if(sockets->claims(0x18000000,4)||sockets->claims(0x19000000,4)||sockets->claims(0x1b000000,4)||sockets->claims(0x1c000000,4)||clients.claims(0x19000000,4)||session.claims(0x18000000,4)||session.claims(0x19000000,4)||session.claims(0x1b000000,4)||!session.claims(0x1c000000,1))throw MissionTickError("Virtual source owners overlap");
     std::uint32_t first_definition_word;std::memcpy(&first_definition_word,initial.definitions.data(),4);
     if(sound_memory.read(0x1900000c,4)!=crt_cells.seed||sound_memory.read(0x18000000,4)!=first_definition_word)throw MissionTickError("Canonical CRT or definition route differs");
@@ -203,14 +225,37 @@ int main(int argc,char** argv){try{
     state.update_callbacks.emplace(0x0badf00d,[](auto&,const auto&,const auto&){});
     const auto prior_updates=state.update_callbacks.size(),prior_secondary=state.secondary_callbacks.size();
     session.install();if(!session.installed())throw MissionTickError("Session did not install");
+    if(ready_mode){
+    const auto source_text=[&](std::uint32_t pointer){std::string text;for(std::uint32_t i=0;i<65536;++i){const auto byte=sound_memory.read(pointer+i,1);if(!byte)return text;text.push_back(char(byte));}throw MissionTickError("Current text is not terminated");};
+    using U=std::uint32_t;const U actor=mission_actor_source_address(3,*state.config.local_actor);U sequence=1;
+    const auto packet=[&](bool mismatch){GameMessageTable table;std::vector<std::uint8_t> bytes;bytes.push_back(0x0b);if(table.descriptor(0x0b).flags&6){bytes.push_back(std::uint8_t(sequence));bytes.push_back(std::uint8_t(sequence>>8));++sequence;}const U start=U(bytes.size());bytes.resize(start+0xe2);const auto put=[&](U at,U value,U width=4){for(U i=0;i<width;++i)bytes.at(start+at+i)=std::uint8_t(value>>(8*i));};const std::string first="StockReady",second="CurrentProfile";for(U i=0;i<first.size();++i)put(i,std::uint8_t(first[i]),1);for(U i=0;i<second.size();++i)put(0x20+i,std::uint8_t(second[i]),1);for(U i=0;i<9;++i)put(0xba+i*4,ready_content[i]);if(mismatch)put(0xda,ready_content[8]^1u);for(U i=0;i<bytes.size();++i)session.write(0x8ec1cc+i,1,bytes[i]);session.write(0x8ee1cc,4,U(bytes.size()));};
+    const auto run=[&](const std::string&expected){MissionStageCall call{};call.address=0x443c50;try{state.world.external_stage(state,call);}catch(const std::exception&e){if(std::string(e.what())!=expected)throw;return;}throw MissionTickError("Focused Ready run passed a required missing boundary");};
+    const auto records=[&](U slot,U id){std::vector<U>out;const U client=MissionClientLive::source_address(slot);for(U i=0;i<64;++i){const U record=client+0x204+i*0x264;if(clients.read(record+9,1)&&clients.read(record+8,1)==id)out.push_back(record);}return out;};
+    const auto no_frames=[&]{if(session.claims(0x1b002100,1)||session.claims(0x1b002240,1))throw MissionTickError("Ready synchronous frame outlived its call");};
+    state.globals.multiplayer_67f520=1;state.globals.mission_67f528=1;
+    const U local=MissionClientLive::source_address(0);if(clients.read(local+0x1c4,2)==5)throw MissionTickError("Startup forced Ready before message0B");
+    packet(false);run("Peer receive transport is not bound");no_frames();
+    if(clients.read(local+0x1c4,2)!=5||clients.read(local+0x154,4)!=1000||source_text(local+0x4c)!="StockReady"||source_text(local+0x2c)!="CurrentProfile"||records(0,0x0b).size()!=1||records(0,0x14).size()!=1)throw MissionTickError("Actual startup message0B Ready/outbox/resupply join differs");
+    const U response=records(0,0x0b).front();if(clients.read(response+4,2)!=0xe2||clients.read(response+10+0x40,2)!=((sound_memory.read(actor+0x24,4)>>15)&65535u))throw MissionTickError("Ready reply does not contain the current actor pose");
+    // Declared remote admission and MP mode inputs; OS transport stays required.
+    const U remote=MissionClientLive::source_address(1),peer=clients.read(local,4);clients.write(local,4,peer^0x80000000u);clients.write(remote,4,peer);clients.write(remote+8,4,actor);clients.write(remote+0x18c,1,1);clients.write(remote+0x1c4,2,3);clients.write(remote+0x1b8,4,1);const auto remote_name=profile.name();for(U i=0;i<=remote_name.size();++i)clients.write(remote+0xc+i,1,i<remote_name.size()?std::uint8_t(remote_name[i]):0);const std::array<U,3>inventory{profile_word(0x680),profile_word(0x684),profile_word(0x688)};for(U i=0;i<10;++i)clients.write(remote+0xac+i*4,4,inventory[i%3]);
+    sound_memory.write(actor+0x70,2,1);const auto old_history=session.read(0xbd34b0,4);fail_ready_format=true;packet(true);run("Declared Ready reject format failure");fail_ready_format=false;no_frames();if(clients.read(remote+0x1c4,2)!=5||clients.read(remote+0x154,4)!=1000||records(1,0x0b).size()!=1||records(1,0x44).size()!=1||session.read(0xbd34b0,4)!=old_history)throw MissionTickError("Reject format failure lost its actual Ready/outbox/resupply prefix");
+    std::size_t marker_list=0;while(marker_list<128&&marker_list<state.world.behavior_world.lists.size()&&!(state.world.behavior_world.lists[marker_list].flags&2))++marker_list;
+    if(marker_list<128&&marker_list<state.world.behavior_world.lists.size()){const auto person=state.tables.groups[3][*state.config.local_actor].person_slot;if(!person||state.people.at(*person).field_ac!=marker_list)throw MissionTickError("Ready marker assignment missed its canonical person");const auto& list=state.world.behavior_world.lists[marker_list];const auto response_row=records(1,0x0b).front();if(clients.read(response_row+10+0x48,2)!=std::min<U>(8,list.count))throw MissionTickError("Ready response did not use the current marker count");if(list.count&&!waypoint_formats)throw MissionTickError("Real Ready markers did not reach exact WPN formatting");}
+    U ammo_nonzero=0;for(U i=0;i<28;++i)ammo_nonzero+=clients.read(remote+0xd4+i*4,4)!=0;if(!ammo_nonzero)throw MissionTickError("Declared actual-profile inventory did not reach source resupply values");
+    mutate_reject_peer=true;packet(true);run("Peer receive transport is not bound");mutate_reject_peer=false;no_frames();if(reject_formats!=2||records(1,0x0b).size()!=2||records(1,0x44).size()!=2||session.read(0xbd3528,4)!=0x13579bdf||!session.read(0xbd34b0,1))throw MissionTickError("Actual reject text/HUD or late metadata read differs");
+    session.uninstall();if(state.update_callbacks.size()!=prior_updates||state.secondary_callbacks.size()!=prior_secondary)throw MissionTickError("Ready session left installed callbacks");current_session=nullptr;
+    std::cout<<"waypoint_formats "<<waypoint_formats<<" marker_list "<<marker_list<<" ammo_classes "<<ammo_nonzero<<std::endl;
+    std::cout<<"session_ready_pass actual43FF30/444C50/46BFB0 terrainCRC parser0B state5 outbox resupply reject_prefix currentHUD sourceframes transport_strict device0\n";return 0;
+    }
     const auto prior_profile=session.read(0x4f8718,4);sound_memory.call(0x456e30,{5});
     if(session.read(0x4f8718,4)!=5)throw MissionTickError("Leave profiler lost the current frame owner");
     sound_memory.call(0x456e30,{prior_profile});
     try{for(unsigned i=0;i<frame_count;++i){if(i==0)bridge.feed(InputEvent{InputKind::key_down,int(keys[2].key)});if(i==4)bridge.feed(InputEvent{InputKind::key_up,int(keys[2].key)});if(i==16)bridge.feed(InputEvent{InputKind::key_down,int(keys[8].key)});if(i==20)bridge.feed(InputEvent{InputKind::key_up,int(keys[8].key)});const auto report=session.step();std::cout<<"session_frame "<<report.tick<<" ammo "<<state.weapons.magazine(state.weapons.current_definition().weapon_class)<<std::endl;}}
-    catch(const std::exception& error){std::cout<<"session_stop "<<state.tick_67dbf4<<" "<<error.what()<<std::endl;session.uninstall();current_session=nullptr;if(!event_reference_repair&&state.tick_67dbf4==48)return 0;throw;}
+    catch(const std::exception& error){std::cout<<"session_stop "<<state.tick_67dbf4<<" "<<error.what()<<std::endl;session.uninstall();current_session=nullptr;if(!event_reference_repair&&!source_events&&state.tick_67dbf4==48)return 0;throw;}
     std::cout<<"session_final ammo "<<state.weapons.magazine(state.weapons.current_definition().weapon_class)<<" repairs "<<repaired<<std::endl;
     if((frame_count==256&&crt_cells.seed!=662824084)||crt_cells.tokenizer_cursor!=tokenizer_before)throw MissionTickError("Session temporary views changed CRT cells");
-    if(state.weapons.magazine(state.weapons.current_definition().weapon_class)!=27||(frame_count==256?repaired!=2:repaired<2))throw MissionTickError("Session final state differs");
+    if(state.weapons.magazine(state.weapons.current_definition().weapon_class)!=27||(source_events?repaired!=0:(frame_count==256?repaired!=2:repaired<2)))throw MissionTickError("Session final state differs");
     const auto shots_before_result=session.read(0xa158a4,4);
     if(frame_count>=2048&&shots_before_result<=3)throw MissionTickError("Long session did not create enemy projectiles");
     MissionLogicResultPacket result_packet{};result_packet.fill(0xa5);
@@ -227,13 +272,13 @@ int main(int argc,char** argv){try{
     const auto profile_put=[&](std::uint32_t at,std::uint32_t value){for(unsigned i=0;i<4;++i)outcome_profile.at(at+i)=std::uint8_t(value>>(i*8));};
     const auto profile_get=[&](std::uint32_t at){std::uint32_t value=0;for(unsigned i=0;i<4;++i)value|=std::uint32_t(outcome_profile.at(at+i))<<(i*8);return value;};
     profile_put(0x28,3);profile_put(0x13c,0x80000000);
-    sound_memory.write(0x67f70c,4,0x80000000);session.write(0x67dbec,4,0x80000008);
+    sound_memory.write(0x67f70c,4,0x80000000);objective_store(0x80000008);
     const auto start_rules=rules_word;
     sound_memory.write(0x67dbe4,4,start_rules);session.write(0x67f548,4,0);
     session.write(0x67f548,4,sound_memory.read(0x67dbe4,4)); //404150 restores start rules.
     session.profile_leave([&]() ->AssetBytes&{return outcome_profile;});
     if(profile_get(0x13c)!=0x80000008||sound_memory.read(0x4cee8c,4)!=start_rules)throw MissionTickError("Live profile leave lost objective mask or restored rules");
-    session.write(0x67dbec,4,0);
+    objective_store(0);
     std::cout<<"session_profile_leave current_result_mask_rules copied_profile\n";
     if(sound_memory.call(0x403a50,{})!=0)throw MissionTickError("Single-player leave drain differs");
     std::uint32_t reset_client=0;for(std::size_t slot=0;slot<17;++slot){const auto base=MissionClientLive::source_address(slot,0);if(clients.read(base+0x18c,1)){reset_client=base;break;}}
@@ -245,6 +290,7 @@ int main(int argc,char** argv){try{
     if(clients.read(reset_client+0x1c4,2)!=0)throw MissionTickError("Peer reset lost the result build/enqueue phase");
     for(std::size_t slot=0;slot<17;++slot){const auto base=MissionClientLive::source_address(slot,0);if(clients.read(base+8,4)||clients.read(base+0x8c,4)||clients.read(base+0x194,4))throw MissionTickError("Peer reset lost current client fields");}
     std::cout<<"session_peer_leave current_clients_squads_packet\n";
+    if(source_events){const auto base=sound_memory.read(0x4f2bcc,4);const auto fired=sound_memory.read(base+20,1);session.reset_events();if(sound_memory.read(0x4f2bc8,4)!=0||sound_memory.read(0x4f2bcc,4)!=base||sound_memory.read(base+20,1)!=fired)throw MissionTickError("Source event reset lost retained arena bytes");std::cout<<"session_source_events actual_file_no_repair reset_retained_bytes\n";}
     state.update_callbacks.emplace(0x0badf00e,[](auto&,const auto&,const auto&){});
     session.uninstall();current_session=nullptr;if(state.update_callbacks.size()!=prior_updates+1||state.secondary_callbacks.size()!=prior_secondary||!state.update_callbacks.count(0x0badf00d)||!state.update_callbacks.count(0x0badf00e))throw MissionTickError("Session removed another callback owner");if(session.installed())throw MissionTickError("Session did not uninstall");
     bool stopped_end_events=false;try{session.end_events();}catch(const MissionTickError&){stopped_end_events=true;}if(!stopped_end_events)throw MissionTickError("End events used an uninstalled Session");
@@ -255,11 +301,12 @@ int main(int argc,char** argv){try{
     // Explicit end-event input uses the same live actors, clients and message owners.
     auto end_fixture=resources.mission;MissionEvent end_event;end_event.words={4,0,0,0,0,1u<<16};
     end_fixture.events={end_event};end_fixture.triggers.clear();end_fixture.actions={{0,8,0,0,0,0,0,0}};
+    host.source_event_file.clear();
     auto end_session=std::make_unique<MissionSession>(MissionSessionContext{state,initial,end_fixture,cache,terrain,animations,geometry,muzzle,bridge,sound,*registry,audio,scripts,crt_cells,clients,*extra_memory,rules_word,requested,camera_position},host,retained_result);
     current_session=end_session.get();script_message=[&](auto id,const auto& packet){current_session->script_message(id,packet.data(),packet.size());};
     end_session->install();end_session->write(0x67dbc0,4,0);sound_memory.call(0x42eba0,{});
     if(end_session->read(0x67dbc0,4)!=1)throw MissionTickError("End event did not reach the live result publisher");
     end_session->uninstall();current_session=nullptr;end_session.reset();
     std::cout<<"session_end_event_fixture live_result_publisher\n";
-    std::cout<<"session_pass"<<frame_count<<" ammo27 namedrepair retainedresult device0\n";return 0;
+    std::cout<<"session_pass"<<frame_count<<(source_events?" ammo27 sourcearena retainedresult device0\n":" ammo27 namedrepair retainedresult device0\n");return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

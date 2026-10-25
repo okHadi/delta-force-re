@@ -9,6 +9,7 @@
 #include "dfre/mission_sound_stop.hpp"
 #include <algorithm>
 #include <cstring>
+#include <exception>
 #include <map>
 #include <limits>
 namespace dfre {
@@ -83,11 +84,30 @@ public:
         for(U i=0;i<width;++i)*bytes[i]=std::uint8_t(n>>(8*i));
     }
     U allocate(U size,U alignment=4,U unused=0,U label=0){
+        check(allocations!=std::numeric_limits<std::uint64_t>::max(),"Sound allocation identity counter is full");
+        IdentityMap prepared;prepared.emplace(0,0);auto node=prepared.extract(0);
         HeapFrame frame(*this);write(frame.at+0x20,4,size);write(frame.at+0x24,4,alignment);
         write(frame.at+0x28,4,unused);write(frame.at+0x2c,4,label);
-        const auto payload=mission_heap_allocate(heap_,frame.at,0);if(payload)++allocations;return payload;
+        const auto payload=mission_heap_allocate(heap_,frame.at,0);
+        if(payload){
+            const auto incarnation=++allocations;const auto prior=identities_.find(payload);
+            if(prior!=identities_.end())prior->second=incarnation;
+            else{node.key()=payload;node.mapped()=incarnation;identities_.insert(std::move(node));}
+        }
+        return payload;
     }
-    U release(U payload){HeapFrame frame(*this);write(frame.at+8,4,payload);return mission_heap_release(heap_,frame.at);}
+    U release(U payload){
+        const auto found=identities_.find(payload);const auto old=found==identities_.end()?0:found->second;
+        HeapFrame frame(*this);write(frame.at+8,4,payload);
+        const auto retire=[&]{const auto current=identities_.find(payload);if(old&&current!=identities_.end()&&current->second==old&&!live_header(payload))identities_.erase(current);};
+        try{const auto result=mission_heap_release(heap_,frame.at);retire();return result;}
+        catch(...){const auto failure=std::current_exception();try{retire();}catch(...){}std::rethrow_exception(failure);}
+    }
+    std::optional<MissionAllocationIdentity> allocation_identity(U payload){
+        const auto identity=identities_.find(payload);if(identity==identities_.end())return std::nullopt;
+        const auto header=live_header(payload);if(!header)return std::nullopt;
+        return MissionAllocationIdentity{read(*header+4),read(*header),identity->second};
+    }
     void callback(std::function<U(U,const std::vector<U>&)> current){heap_callback_=std::move(current);}
     std::size_t remaining(U at){
         if(at>=arena_base){check(std::uint64_t(at-arena_base)<=arena_extent_,"Sample address exceeds arena");return arena_extent_-(at-arena_base);}
@@ -96,8 +116,23 @@ public:
     }
     std::string text(U at){std::string s;for(U i=0;i<4096;++i){const auto c=read(at+i,1);if(!c)return s;s+=char(c);}throw std::runtime_error("Sound name has no end byte");}
     void text(U at,const std::string& s){for(std::size_t i=0;i<=s.size();++i)write(at+U(i),1,i<s.size()?std::uint8_t(s[i]):0);}
-    std::size_t allocations=0;
+    std::uint64_t allocations=0;
 private:
+    using IdentityMap=std::map<U,std::uint64_t>;
+    IdentityMap identities_;
+    std::optional<U> live_header(U payload){
+        const auto end=std::uint64_t(arena_base)+arena_extent_;
+        if(payload<std::uint64_t(arena_base)+16||payload>end)return std::nullopt;
+        const U context=read(0x5013a0);U node=read(context+8);std::size_t visited=0;
+        while(node){
+            check(++visited<=std::size_t(arena_extent_)/16+1,"Sound allocation list does not terminate");
+            check(node>=arena_base&&std::uint64_t(node)+16<=end,"Sound live allocation header is outside its arena");
+            const U size=read(node);check(std::uint64_t(node)+16+size<=end,"Sound live allocation exceeds its arena");
+            if(std::uint64_t(node)+16==payload)return node;
+            node=read(node+12);
+        }
+        return std::nullopt;
+    }
     struct View {U at;std::uint8_t* bytes;std::size_t size;};
     static constexpr U arena_base=0x28000000;
     std::map<U,dfre::AssetBytes> blocks_;std::vector<View> views_;
@@ -317,6 +352,7 @@ void MissionSoundRuntime::release_banks(U context){auto& p=*impl_;Impl::Stack st
 void MissionSoundRuntime::frame(){impl_->frame();}
 void MissionSoundRuntime::publish(){impl_->playback.publish();}
 void MissionSoundRuntime::advance_frames(U frames){impl_->playback.advance_frames(frames);}
+std::optional<MissionAllocationIdentity> MissionSoundRuntime::allocation_identity(U payload)const{return impl_->memory.allocation_identity(payload);}
 const MissionSoundAssetBindings& MissionSoundRuntime::asset_bindings()const{return impl_->assets;}
 const MissionSoundBankBindings& MissionSoundRuntime::bank_bindings()const{return impl_->banks;}
 }

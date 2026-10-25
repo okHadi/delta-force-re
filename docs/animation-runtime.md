@@ -8,6 +8,13 @@ frame duration for timed frames and the last Y-angle delta for immediate frames.
 A zero head divisor stops after the preceding pose-delta writes. Pitch uses the
 source signed byte shift.
 
+Use `source_state()` for borrowed access to reviewed controller fields and current
+pose/root arrays. Acquire a fresh view for each memory operation. Keep its
+controller and prepared model alive. Array spans stay valid until the next
+controller operation that can replace storage. Counts are read-only. The raw
+memory adapter owns address and width checks. Current model, animation and frame
+pointers identify the existing model data.
+
 Use `decode_animation_definition()` to read decoded ANM text. Lines contain
 `name number [velocity] [override]`. Velocity becomes
 `trunc(velocity * 65536) / 30`. The parser keeps line order and records whether

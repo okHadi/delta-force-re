@@ -666,6 +666,16 @@ std::uint8_t AnimationController::random_selector_value() const {
     return animation_random_selector(heading_, std::int32_t(accumulator_), random_a_, random_b_);
 }
 
+AnimationSourceState AnimationController::source_state() {
+    return {*model_,animation(),frame(),bone_count_,root_count_,frame_ticks_,motion_,
+        random_a_,random_b_,accumulator_,condition_current_,condition_previous_,
+        condition_latched_,inputs_.anim_flags,inputs_.extra_4c,event_bits_,
+        inputs_.state_flags,inputs_.stance,inputs_.pitch,switch_flag_,inputs_.byte78,
+        inputs_.byte79,inputs_.aim_a,inputs_.aim_b,
+        {pose_.data(),pose_.size()},{pose_delta_.data(),pose_delta_.size()},
+        {root_base_.data(),root_base_.size()},{root_delta_.data(),root_delta_.size()}};
+}
+
 AnimationStatus AnimationController::status() const {
     AnimationStatus result;
     const auto* current = animation();

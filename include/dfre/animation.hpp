@@ -87,6 +87,41 @@ struct AnimationConditionState {
     std::uint8_t switch_flag{};  // [instance+0x66]
 };
 
+// Borrowed current controller data. Acquire a fresh view for each operation.
+// Array views stay valid until the next controller operation that can change
+// storage. Keep the controller and its prepared model alive while using a view.
+template<class T> struct AnimationSourceSpan { T* data; std::size_t size; };
+struct AnimationSourceState {
+    const CharacterModel& model;
+    const CharacterAnimation* animation;
+    const CharacterFrame* frame;
+    const std::size_t& bone_count;
+    const std::size_t& root_count;
+    std::uint32_t& remaining_ticks;
+    std::array<std::int32_t,3>& motion;
+    std::uint32_t& random_a;
+    std::uint32_t& random_b;
+    std::uint32_t& accumulator;
+    std::uint32_t& condition_current;
+    std::uint32_t& condition_previous;
+    std::uint32_t& condition_latched;
+    std::uint32_t& anim_flags;
+    std::int32_t& extra_4c;
+    std::uint32_t& event_bits;
+    std::uint32_t& state_flags;
+    std::uint8_t& stance;
+    std::uint8_t& pitch;
+    std::uint8_t& switch_flag;
+    std::uint8_t& byte78;
+    std::uint8_t& byte79;
+    std::uint8_t& aim_a;
+    std::uint8_t& aim_b;
+    AnimationSourceSpan<CharacterBonePose> pose;
+    AnimationSourceSpan<CharacterBonePose> pose_delta;
+    AnimationSourceSpan<std::array<std::int32_t,3>> root_base;
+    AnimationSourceSpan<std::array<std::int32_t,3>> root_delta;
+};
+
 // Original condition opcode test (carry set means failed at the call sites).
 bool check_animation_condition(std::uint8_t opcode, bool carry, const AnimationConditionState& state);
 // Original pseudo-random selector 0x43ac10.
@@ -114,6 +149,7 @@ public:
 
     // Original status probe 0x42cd90.
     AnimationStatus status() const;
+    AnimationSourceState source_state();
 
     bool has_animation() const { return animation_index_ >= 0; }
     std::int32_t animation_slot() const;

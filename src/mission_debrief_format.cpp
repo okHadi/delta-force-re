@@ -6,12 +6,14 @@
 namespace dfre {namespace {
 using U=std::uint32_t;
 struct Format {U address;std::string_view bytes;std::size_t arguments;};
-constexpr std::array<Format,9> formats{{
+constexpr std::array<Format,14> formats{{
     {0x4cae34,"dfcamp%02i.bin",3},{0x4cad48,"Win%d",3},{0x4cadd0,"Lose%d",3},
     {0x4cad50,"Briefing%d",3},{0x4cad5c,"Unable to find mission %d debriefing won text",3},
     {0x4cadd8,"Unable to find mission %d debriefing lose text",3},
     {0x4cae08,"%s ~ ~ %s",4},{0x4cadbc,"%s ~ %s : %d ~ ~ %s",6},
-    {0x4cae14,"Unable to find '%s'",3}
+    {0x4cae14,"Unable to find '%s'",3},
+    {0x4cc67c,"WPN%03i",3},{0x4cc570,"%i",3},{0x4cc278,"%s %s",4},
+    {0x4ccc60,"STR_PWNAME%02i",3},{0x4ccc80,"STR_SPWNAME%02i",3}
 }};
 template<class T> const T& need(const T& f){if(!f)throw std::runtime_error("Debrief format reached a missing provider");return f;}
 std::int32_t si(U n){std::int32_t result;std::memcpy(&result,&n,4);return result;}
@@ -57,6 +59,11 @@ U mission_debrief_format(const MissionDebriefBindings& b,const std::vector<U>& a
     case 0x4cae08:string(args[2]);literal(" ~ ~ ");string(args[3]);break;
     case 0x4cadbc:string(args[2]);literal(" ~ ");string(args[3]);literal(" : ");integer(args[4]);literal(" ~ ~ ");string(args[5]);break;
     case 0x4cae14:literal("Unable to find '");string(args[2]);literal("'");break;
+    case 0x4cc67c:literal("WPN");integer(args[2],3);break;
+    case 0x4cc570:integer(args[2]);break;
+    case 0x4cc278:string(args[2]);literal(" ");string(args[3]);break;
+    case 0x4ccc60:literal("STR_PWNAME");integer(args[2],2);break;
+    case 0x4ccc80:literal("STR_SPWNAME");integer(args[2],2);break;
     default:throw std::runtime_error("Debrief format recipe is missing");
     }
     store(args[0]+count,0);return count;

@@ -12,6 +12,7 @@
 #include "dfre/mission_logic.hpp"
 #include "dfre/mission_results.hpp"
 #include <memory>
+#include <string>
 
 namespace dfre {
 // Bind the loaded input row through the current executable memory owner.
@@ -47,6 +48,8 @@ struct MissionSessionHost {
     std::function<std::uint32_t()> camera_mode_6ba3ec;
     EventReferencePolicy event_references=EventReferencePolicy::strict;
     EventReferenceDiagnostic event_diagnostic;
+    // Load source event tables from this supplied BMS file during install.
+    std::string source_event_file;
 };
 // Construct after mission initialization. Keep all context owners alive. Destroy
 // this session before resetting the mission, input, sound or script owners.
@@ -68,6 +71,7 @@ public:
     std::optional<std::uint32_t> leave_service(std::uint32_t site,const std::vector<std::uint32_t>& args);
     void profile_leave(const std::function<AssetBytes&()>& current_profile); //401E70
     void end_events(); //42EBA0, while all current mission owners are alive
+    void reset_events(); //42EBE0, before releasing the current sound arena
     std::uint32_t camera_yaw() const;
     // Route these owned cells before the sound memory fallback. Construction
     // captures initial source values before the host installs that routing.
